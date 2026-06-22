@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Plus,
   Search,
+  X,
 } from "lucide-react";
 import { classNames, makeId } from "../utils/common";
 import {
@@ -55,6 +56,7 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
   const [estadoComentarioFiltro, setEstadoComentarioFiltro] = useState("Todos");
   const [skuFiltro, setSkuFiltro] = useState("");
   const [actividadCatalogoFiltro, setActividadCatalogoFiltro] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState(null);
   const [commentDrafts, setCommentDrafts] = useState({});
 
   const activityMap = useMemo(
@@ -77,7 +79,32 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
   const canales = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).canal || "Sin canal")))];
   const alcances = ["Todos", ...Array.from(new Set(rows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
 
-  const rowsFiltradas = rows.filter((row) => {
+  const applyFilters = () => {
+    setAppliedFilters({
+      comprador: compradorFiltro,
+      tipo: tipoFiltro,
+      tipoActividad: tipoActividadFiltro,
+      canal: canalFiltro,
+      alcance: alcanceFiltro,
+      estadoComentario: estadoComentarioFiltro,
+      sku: skuFiltro,
+      actividadCatalogo: actividadCatalogoFiltro,
+    });
+  };
+
+  const clearFilters = () => {
+    setCompradorFiltro("Todos");
+    setTipoFiltro("Todos");
+    setTipoActividadFiltro("Todos");
+    setCanalFiltro("Todos");
+    setAlcanceFiltro("Todos");
+    setEstadoComentarioFiltro("Todos");
+    setSkuFiltro("");
+    setActividadCatalogoFiltro("");
+    setAppliedFilters(null);
+  };
+
+  const rowsFiltradas = appliedFilters ? rows.filter((row) => {
     const activity = getActivity(row);
     const comentariosRow = getComentariosRow(row.id);
     const comentariosActividad = getActivityComments(getActivityId(row));
@@ -90,27 +117,27 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
     const activityName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || "";
     const canal = activity.canal || "Sin canal";
     const alcance = row.alcanceTipo || row.alcance_tipo || "Sin alcance";
-    const skuTerm = skuFiltro.trim().toLowerCase();
-    const activityTerm = actividadCatalogoFiltro.trim().toLowerCase();
+    const skuTerm = appliedFilters.sku.trim().toLowerCase();
+    const activityTerm = appliedFilters.actividadCatalogo.trim().toLowerCase();
     const matchesSku = !skuTerm || String(row.sku || "").toLowerCase().includes(skuTerm);
     const matchesActivity = !activityTerm || `${activityId} ${activityName}`.toLowerCase().includes(activityTerm);
     return matchesSku
       && matchesActivity
-      && (compradorFiltro === "Todos" || compradorRow === compradorFiltro)
-      && (tipoFiltro === "Todos" || (row.tipoPromo || "Sin tipo") === tipoFiltro)
-      && (tipoActividadFiltro === "Todos" || tipoActividad === tipoActividadFiltro)
-      && (canalFiltro === "Todos" || canal === canalFiltro)
-      && (alcanceFiltro === "Todos" || alcance === alcanceFiltro)
-      && (estadoComentarioFiltro === "Todos"
-        || (estadoComentarioFiltro === "Abiertos" && tieneAbierto)
-        || (estadoComentarioFiltro === "Resueltos" && tieneResuelto)
-        || (estadoComentarioFiltro === "Sin comentarios" && comentariosTotales.length === 0));
-  });
+      && (appliedFilters.comprador === "Todos" || compradorRow === appliedFilters.comprador)
+      && (appliedFilters.tipo === "Todos" || (row.tipoPromo || "Sin tipo") === appliedFilters.tipo)
+      && (appliedFilters.tipoActividad === "Todos" || tipoActividad === appliedFilters.tipoActividad)
+      && (appliedFilters.canal === "Todos" || canal === appliedFilters.canal)
+      && (appliedFilters.alcance === "Todos" || alcance === appliedFilters.alcance)
+      && (appliedFilters.estadoComentario === "Todos"
+        || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)
+        || (appliedFilters.estadoComentario === "Resueltos" && tieneResuelto)
+        || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
+  }) : [];
 
   const resumenComprador = compradores
     .map((buyer) => {
       const nombre = buyer.comprador || buyer.nombre;
-      const buyerRows = rows.filter((row) => (row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador") === nombre);
+      const buyerRows = rowsFiltradas.filter((row) => (row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador") === nombre);
       return { nombre, division: buyer.division, total: buyerRows.length, complejas: buyerRows.filter((row) => isComplexPromoType(row.tipoPromo)).length };
     })
     .filter((item) => item.total > 0);
@@ -171,7 +198,7 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
     URL.revokeObjectURL(url);
   };
 
-  const generalCommentsPanel = generalComments.length ? (
+  const generalCommentsPanel = appliedFilters && generalComments.length ? (
     <Card className="activity-comments-card">
       <CardContent>
         <div className="section-head">
@@ -208,13 +235,20 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
         <div className="consolidado-top">
           <Card className="consolidado-summary-card">
             <CardContent>
-              <div className="section-head"><h2>Resumen por comprador</h2><span>{resumenComprador.length} compradores</span></div>
+              <div className="section-head"><h2>Resumen por comprador</h2><span>{appliedFilters ? `${resumenComprador.length} compradores` : "Presione Buscar"}</span></div>
               <div className="summary-list compact">{resumenComprador.map((item) => <div key={item.nombre}><strong>{item.nombre}</strong><span>{item.division}</span><p><b>{item.total}</b> filas · {item.complejas} complejas</p></div>)}</div>
             </CardContent>
           </Card>
           <Card className="consolidado-filter-card">
             <CardContent>
-              <div className="section-head"><div><h2>Filtros</h2><span>{rowsFiltradas.length} filas visibles</span></div><Button variant="outline" onClick={exportCsv} disabled={!rowsFiltradas.length}><Download size={16}/> Exportar CSV</Button></div>
+              <div className="section-head">
+                <div><h2>Filtros</h2><span>{appliedFilters ? `${rowsFiltradas.length} filas visibles` : "Presione Buscar para cargar"}</span></div>
+                <div className="toolbar-actions">
+                  <Button variant="outline" onClick={applyFilters}><Search size={16}/> Buscar</Button>
+                  <Button variant="outline" onClick={clearFilters}><X size={16}/> Limpiar</Button>
+                  <Button variant="outline" onClick={exportCsv} disabled={!rowsFiltradas.length}><Download size={16}/> Exportar CSV</Button>
+                </div>
+              </div>
               <div className="filter-grid">
                 <label className="filter-field"><span>SKU</span><input value={skuFiltro} onChange={(e) => setSkuFiltro(e.target.value)} placeholder="Buscar SKU" /></label>
                 <label className="filter-field"><span>Actividad / catálogo</span><input value={actividadCatalogoFiltro} onChange={(e) => setActividadCatalogoFiltro(e.target.value)} placeholder="ID o nombre" /></label>
@@ -236,6 +270,8 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
               <table>
                 <thead><tr>{CONSOLIDADO_TABLE_HEADERS.map((h) => <th key={h}>{h}</th>)}</tr></thead>
                 <tbody>
+                  {!appliedFilters && <tr><td colSpan={CONSOLIDADO_TABLE_HEADERS.length}><div className="empty-state">Use Buscar para cargar el consolidado.</div></td></tr>}
+                  {appliedFilters && !rowsFiltradas.length && <tr><td colSpan={CONSOLIDADO_TABLE_HEADERS.length}><div className="empty-state">No hay promociones con esos filtros.</div></td></tr>}
                   {rowsFiltradas.map((row) => {
                     const activity = getActivity(row);
                     const activityId = getActivityId(row);

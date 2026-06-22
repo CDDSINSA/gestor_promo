@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, Search, X } from "lucide-react";
 import { classNames } from "../utils/common";
 import { isActivityComment, isLineComment, isSegmentedRow, normalizeActividad } from "../utils/promoHelpers";
 
@@ -33,6 +33,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const [estadoComentarioFiltro, setEstadoComentarioFiltro] = useState("Todos");
   const [skuFiltro, setSkuFiltro] = useState("");
   const [actividadCatalogoFiltro, setActividadCatalogoFiltro] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState(null);
 
   const activityMap = useMemo(
     () => new Map((actividades || []).map((item) => {
@@ -53,7 +54,32 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const canales = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).canal || "Sin canal")))];
   const alcances = ["Todos", ...Array.from(new Set(rows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
 
-  const rowsFiltradas = rows.filter((row) => {
+  const applyFilters = () => {
+    setAppliedFilters({
+      comprador: compradorFiltro,
+      tipo: tipoFiltro,
+      tipoActividad: tipoActividadFiltro,
+      canal: canalFiltro,
+      alcance: alcanceFiltro,
+      estadoComentario: estadoComentarioFiltro,
+      sku: skuFiltro,
+      actividadCatalogo: actividadCatalogoFiltro,
+    });
+  };
+
+  const clearFilters = () => {
+    setCompradorFiltro("Todos");
+    setTipoFiltro("Todos");
+    setTipoActividadFiltro("Todos");
+    setCanalFiltro("Todos");
+    setAlcanceFiltro("Todos");
+    setEstadoComentarioFiltro("Todos");
+    setSkuFiltro("");
+    setActividadCatalogoFiltro("");
+    setAppliedFilters(null);
+  };
+
+  const rowsFiltradas = appliedFilters ? rows.filter((row) => {
     const activity = getActivity(row);
     const comentariosRow = getComentariosRow(row.id);
     const comentariosActividad = getActivityComments(getActivityId(row));
@@ -66,22 +92,22 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
     const activityName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || "";
     const canal = activity.canal || "Sin canal";
     const alcance = row.alcanceTipo || row.alcance_tipo || "Sin alcance";
-    const skuTerm = skuFiltro.trim().toLowerCase();
-    const activityTerm = actividadCatalogoFiltro.trim().toLowerCase();
+    const skuTerm = appliedFilters.sku.trim().toLowerCase();
+    const activityTerm = appliedFilters.actividadCatalogo.trim().toLowerCase();
     const matchesSku = !skuTerm || String(row.sku || "").toLowerCase().includes(skuTerm);
     const matchesActivity = !activityTerm || `${activityId} ${activityName}`.toLowerCase().includes(activityTerm);
     return matchesSku
       && matchesActivity
-      && (compradorFiltro === "Todos" || compradorRow === compradorFiltro)
-      && (tipoFiltro === "Todos" || (row.tipoPromo || "Sin tipo") === tipoFiltro)
-      && (tipoActividadFiltro === "Todos" || tipoActividad === tipoActividadFiltro)
-      && (canalFiltro === "Todos" || canal === canalFiltro)
-      && (alcanceFiltro === "Todos" || alcance === alcanceFiltro)
-      && (estadoComentarioFiltro === "Todos"
-        || (estadoComentarioFiltro === "Abiertos" && tieneAbierto)
-        || (estadoComentarioFiltro === "Resueltos" && tieneResuelto)
-        || (estadoComentarioFiltro === "Sin comentarios" && comentariosTotales.length === 0));
-  });
+      && (appliedFilters.comprador === "Todos" || compradorRow === appliedFilters.comprador)
+      && (appliedFilters.tipo === "Todos" || (row.tipoPromo || "Sin tipo") === appliedFilters.tipo)
+      && (appliedFilters.tipoActividad === "Todos" || tipoActividad === appliedFilters.tipoActividad)
+      && (appliedFilters.canal === "Todos" || canal === appliedFilters.canal)
+      && (appliedFilters.alcance === "Todos" || alcance === appliedFilters.alcance)
+      && (appliedFilters.estadoComentario === "Todos"
+        || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)
+        || (appliedFilters.estadoComentario === "Resueltos" && tieneResuelto)
+        || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
+  }) : [];
 
   const escapeCsv = (value) => {
     const text = String(value ?? "").replace(/\r?\n/g, " ");
@@ -162,7 +188,11 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
           <div className="section-head">
             <div>
               <h2>Filtros</h2>
-              <span>{rowsFiltradas.length} filas listas para exportar</span>
+              <span>{appliedFilters ? `${rowsFiltradas.length} filas listas para exportar` : "Presione Buscar para preparar descargas"}</span>
+            </div>
+            <div className="toolbar-actions">
+              <Button variant="outline" onClick={applyFilters}><Search size={16}/> Buscar</Button>
+              <Button variant="outline" onClick={clearFilters}><X size={16}/> Limpiar</Button>
             </div>
           </div>
           <div className="filter-grid">

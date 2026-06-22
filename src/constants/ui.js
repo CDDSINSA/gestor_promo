@@ -1,10 +1,10 @@
 import { Download, FileSpreadsheet, History, Home, ListChecks, Settings } from "lucide-react";
 
 export const SIDEBAR_NAV_ITEMS = [
+  { id: "ajustes", label: "Ajustes", icon: Settings },
   { id: "home", label: "Inicio", icon: Home },
   { id: "promos", label: "Promociones", icon: FileSpreadsheet },
   { id: "solicitudes", label: "Solicitudes", icon: ListChecks },
-  { id: "ajustes", label: "Ajustes", icon: Settings },
   { id: "logs", label: "Logs", icon: History },
   { id: "consolidado", label: "Consolidado", icon: ListChecks },
   { id: "export", label: "Exportar", icon: Download },

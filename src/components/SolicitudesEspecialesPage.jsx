@@ -54,6 +54,7 @@ function normalizeIdList(value) {
 
 export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], responsablesSolicitudes = [], setLogs, setActive, onSaveDrive, driveReady, saveDriveStatus, isSyncing }) {
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState(null);
   const [selectedId, setSelectedId] = useState("");
   const [finishModal, setFinishModal] = useState(null);
   const [assignmentError, setAssignmentError] = useState("");
@@ -78,11 +79,25 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
 
   const specialRequests = useMemo(() => actividades.map(normalizeActividad).filter((item) => item.tipo_actividad === "ESPECIAL"), [actividades]);
   const filteredRequests = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    if (appliedSearch === null) return [];
+    const term = appliedSearch.trim().toLowerCase();
     if (!term) return specialRequests;
     return specialRequests.filter((item) => `${item.actividad_id} ${item.nombre_actividad} ${item.comprador || item.solicitante} ${item.responsable} ${item.canal}`.toLowerCase().includes(term));
-  }, [specialRequests, search]);
-  const selected = filteredRequests.find((item) => item.actividad_id === selectedId) || specialRequests.find((item) => item.actividad_id === selectedId) || filteredRequests[0] || specialRequests[0] || null;
+  }, [specialRequests, appliedSearch]);
+  const selected = filteredRequests.find((item) => item.actividad_id === selectedId) || filteredRequests[0] || null;
+
+  const applySearch = () => {
+    setAppliedSearch(search);
+    setSelectedId("");
+    setAssignmentError("");
+  };
+
+  const clearSearch = () => {
+    setSearch("");
+    setAppliedSearch(null);
+    setSelectedId("");
+    setAssignmentError("");
+  };
 
   const applyActivityChanges = (activity, changes, action) => {
     const updated = normalizeActividad({ ...activity, ...changes });
@@ -209,8 +224,12 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
       <Card className="special-request-list-card">
         <CardContent>
           <div className="section-head">
-            <div><h2>Solicitudes</h2><span>{filteredRequests.length} visibles</span></div>
-            <div className="search compact"><Search size={16}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar solicitud" /></div>
+            <div><h2>Solicitudes</h2><span>{appliedSearch === null ? "Presione Buscar para cargar" : `${filteredRequests.length} visibles`}</span></div>
+            <div className="toolbar-actions">
+              <div className="search compact"><Search size={16}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar solicitud" /></div>
+              <Button variant="outline" onClick={applySearch}><Search size={16}/> Buscar</Button>
+              <Button variant="outline" onClick={clearSearch}><X size={16}/> Limpiar</Button>
+            </div>
           </div>
           <div className="special-request-list">
             {filteredRequests.map((item) => {
@@ -222,7 +241,8 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
                 <small>{rowCounts.get(item.actividad_id) || 0} SKU · {item.canal || "Sin canal"}</small>
               </button>;
             })}
-            {!filteredRequests.length && <div className="empty-state">No hay solicitudes especiales con ese filtro.</div>}
+            {appliedSearch === null && <div className="empty-state">Use Buscar para cargar solicitudes especiales.</div>}
+            {appliedSearch !== null && !filteredRequests.length && <div className="empty-state">No hay solicitudes especiales con ese filtro.</div>}
           </div>
         </CardContent>
       </Card>

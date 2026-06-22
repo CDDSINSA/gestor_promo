@@ -115,7 +115,34 @@ export default function GestionAvancesPage({
     return rows.filter((row) => rowMatchesCatalog(row, catalogo));
   }, [rows, catalogo]);
   const hierarchyByDepId = useMemo(() => new Map((jerarquiaCategorias || []).filter((item) => item.activo !== false && item.dep_id).map((item) => [normalizeKey(item.dep_id), item])), [jerarquiaCategorias]);
-  const getRowDivision = (row) => row?.division || hierarchyByDepId.get(normalizeKey(row?.dep_id || row?.depId || row?.dept))?.division || "";
+  const buyerDivisionMap = useMemo(() => {
+    const map = new Map();
+    activeBuyers.forEach((buyer) => {
+      const name = normalizeKey(getCompradorNombre(buyer));
+      const divisions = getCompradorDivisiones(buyer);
+      if (name && divisions.length) map.set(name, divisions);
+    });
+    return map;
+  }, [activeBuyers]);
+  const getRowDivisionCandidates = (row) => {
+    const candidates = [
+      row?.division,
+      hierarchyByDepId.get(normalizeKey(row?.dep_id || row?.depId || row?.dept))?.division,
+      ...(buyerDivisionMap.get(normalizeKey(row?.comprador)) || []),
+    ];
+    const seen = new Set();
+    return candidates
+      .map((division) => String(division || "").trim())
+      .filter(Boolean)
+      .filter((division) => {
+        const key = normalizeKey(division);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+  const rowMatchesDivision = (row, division) => getRowDivisionCandidates(row).some((candidate) => sameDivision(candidate, division));
+  const getDivisionRows = (division) => scopedRows.filter((row) => rowMatchesDivision(row, division));
 
   const getSupportJuniors = (senior, division) => {
     const seniorId = getCompradorId(senior);
@@ -139,18 +166,22 @@ export default function GestionAvancesPage({
     const divisions = seniorDivisions.map((division) => {
       const supportJuniors = getSupportJuniors(senior, division);
       const responsibleNames = [seniorName, ...supportJuniors.map(getCompradorNombre).filter(Boolean)];
-      const divisionRows = scopedRows.filter((row) => sameDivision(getRowDivision(row), division) && isBuyerName(row, responsibleNames));
+      const allDivisionRows = getDivisionRows(division);
+      const divisionRows = scopedRows.filter((row) => isBuyerName(row, responsibleNames) && rowMatchesDivision(row, division));
       const terminado = isAvanceTerminado(avances, catalogoId, division, seniorName);
       return {
         division,
         terminado,
         juniors: supportJuniors.map(getCompradorNombre).filter(Boolean),
-        ofertas: divisionRows.length,
-        skus: uniqueCount(divisionRows, "sku"),
+        tienePromos: allDivisionRows.length > 0,
+        ofertas: allDivisionRows.length,
+        ofertasEquipo: divisionRows.length,
+        skus: uniqueCount(allDivisionRows, "sku"),
+        skusDivision: uniqueCount(allDivisionRows, "sku"),
       };
     });
     const completas = divisions.filter((division) => division.terminado).length;
-    const divisionesConSku = divisions.filter((division) => division.skus > 0).length;
+    const divisionesConPromos = divisions.filter((division) => division.tienePromos).length;
     const completo = divisions.length > 0 && completas === divisions.length;
     return {
       key: getSeniorKey(senior),
@@ -159,13 +190,14 @@ export default function GestionAvancesPage({
       categoria: getCompradorCategoria(senior) || "Senior",
       divisions,
       completas,
-      divisionesConSku,
+      divisionesConSku: divisionesConPromos,
+      divisionesConPromos,
       completo,
       juniors: Array.from(new Set(divisions.flatMap((division) => division.juniors))),
       ofertas: divisions.reduce((total, division) => total + division.ofertas, 0),
       skus: divisions.reduce((total, division) => total + division.skus, 0),
     };
-  }), [avances, catalogoId, divisionesCatalogo, scopedRows, seniors, juniors]);
+  }), [avances, catalogoId, divisionesCatalogo, scopedRows, seniors, juniors, buyerDivisionMap, hierarchyByDepId]);
 
   const selectedSenior = seniorSummaries.find((senior) => senior.key === selectedSeniorKey) || seniorSummaries[0];
   const totalDivisiones = seniorSummaries.reduce((total, senior) => total + senior.divisions.length, 0);
@@ -233,7 +265,7 @@ export default function GestionAvancesPage({
                   <span>{senior.completas}/{senior.divisions.length} divisiones completas</span>
                   <span>{senior.juniors.length ? `Junior: ${senior.juniors.join(", ")}` : "Sin junior asignado"}</span>
                 </div>
-                <div className="avance-card-status"><span className="pill">{senior.divisionesConSku}/{senior.divisions.length} con SKU</span><span className={senior.completo ? "pill green" : "pill yellow"}>{senior.completo ? "Completo" : "Pendiente"}</span></div>
+                <div className="avance-card-status"><span className="pill">{senior.divisionesConPromos}/{senior.divisions.length} con promos</span><span className={senior.completo ? "pill green" : "pill yellow"}>{senior.completo ? "Completo" : "Pendiente"}</span></div>
               </button>;
             }) : <div className="empty-state">No hay compradores Senior activos configurados.</div>}
           </div>
@@ -257,7 +289,7 @@ export default function GestionAvancesPage({
               {selectedSenior.divisions.length ? selectedSenior.divisions.map((division) => <div key={`${selectedSenior.key}-${division.division}`} className={classNames("avance-buyer-row", division.terminado && "complete")}>
                 <div>
                   <strong>{division.division}</strong>
-                  <span>{division.juniors.length ? `Apoyo junior: ${division.juniors.join(", ")}` : "Sin apoyo junior"} - {division.ofertas} ofertas - {division.skus} SKU</span>
+                  <span>{division.juniors.length ? `Apoyo junior: ${division.juniors.join(", ")}` : "Sin apoyo junior"} - {division.ofertas} ofertas - {division.skusDivision} SKU en la division</span>
                 </div>
                 <div className="toolbar-actions">
                   <span className={division.terminado ? "pill green" : "pill yellow"}>{division.terminado ? "Terminado" : "Pendiente"}</span>
