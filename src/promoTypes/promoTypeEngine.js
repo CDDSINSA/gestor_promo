@@ -85,7 +85,9 @@ function createUniqueGroup(type, rows) {
       .map((row) => row.grupoOferta || row.grupo_oferta)
       .filter(Boolean)
   );
-  return `${prefix}-${groups.size + 1}`;
+  let next = 1;
+  while (groups.has(`${prefix}-${next}`)) next += 1;
+  return `${prefix}-${next}`;
 }
 
 function validateComplexBase(row) {

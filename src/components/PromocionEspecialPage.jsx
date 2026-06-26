@@ -10,6 +10,57 @@ import {
 } from "../utils/promoHelpers";
 import PromosPageView from "./PromosPage";
 
+const SPECIAL_CHANNEL_OPTIONS = ["Retail", "Comasa", "Galerón", "Ferrex"];
+const SPECIAL_REQUEST_REASONS = [
+  "Liquidación",
+  "Productos proximo a vencer",
+  "Ofertas de emergencia",
+  "Respuesta competencia",
+  "Inventario duro/lento",
+  "Introducción",
+  "Incentivar venta",
+  "Negociación Proveedor",
+  "otros",
+];
+
+function normalizeChannelLabel(value) {
+  return String(value || "").trim().toLowerCase() === "galeron" ? "Galerón" : String(value || "").trim();
+}
+
+function splitMultiValue(value) {
+  return String(value || "")
+    .split(/[;|,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinMultiValue(values) {
+  return Array.from(new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))).join("; ");
+}
+
+function parseReasonState(value) {
+  const selections = [];
+  let otherText = "";
+  splitMultiValue(value).forEach((item) => {
+    const lower = item.toLowerCase();
+    if (lower.startsWith("otros:")) {
+      selections.push("otros");
+      otherText = item.slice(item.indexOf(":") + 1).trim();
+      return;
+    }
+    selections.push(item);
+  });
+  return { selections: Array.from(new Set(selections)), otherText };
+}
+
+function buildReasonValue(selections, otherText) {
+  return joinMultiValue((selections || []).flatMap((item) => {
+    if (item !== "otros") return item;
+    const text = String(otherText || "").trim();
+    return text ? `otros: ${text}` : "otros";
+  }));
+}
+
 function Header({ title, subtitle }) {
   return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
 }
@@ -44,22 +95,25 @@ export default function PromocionEspecialPage({
   catalogos,
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const canalOptions = Array.from(new Set([...(catalogos || []).map((cat) => cat.canal).filter(Boolean), "Retail", "Galeron", "Comasa"]));
+  const canalOptions = Array.from(new Set([...(catalogos || []).map((cat) => normalizeChannelLabel(cat.canal)).filter(Boolean), ...SPECIAL_CHANNEL_OPTIONS]));
   const buyerList = compradores.filter((c) => c.activo !== false).map((c) => c.comprador || c.nombre).filter(Boolean);
+  const defaultCanal = canalOptions[0] || "Retail";
   const [currentActivity, setCurrentActivity] = useState(null);
   const [draft, setDraft] = useState({
     comprador: "",
     nombre_actividad: "",
-    canal: canalOptions[0] || "Retail",
+    canal: defaultCanal,
     fecha_inicio: today,
     fecha_fin: today,
     alcance_tipo: "CANAL",
-    alcance_valor: canalOptions[0] || "Retail",
+    alcance_valor: defaultCanal,
     aplica_segmento: "NO",
     segmento_cliente: "",
     motivo_solicitud: "",
     tipo_promo: "Descuento",
   });
+  const selectedChannels = splitMultiValue(draft.canal);
+  const { selections: selectedReasons, otherText: otherReasonText } = parseReasonState(draft.motivo_solicitud);
   const segmentOptions = getSegmentosByCanal(segmentosClientes, draft.canal);
   const alcanceValorLabel = { CANAL: "Canal", SEGMENTO: "Segmento", TIENDA: "Tienda", MULTI_TIENDA: "Tiendas" }[draft.alcance_tipo] || "Alcance";
 
@@ -92,15 +146,36 @@ export default function PromocionEspecialPage({
     });
   };
 
+  const toggleChannel = (channel) => {
+    const nextChannels = selectedChannels.includes(channel)
+      ? selectedChannels.filter((item) => item !== channel)
+      : [...selectedChannels, channel];
+    const nextValue = joinMultiValue(nextChannels);
+    updateDraft("canal", nextValue);
+  };
+
+  const toggleReason = (reason) => {
+    const nextSelections = selectedReasons.includes(reason)
+      ? selectedReasons.filter((item) => item !== reason)
+      : [...selectedReasons, reason];
+    const nextOtherText = nextSelections.includes("otros") ? otherReasonText : "";
+    updateDraft("motivo_solicitud", buildReasonValue(nextSelections, nextOtherText));
+  };
+
+  const updateOtherReason = (value) => {
+    updateDraft("motivo_solicitud", buildReasonValue(selectedReasons, value));
+  };
+
   const requiredReady = Boolean(
     draft.comprador &&
     draft.nombre_actividad &&
-    draft.canal &&
+    selectedChannels.length &&
     draft.fecha_inicio &&
     draft.fecha_fin &&
     draft.alcance_tipo &&
     (draft.alcance_tipo === "CANAL" || draft.alcance_valor) &&
-    (draft.aplica_segmento !== "SI" || draft.segmento_cliente)
+    (draft.aplica_segmento !== "SI" || draft.segmento_cliente) &&
+    (!selectedReasons.includes("otros") || String(otherReasonText || "").trim())
   );
 
   const createActivity = () => {
@@ -131,11 +206,11 @@ export default function PromocionEspecialPage({
     setDraft({
       comprador: "",
       nombre_actividad: "",
-      canal: canalOptions[0] || "Retail",
+      canal: defaultCanal,
       fecha_inicio: today,
       fecha_fin: today,
       alcance_tipo: "CANAL",
-      alcance_valor: canalOptions[0] || "Retail",
+      alcance_valor: defaultCanal,
       aplica_segmento: "NO",
       segmento_cliente: "",
       motivo_solicitud: "",
@@ -179,9 +254,11 @@ export default function PromocionEspecialPage({
           <Field label="Nombre de actividad" value={draft.nombre_actividad} onChange={(v) => updateDraft("nombre_actividad", v)} />
           <label className="field">
             <span>Canal</span>
-            <select value={draft.canal} onChange={(e) => updateDraft("canal", e.target.value)} disabled={Boolean(currentActivity)}>
-              {canalOptions.map((canal) => <option key={canal}>{canal}</option>)}
-            </select>
+            <div className="segment-panel special-multi-select">
+              <div className="segment-chip-list">
+                {canalOptions.map((canal) => <button key={canal} type="button" className={selectedChannels.includes(canal) ? "segment-chip selected" : "segment-chip"} onClick={() => toggleChannel(canal)} disabled={Boolean(currentActivity)}>{canal}</button>)}
+              </div>
+            </div>
           </label>
           <Field label="Fecha inicio" value={draft.fecha_inicio} onChange={(v) => updateDraft("fecha_inicio", v)} type="date" />
           <Field label="Fecha fin" value={draft.fecha_fin} onChange={(v) => updateDraft("fecha_fin", v)} type="date" />
@@ -222,7 +299,12 @@ export default function PromocionEspecialPage({
           </label>
           <label className="field wide">
             <span>Motivo solicitud</span>
-            <textarea value={draft.motivo_solicitud} onChange={(e) => updateDraft("motivo_solicitud", e.target.value)} disabled={Boolean(currentActivity)} />
+            <div className="segment-panel special-multi-select">
+              <div className="segment-chip-list">
+                {SPECIAL_REQUEST_REASONS.map((reason) => <button key={reason} type="button" className={selectedReasons.includes(reason) ? "segment-chip selected" : "segment-chip"} onClick={() => toggleReason(reason)} disabled={Boolean(currentActivity)}>{reason}</button>)}
+              </div>
+              {selectedReasons.includes("otros") && <div className="special-other-field"><input value={otherReasonText} onChange={(e) => updateOtherReason(e.target.value)} placeholder="Detalle de otros" disabled={Boolean(currentActivity)} /></div>}
+            </div>
           </label>
         </div>
       </CardContent>

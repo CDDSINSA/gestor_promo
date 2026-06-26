@@ -205,7 +205,7 @@ export default function GestionAvancesPage({
   const seniorsCompletos = seniorSummaries.filter((senior) => senior.completo).length;
   const totalOfertas = seniorSummaries.reduce((total, senior) => total + senior.ofertas, 0);
   const progress = totalDivisiones ? Math.round((totalDivisionesCompletas / totalDivisiones) * 100) : 0;
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Drive";
+  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
 
   const toggleDivision = (divisionStatus, seniorName) => {
     const division = divisionStatus?.division;

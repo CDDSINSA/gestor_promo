@@ -431,6 +431,15 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const isSimpleRequiredValuePaste = bulkColumn === simpleRequiredBulkColumn;
   const getRowActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
   const getRowBuyer = (row) => row.comprador || "";
+  const getRowSegmentKey = (row) => {
+    const segmented = isSegmentedRow(row);
+    const segment = row.segmento || row.segmentoCliente || row.segmento_cliente || "";
+    return segmented && normalizeValue(segment).toLowerCase() !== "todos" ? normalizeValue(segment).toLowerCase() : "todos";
+  };
+  const currentSegmentKey = () => segmentMode && segmentText ? normalizeValue(segmentText).toLowerCase() : "todos";
+  const rowMatchesSkuSegment = (row, sku, segmentKey = currentSegmentKey()) => normalizeValue(row.sku) === sku && getRowSegmentKey(row) === segmentKey;
+  const getRowsForCurrentActivity = (rowList) => currentActivityId ? rowList.filter((row) => getRowActivityId(row) === currentActivityId) : rowList;
+  const createGroupForCurrentActivity = (promoType, rowList = rows) => createGroupForPromoType(promoType, getRowsForCurrentActivity(rowList));
   const rowMatchesActiveScope = (row, promoType = tipoActivo) => {
     if (!compradorSeleccionado || !currentActivityId) return false;
     const matchesActivity = getRowActivityId(row) === currentActivityId;
@@ -463,7 +472,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const matchesBuyer = getRowBuyer(row) === comprador;
     return matchesActivity && matchesBuyer && (row.tipoPromo || row.tipo_promo) === "Combo" && (row.grupoOferta || row.grupo_oferta);
   }).map((row) => row.grupoOferta || row.grupo_oferta))).sort(), [rows, compradorSeleccionado, currentActivityId, comprador]);
-  const comboGroup = comboDraft.group || createGroupForPromoType("Combo", rows);
+  const comboGroup = comboDraft.group || createGroupForCurrentActivity("Combo");
   const pushLog = (accion) => setLogs((prev) => [{ fecha: new Date().toLocaleString(), usuario: comprador, catalogo: currentActivityName, accion }, ...prev]);
   const toggleSegment = (segmentoId) => setSelectedSegments((prev) => prev.includes(segmentoId) ? prev.filter((item) => item !== segmentoId) : [...prev, segmentoId]);
   const toggleSegmentMode = () => { setSegmentMode((prev) => { if (prev) setSelectedSegments([]); return !prev; }); };
@@ -502,7 +511,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const master = (skuMaster || {})[cleanSku] || {};
     const rowId = makeId("ROW");
     const promoIsComplex = isComplexPromoType(promoType);
-    const nextGroup = group || (promoIsComplex ? createGroupForPromoType(promoType, rows) : promoType);
+    const nextGroup = group || (promoIsComplex ? createGroupForCurrentActivity(promoType) : promoType);
     const buyer = compradores.find((c) => (c.comprador || c.nombre) === comprador);
     const aplicaSegmento = activityContext?.aplica_segmento || (segmentMode && segmentText ? "SI" : "NO");
     const segmentoCliente = activityContext?.segmento_cliente || (segmentMode && segmentText ? segmentText : "");
@@ -577,7 +586,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       if (optionalValue && column === "precioAhora") extraValues.descuento = normalizeDiscountValue(optionalValue);
       if (commentValue) extraValues.comentario = commentValue;
       const extraSummary = [extraValues.precioAhora ? `Precio ${extraValues.precioAhora}` : "", extraValues.descuento ? `Descuento ${extraValues.descuento}` : "", extraValues.comentario ? "Comentario" : ""].filter(Boolean).join(" | ");
-      const matches = rows.filter((row) => rowMatchesActiveScope(row) && normalizeValue(row.sku) === sku);
+      const matches = rows.filter((row) => rowMatchesActiveScope(row) && rowMatchesSkuSegment(row, sku));
       const missingSecondColumn = cells.length < 2;
       const missingRequired = !sku || missingSecondColumn;
       const master = (skuMaster || {})[sku];
@@ -588,7 +597,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     return numericRows.map((cells, index) => {
       const sku = cells[0];
       const value = cells.length > 1 ? cells[1] : "";
-      const matches = rows.filter((row) => rowMatchesActiveScope(row) && normalizeValue(row.sku) === sku);
+      const matches = rows.filter((row) => rowMatchesActiveScope(row) && rowMatchesSkuSegment(row, sku));
       const row = matches.length === 1 ? matches[0] : null;
       const missingSecondColumn = cells.length < 2;
       const duplicated = matches.length > 1;
@@ -622,7 +631,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       const groupsBySku = new Map();
       const newRows = [];
       applicableItems.forEach((item) => {
-        if (!groupsBySku.has(item.sku)) groupsBySku.set(item.sku, createGroupForPromoType("Umbral", [...rows, ...newRows]));
+        if (!groupsBySku.has(item.sku)) groupsBySku.set(item.sku, createGroupForCurrentActivity("Umbral", [...rows, ...newRows]));
         newRows.push(buildPromoRow({ sku: item.sku, promoType: "Umbral", group: groupsBySku.get(item.sku), tipoSku: "principal", tipoCantidad: "Mínimo", cantidadMinima: item.cantidadMinima, precioAhora: item.precioAhora, descuento: item.descuento }));
       });
       if (!newRows.length) return;
@@ -637,7 +646,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       const groupsByScenario = new Map();
       const newRows = [];
       applicableItems.forEach((item) => {
-        if (!groupsByScenario.has(item.scenario)) groupsByScenario.set(item.scenario, createGroupForPromoType("Combo", [...rows, ...newRows]));
+        if (!groupsByScenario.has(item.scenario)) groupsByScenario.set(item.scenario, createGroupForCurrentActivity("Combo", [...rows, ...newRows]));
         const reward = isComboRewardRole(item.role);
         const comboComment = [`${item.scenario}: ${reward ? "regalia" : "principal"} cantidad 1`, item.comentario].filter(Boolean).join(" | ");
         newRows.push(buildPromoRow({ sku: item.sku, promoType: "Combo", group: groupsByScenario.get(item.scenario), tipoSku: reward ? "regalia" : "principal", tipoCantidad: "Exacta", cantidadMinima: 1, precioAhora: item.precioAhora, descuento: item.descuento, comentario: comboComment }));
@@ -655,7 +664,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       const newRows = [];
       applicableItems.forEach((item) => {
         const promoType = BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? tipoActivo : BUY_X_GET_X_PROMO_TYPE;
-        const group = createGroupForPromoType(promoType, [...rows, ...newRows]);
+        const group = createGroupForCurrentActivity(promoType, [...rows, ...newRows]);
         if (promoType === BUY_X_GET_X_V2_PROMO_TYPE) {
           newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, precioAhora: item.precioAhora, descuento: item.descuento, comentario: `Variante ${item.variant}: principal ${item.principalQty}; regalia ${item.rewardQty}`, variante: item.variant }));
           return;
@@ -676,7 +685,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       setRows((prev) => {
         let nextRows = [...prev];
         applicableItems.forEach((item) => {
-          const matches = nextRows.filter((row) => rowMatchesActiveScope(row) && normalizeValue(row.sku) === item.sku);
+          const matches = nextRows.filter((row) => rowMatchesActiveScope(row) && rowMatchesSkuSegment(row, item.sku));
           const extraValues = item.extraValues || {};
           if (matches.length) {
             const ids = new Set(matches.map((row) => row.id));
@@ -738,8 +747,8 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const comboIsReward = isComboRewardRole(comboDraft.role);
   const comboNeedsValue = comboDraft.beneficio !== "gratis" && comboDraft.beneficio !== "sin";
   const canAddComboLine = compradorSeleccionado && normalizeValue(comboDraft.sku) && (!comboNeedsValue || normalizeValue(comboDraft.valor));
-  const comboBuilder = isComboActive ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder"><label className="field"><span>Oferta</span><select value={comboDraft.group} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForPromoType("Combo", rows)}</option>{comboGroups.map((group) => <option key={group} value={group}>{group}</option>)}</select></label><label className="field"><span>Rol</span><select value={comboDraft.role} onChange={(e) => updateComboDraft("role", e.target.value)} disabled={!compradorSeleccionado}><option value="principal">Principal</option><option value="regalia">Regalía</option></select></label><label className="field"><span>SKU</span><input value={comboDraft.sku} onChange={(e) => updateComboDraft("sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={comboIsReward ? "SKU de regalía" : "SKU principal"} /></label><label className="field"><span>{comboIsReward ? "Cantidad entregada" : "Cantidad comprada"}</span><input type="number" min="1" step="1" value={comboDraft.cantidad} onChange={(e) => updateComboDraft("cantidad", e.target.value)} disabled={!compradorSeleccionado} /></label><label className="field"><span>Beneficio</span><select value={comboDraft.beneficio} onChange={(e) => updateComboDraft("beneficio", e.target.value)} disabled={!compradorSeleccionado}><option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="gratis">Gratis / regalía</option><option value="sin">Sin beneficio</option></select></label><label className="field"><span>Valor beneficio</span><input value={comboDraft.valor} onChange={(e) => updateComboDraft("valor", e.target.value)} disabled={!compradorSeleccionado || !comboNeedsValue} placeholder={comboDraft.beneficio === "precio" ? "250" : "10%"} /></label><div className="button-row"><Button onClick={addComboLine} disabled={!canAddComboLine}><Plus size={16}/> Agregar al combo</Button></div></div></CardContent></Card> : null;
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Drive";
+  const comboBuilder = isComboActive ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder"><label className="field"><span>Oferta</span><select value={comboDraft.group} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group} value={group}>{group}</option>)}</select></label><label className="field"><span>Rol</span><select value={comboDraft.role} onChange={(e) => updateComboDraft("role", e.target.value)} disabled={!compradorSeleccionado}><option value="principal">Principal</option><option value="regalia">Regalía</option></select></label><label className="field"><span>SKU</span><input value={comboDraft.sku} onChange={(e) => updateComboDraft("sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={comboIsReward ? "SKU de regalía" : "SKU principal"} /></label><label className="field"><span>{comboIsReward ? "Cantidad entregada" : "Cantidad comprada"}</span><input type="number" min="1" step="1" value={comboDraft.cantidad} onChange={(e) => updateComboDraft("cantidad", e.target.value)} disabled={!compradorSeleccionado} /></label><label className="field"><span>Beneficio</span><select value={comboDraft.beneficio} onChange={(e) => updateComboDraft("beneficio", e.target.value)} disabled={!compradorSeleccionado}><option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="gratis">Gratis / regalía</option><option value="sin">Sin beneficio</option></select></label><label className="field"><span>Valor beneficio</span><input value={comboDraft.valor} onChange={(e) => updateComboDraft("valor", e.target.value)} disabled={!compradorSeleccionado || !comboNeedsValue} placeholder={comboDraft.beneficio === "precio" ? "250" : "10%"} /></label><div className="button-row"><Button onClick={addComboLine} disabled={!canAddComboLine}><Plus size={16}/> Agregar al combo</Button></div></div></CardContent></Card> : null;
+  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
   const activityCommentStatus = openActivityComments.length ? `${openActivityComments.length} abierto(s)` : activityComments.length ? `${activityComments.length} registrado(s)` : "Sin comentarios";
   const buyerAvancePanel = compradorSeleccionado ? <div className="avance-mini-panel"><div className="segment-panel-head"><div><strong>Estado de carga</strong><span>Marque terminado cuando complete sus ofertas por division.</span></div></div>{buyerDivisionesAvance.length ? <div className="segment-chip-list">{buyerDivisionesAvance.map((division) => { const terminado = isAvanceTerminado(avanceCatalogos, currentCatalogoAvanceId, division, comprador); return <button key={division} type="button" className={terminado ? "segment-chip selected" : "segment-chip"} onClick={() => toggleBuyerAvance(division)}>{terminado ? <CheckCircle2 size={14}/> : <CircleDashed size={14}/>} {division}</button>; })}</div> : <div className="empty-state">Este comprador no tiene divisiones configuradas en Ajustes.</div>}</div> : null;
   const activityCommentPanel = <div className="activity-comment-panel"><div className="activity-comment-head"><div><strong>Comentario general</strong><span>{activityCommentStatus}</span></div><Button variant="outline" onClick={() => setShowActivityComment((value) => !value)} disabled={!currentActivityId || !compradorSeleccionado}><MessageSquare size={16}/> {showActivityComment ? "Ocultar" : "Agregar"}</Button></div>{latestActivityComment && <div className="activity-comment-latest"><span className={String(latestActivityComment.estado).toLowerCase() === "abierto" ? "pill yellow" : "pill green"}>{latestActivityComment.estado}</span><p>{latestActivityComment.texto || latestActivityComment.comentario}</p></div>}{showActivityComment && <div className="activity-comment-form"><textarea value={activityCommentDraft} onChange={(e) => setActivityCommentDraft(e.target.value)} placeholder="Ej. 20% de descuento en categoria Puertas" /><div className="button-row"><Button onClick={addActivityComment} disabled={!normalizeValue(activityCommentDraft)}><Save size={16}/> Guardar comentario</Button></div></div>}</div>;

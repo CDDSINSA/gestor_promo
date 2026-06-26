@@ -12,12 +12,15 @@ import {
 } from "lucide-react";
 import { classNames, makeId } from "../utils/common";
 import {
+  channelMatchesFilter,
   formatDurationHours,
   getSpecialRequestStatusKey,
   isActivityComment,
   isLineComment,
   isSegmentedRow,
   normalizeActividad,
+  normalizeCanal,
+  splitChannelValues,
 } from "../utils/promoHelpers";
 import { CONSOLIDADO_TABLE_HEADERS } from "../constants";
 import { isComplexPromoType } from "../promoTypes/promoTypeEngine";
@@ -71,12 +74,22 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
   const getComentariosRow = (rowId) => comentarios.filter((c) => isLineComment(c) && (c.rowId || c.row_id) === rowId);
   const getActivityComments = (activityId) => comentarios.filter((c) => isActivityComment(c) && (c.actividadId || c.actividad_id) === activityId);
-  const generalComments = comentarios.filter(isActivityComment);
 
   const compradoresUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador")))];
   const tiposUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.tipoPromo || "Sin tipo")))];
   const tiposActividad = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).tipo_actividad || "CATALOGO")))];
-  const canales = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).canal || "Sin canal")))];
+  const canales = ["Todos", ...Array.from(rows.reduce((map, row) => {
+    const values = splitChannelValues(getActivity(row).canal);
+    if (!values.length) {
+      if (!map.has("sin-canal")) map.set("sin-canal", "Sin canal");
+      return map;
+    }
+    values.forEach((item) => {
+      const key = normalizeCanal(item);
+      if (key && !map.has(key)) map.set(key, item);
+    });
+    return map;
+  }, new Map()).values())];
   const alcances = ["Todos", ...Array.from(new Set(rows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
 
   const applyFilters = () => {
@@ -126,13 +139,19 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
       && (appliedFilters.comprador === "Todos" || compradorRow === appliedFilters.comprador)
       && (appliedFilters.tipo === "Todos" || (row.tipoPromo || "Sin tipo") === appliedFilters.tipo)
       && (appliedFilters.tipoActividad === "Todos" || tipoActividad === appliedFilters.tipoActividad)
-      && (appliedFilters.canal === "Todos" || canal === appliedFilters.canal)
+      && (appliedFilters.canal === "Todos"
+        || (canal === "Sin canal" ? appliedFilters.canal === "Sin canal" : channelMatchesFilter(canal, appliedFilters.canal)))
       && (appliedFilters.alcance === "Todos" || alcance === appliedFilters.alcance)
       && (appliedFilters.estadoComentario === "Todos"
         || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)
         || (appliedFilters.estadoComentario === "Resueltos" && tieneResuelto)
         || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
   }) : [];
+
+  const visibleActivityIds = new Set(rowsFiltradas.map(getActivityId).filter(Boolean));
+  const generalComments = appliedFilters
+    ? comentarios.filter((comment) => isActivityComment(comment) && visibleActivityIds.has(comment.actividadId || comment.actividad_id))
+    : [];
 
   const resumenComprador = compradores
     .map((buyer) => {

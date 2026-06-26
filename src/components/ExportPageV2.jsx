@@ -1,7 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { Download, Search, X } from "lucide-react";
 import { classNames } from "../utils/common";
-import { isActivityComment, isLineComment, isSegmentedRow, normalizeActividad } from "../utils/promoHelpers";
+import {
+  channelMatchesFilter,
+  isActivityComment,
+  isLineComment,
+  isSegmentedRow,
+  normalizeActividad,
+  normalizeCanal,
+  splitChannelValues,
+} from "../utils/promoHelpers";
 
 function Header({ title, subtitle }) {
   return (
@@ -51,7 +59,18 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const compradoresUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador")))];
   const tiposUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.tipoPromo || "Sin tipo")))];
   const tiposActividad = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).tipo_actividad || "CATALOGO")))];
-  const canales = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).canal || "Sin canal")))];
+  const canales = ["Todos", ...Array.from(rows.reduce((map, row) => {
+    const values = splitChannelValues(getActivity(row).canal);
+    if (!values.length) {
+      if (!map.has("sin-canal")) map.set("sin-canal", "Sin canal");
+      return map;
+    }
+    values.forEach((item) => {
+      const key = normalizeCanal(item);
+      if (key && !map.has(key)) map.set(key, item);
+    });
+    return map;
+  }, new Map()).values())];
   const alcances = ["Todos", ...Array.from(new Set(rows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
 
   const applyFilters = () => {
@@ -101,7 +120,8 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       && (appliedFilters.comprador === "Todos" || compradorRow === appliedFilters.comprador)
       && (appliedFilters.tipo === "Todos" || (row.tipoPromo || "Sin tipo") === appliedFilters.tipo)
       && (appliedFilters.tipoActividad === "Todos" || tipoActividad === appliedFilters.tipoActividad)
-      && (appliedFilters.canal === "Todos" || canal === appliedFilters.canal)
+      && (appliedFilters.canal === "Todos"
+        || (canal === "Sin canal" ? appliedFilters.canal === "Sin canal" : channelMatchesFilter(canal, appliedFilters.canal)))
       && (appliedFilters.alcance === "Todos" || alcance === appliedFilters.alcance)
       && (appliedFilters.estadoComentario === "Todos"
         || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)

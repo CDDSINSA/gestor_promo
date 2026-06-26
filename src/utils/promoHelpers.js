@@ -293,6 +293,19 @@ export function normalizeCanal(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+export function splitChannelValues(value) {
+  return String(value || "")
+    .split(/[;|,]/)
+    .map((item) => normalizeValue(item))
+    .filter(Boolean);
+}
+
+export function channelMatchesFilter(activityChannel, filterChannel) {
+  const normalizedFilter = normalizeCanal(filterChannel);
+  if (!normalizedFilter) return false;
+  return splitChannelValues(activityChannel).some((item) => normalizeCanal(item) === normalizedFilter);
+}
+
 export function getCommentScope(item) {
   const explicit = normalizeValue(item?.alcanceComentario || item?.alcance_comentario || item?.tipo_comentario).toUpperCase();
   if (["ACTIVIDAD", "CATALOGO", "CATÁLOGO", "GENERAL"].includes(explicit)) return COMMENT_SCOPE_ACTIVITY;
@@ -405,10 +418,13 @@ export function readJerarquiaCategoriasFromData(data) {
 }
 
 export function getSegmentosByCanal(segmentos, canal) {
-  const normalizedCanal = normalizeCanal(canal);
+  const normalizedChannels = splitChannelValues(canal)
+    .map((item) => normalizeCanal(item))
+    .filter(Boolean);
+  const allowedChannels = normalizedChannels.length ? new Set(normalizedChannels) : null;
   return (segmentos || [])
     .map(normalizeSegmentoCliente)
-    .filter((item) => item.activo && normalizeCanal(item.canal) === normalizedCanal)
+    .filter((item) => item.activo && (!allowedChannels || allowedChannels.has(normalizeCanal(item.canal))))
     .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0) || a.segmento.localeCompare(b.segmento));
 }
 

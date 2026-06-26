@@ -13,7 +13,7 @@ import {
   Settings,
   Upload,
 } from "lucide-react";
-import { hasDriveConnection } from "../services/googleSheetsService";
+import { hasSupabaseConnection } from "../services/supabaseService";
 import { classNames } from "../utils/common";
 
 function Header({ title, subtitle }) {
@@ -31,9 +31,9 @@ function Metric({ title, value, icon: Icon }) { return <Card><CardContent classN
 export default function HomePage({ catalogos, rows = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadExcel, onSaveExcel, onLoadDrive, onSaveDrive, driveConnection, driveStatus, isSyncing, fileInputRef }) {
   const catalogosVisibles = catalogos.filter((c) => String(c.estado).toLowerCase() !== "cerrado");
   const activos = catalogosVisibles.filter((c) => c.estado === "Activo").length;
-  const driveReady = hasDriveConnection(driveConnection);
+  const driveReady = hasSupabaseConnection(driveConnection);
   const statusType = driveStatus?.type || (driveReady ? "ready" : "idle");
-  const statusMessage = driveStatus?.message || (driveReady ? "Conexion lista para Google Sheets." : "Configure la URL publicada de Apps Script.");
+  const statusMessage = driveStatus?.message || (driveReady ? "Conexion lista para Supabase." : "Configure el usuario tecnico de Supabase.");
   const catalogStats = useMemo(() => {
     const stats = new Map(catalogosVisibles.map((cat) => [cat.id, { compradores: new Set(), divisiones: new Set(), skus: new Set() }]));
     const byKey = new Map();
@@ -56,17 +56,17 @@ export default function HomePage({ catalogos, rows = [], rowsCount, logsCount, s
       <Metric title="Catalogos activos" value={activos} icon={LayoutDashboard}/>
       <Metric title="Promos registradas" value={rowsCount} icon={ListChecks}/>
       <Metric title="Cambios recientes" value={logsCount} icon={History}/>
-      <Metric title="Conexion Drive" value={driveReady ? "ON" : "OFF"} icon={Bell}/>
+      <Metric title="Conexion Supabase" value={driveReady ? "ON" : "OFF"} icon={Bell}/>
     </div>
     <div className={classNames("sync-panel", statusType)}>
       <div>
-        <strong>Google Drive / Sheets</strong>
-        <span>{driveReady ? `Hoja ${driveConnection.spreadsheetId}` : "Sin URL de Apps Script configurada"}</span>
+        <strong>Supabase</strong>
+        <span>{driveReady ? driveConnection.url : "Sin usuario tecnico configurado"}</span>
         <p>{statusMessage}</p>
       </div>
       <div className="toolbar-actions">
-        <Button variant="outline" onClick={onLoadDrive} disabled={!driveReady || isSyncing}><Download size={16}/> Cargar Drive</Button>
-        <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> Guardar Drive</Button>
+        <Button variant="outline" onClick={onLoadDrive} disabled={!driveReady || isSyncing}><Download size={16}/> Cargar Supabase</Button>
+        <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> Guardar Supabase</Button>
         {!driveReady && <Button variant="outline" onClick={() => setActive("ajustes")}><Settings size={16}/> Configurar</Button>}
       </div>
     </div>

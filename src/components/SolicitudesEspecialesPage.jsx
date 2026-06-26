@@ -209,7 +209,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     return acc;
   }, {});
   const selectedStatus = selected ? normalizeSpecialRequestStatus(selected.estado) : "";
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Drive";
+  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
 
   return <div>
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
