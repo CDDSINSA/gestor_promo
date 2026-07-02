@@ -2,9 +2,9 @@
 
 ## Estado General
 
-Version actual: MVP v0.1
+Version actual: MVP v0.2
 
-Objetivo principal: digitalizar y estructurar el proceso de creacion, revision y consolidacion de promociones comerciales.
+Objetivo principal: digitalizar y estructurar el proceso de creacion, revision y consolidacion de promociones comerciales, manteniendo Excel como respaldo/exportacion y Supabase como persistencia operativa del MVP.
 
 ## Funcionalidades Implementadas
 
@@ -21,19 +21,19 @@ Estado: Completado
 
 ### Gestion de Promociones
 
-Estado: Completado MVP visual
+Estado: Completado MVP operativo
 
 - Promociones simples.
 - Promociones complejas.
 - Grilla tipo Excel.
-- Autocompletado de SKU mock.
+- Carga de archivo comprador ERP para SKU de trabajo.
 - Pegado masivo.
 - Vista previa de pegado masivo.
 - Validaciones visuales.
 
 ### Consolidado
 
-Estado: Completado MVP visual
+Estado: Completado MVP operativo
 
 - Vista unificada.
 - Filtro por comprador.
@@ -42,9 +42,10 @@ Estado: Completado MVP visual
 
 ### Comentarios de Mercadeo
 
-Estado: Completado MVP visual
+Estado: Completado MVP operativo
 
 - Comentarios por SKU.
+- Comentarios generales por actividad.
 - Estado Abierto.
 - Estado Resuelto.
 - Reapertura de comentarios.
@@ -69,7 +70,7 @@ Hojas definidas:
 
 ### Servicio Excel
 
-Estado: Completado base
+Estado: Completado como respaldo/exportacion
 
 Archivo:
 
@@ -83,11 +84,47 @@ Incluye:
 - Exportaciones.
 - Validaciones basicas.
 
+### Servicio Supabase
+
+Estado: Completado MVP operativo
+
+Archivo:
+
+src/services/supabaseService.js
+
+Incluye:
+
+- Login de entrada con Supabase Auth.
+- Carga de catalogo desde Supabase.
+- Guardado incremental con mutaciones atomicas.
+- Paginacion interna para lecturas grandes.
+- Consulta paginada de logs bajo demanda.
+- Uso de usuario tecnico para sincronizacion de datos del MVP.
+
+### Logs
+
+Estado: Completado MVP operativo
+
+- La pestana Logs no descarga datos al cargar el catalogo.
+- Boton Consultar.
+- Paginacion de 25, 50 o 100 filas.
+- Navegacion Anterior / Siguiente.
+- Separacion entre logs consultados en pantalla y logs nuevos pendientes de sincronizar.
+
+### Seguridad
+
+Estado: Completado base
+
+- Login con Supabase Auth.
+- Cierre de sesion desde la barra lateral.
+- Todos los usuarios autenticados tienen acceso a todos los modulos por ahora.
+- Roles y permisos quedan pendientes para una fase posterior.
+
 ## En Desarrollo
 
 ### Integracion Real con Excel
 
-Estado: En progreso
+Estado: Completado base / mantenimiento
 
 Objetivos:
 
@@ -103,18 +140,18 @@ Criterio de aceptacion:
 - Guardar.
 - Ver cambios reflejados en Excel.
 
+### Sincronizacion Supabase
+
+Estado: En mejora continua
+
+Objetivos:
+
+- Mantener mutaciones atomicas.
+- Evitar descargas completas innecesarias.
+- Preparar filtros por vigencia, estado y catalogo.
+- Mantener compatibilidad con migracion futura a SQL Server o API corporativa.
+
 ## Proximas Funcionalidades
-
-### Sprint 2 - Archivo Comprador ERP
-
-Estado: Pendiente
-
-- Reemplazar skuMaster mock.
-- Cargar archivo comprador ERP.
-- Crear catalogo SKU dinamico.
-- Autocompletar descripcion, VPN y precio.
-
-Prioridad: Alta
 
 ### Sprint 3 - Validaciones de Negocio
 
@@ -131,11 +168,11 @@ Prioridad: Alta
 
 ### Sprint 4 - Historial Avanzado
 
-Estado: Pendiente
+Estado: Parcial
 
-- Ver diferencias entre versiones.
-- Consultar cambios por usuario.
-- Consultar cambios por fecha.
+- Implementado: logs consultables bajo demanda con paginacion.
+- Pendiente: ver diferencias entre versiones.
+- Pendiente: filtros avanzados por usuario, fecha y entidad.
 
 Prioridad: Media
 
@@ -149,25 +186,24 @@ Estado: Pendiente
 
 Prioridad: Media
 
-### Sprint 6 - Integracion Drive
+### Sprint 6 - Integracion Drive / SharePoint
 
-Estado: En progreso
+Estado: En espera
 
-- Google Drive via Apps Script y Google Sheets.
-- Carga completa del catalogo desde la hoja compartida.
-- Guardado completo y regeneracion de CONSOLIDADO y EXPORT_*.
+- Supabase queda como flujo principal de carga/guardado.
 - Excel queda como respaldo/exportacion.
-- OneDrive y SharePoint quedan para evaluacion futura.
+- Google Drive/Sheets, OneDrive y SharePoint quedan para evaluacion futura si negocio lo requiere.
 
 Prioridad: Media
 
 ### Sprint 7 - Seguridad
 
-Estado: Pendiente
+Estado: Base implementada / roles pendientes
 
-- Roles.
-- Permisos.
-- Autenticacion.
+- Implementado: autenticacion con Supabase Auth.
+- Pendiente: tabla/modelo de roles.
+- Pendiente: permisos por modulo.
+- Pendiente: auditoria por usuario final.
 
 Prioridad: Alta
 
@@ -187,13 +223,16 @@ Prioridad: Alta
 Mantener:
 
 - React.
-- Excel como almacenamiento temporal.
+- Excel como respaldo/exportacion y compatibilidad operativa.
+- Supabase como persistencia principal del MVP.
 - Arquitectura desacoplada.
 - Consolidado generado automaticamente.
+- PROMOCIONES como tabla principal.
 
 Evitar:
 
 - Logica Excel dentro de pantallas.
-- Pestañas por comprador.
+- Pestanas por comprador.
 - Dependencias directas con Oracle.
 - Automatizaciones complejas antes de estabilizar el MVP.
+- Descargas completas innecesarias de tablas historicas grandes.
