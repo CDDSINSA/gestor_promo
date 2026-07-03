@@ -469,6 +469,36 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     segmentMode,
     segmentText,
   });
+  const createComboLine = (role = "principal", overrides = {}) => ({
+    id: makeId(role === "reward" ? "combo-reward" : "combo-principal"),
+    sku: "",
+    cantidad: 1,
+    beneficio: role === "reward" ? "gratis" : "descuento",
+    valor: "",
+    ...overrides,
+  });
+  const createEmptyComboDraft = (overrides = {}) => ({
+    group: "",
+    principals: [createComboLine("principal")],
+    rewards: [createComboLine("reward")],
+    ...overrides,
+  });
+  const comboPrincipals = Array.isArray(comboDraft.principals) && comboDraft.principals.length
+    ? comboDraft.principals
+    : [createComboLine("principal", {
+      sku: comboDraft.principalSku || "",
+      cantidad: comboDraft.principalCantidad || 1,
+      beneficio: comboDraft.principalBeneficio || "descuento",
+      valor: comboDraft.principalValor || "",
+    })];
+  const comboRewards = Array.isArray(comboDraft.rewards) && comboDraft.rewards.length
+    ? comboDraft.rewards
+    : [createComboLine("reward", {
+      sku: comboDraft.rewardSku || "",
+      cantidad: comboDraft.rewardCantidad || 1,
+      beneficio: comboDraft.rewardBeneficio || "gratis",
+      valor: comboDraft.rewardValor || "",
+    })];
   const comboGroup = comboDraft.group || createGroupForCurrentActivity("Combo");
   const pushLog = (accion) => setLogs((prev) => [{ fecha: new Date().toLocaleString(), usuario: comprador, catalogo: currentActivityName, accion }, ...prev]);
   const toggleSegment = (segmentoId) => setSelectedSegments((prev) => prev.includes(segmentoId) ? prev.filter((item) => item !== segmentoId) : [...prev, segmentoId]);
@@ -517,29 +547,92 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const compradorId = buyer?.comprador_id || buyer?.compradorId || buyer?.id || "";
     return toAppRow({ row_id: rowId, actividad_id: actividadId, tipo_promo: promoType, grupo_oferta: nextGroup, tipo_sku: tipoSku || (promoIsComplex ? "principal" : "simple"), variante, sku: cleanSku, dep_id: master.dep_id || "", num_parte: master.vpn || "", descripcion: master.descripcion || "", tipo_cantidad: tipoCantidad, cantidad_minima: cantidadMinima, precio_antes: master.precio || "", precio_ahora: precioAhora, descuento, comentario_comprador: comentario, aplica_segmento: aplicaSegmento, segmento: aplicaSegmento === "SI" ? segmentoCliente : "Todos", segmento_cliente: aplicaSegmento === "SI" ? segmentoCliente : "", alcance_tipo: activityContext?.alcance_tipo || "CANAL", alcance_valor: activityContext?.alcance_valor || catalogoActivo?.canal || "", comprador_id: compradorId, comprador, division, estado_registro: "BORRADOR" });
   };
-  const updateComboDraft = (field, value) => setComboDraft((prev) => { const next = { ...prev, [field]: value }; if (field === "role") { next.beneficio = isComboRewardRole(value) ? "gratis" : "descuento"; next.valor = ""; } return next; });
-  const startNewCombo = () => setComboDraft((prev) => ({ ...prev, group: "", role: "principal", sku: "", cantidad: 1, beneficio: "descuento", valor: "" }));
-  const addComboLine = () => {
+  const updateComboDraft = (field, value) => setComboDraft((prev) => ({ ...prev, [field]: value }));
+  const updateComboLine = (role, id, field, value) => {
+    const collection = role === "reward" ? "rewards" : "principals";
+    const fallback = role === "reward" ? comboRewards : comboPrincipals;
+    setComboDraft((prev) => ({
+      ...prev,
+      [collection]: (Array.isArray(prev[collection]) && prev[collection].length ? prev[collection] : fallback)
+        .map((line) => line.id === id ? { ...line, [field]: value } : line),
+    }));
+  };
+  const addComboDraftLine = (role) => {
+    const collection = role === "reward" ? "rewards" : "principals";
+    const fallback = role === "reward" ? comboRewards : comboPrincipals;
+    setComboDraft((prev) => ({
+      ...prev,
+      [collection]: [...(Array.isArray(prev[collection]) && prev[collection].length ? prev[collection] : fallback), createComboLine(role)],
+    }));
+  };
+  const removeComboDraftLine = (role, id) => {
+    const collection = role === "reward" ? "rewards" : "principals";
+    const fallback = role === "reward" ? comboRewards : comboPrincipals;
+    setComboDraft((prev) => {
+      const current = Array.isArray(prev[collection]) && prev[collection].length ? prev[collection] : fallback;
+      const next = current.filter((line) => line.id !== id);
+      return { ...prev, [collection]: next.length ? next : current };
+    });
+  };
+  const startNewCombo = () => setComboDraft(createEmptyComboDraft());
+  const getComboBenefitValues = (beneficio, valor, defaultReward = false) => {
+    const benefitValue = normalizeValue(valor);
+    if (beneficio === "precio") return { precioAhora: benefitValue, descuento: "" };
+    if (beneficio === "descuento") return { precioAhora: "", descuento: benefitValue.includes("%") ? benefitValue : `${benefitValue}%` };
+    if (beneficio === "gratis") return { precioAhora: 0, descuento: "100%" };
+    if (defaultReward) return { precioAhora: 0, descuento: "100%" };
+    return { precioAhora: "", descuento: "" };
+  };
+  const comboBenefitNeedsValue = (beneficio) => beneficio !== "gratis" && beneficio !== "sin";
+  const canUseComboBenefit = (beneficio, valor) => !comboBenefitNeedsValue(beneficio) || Boolean(normalizeValue(valor));
+  const addComboPair = () => {
     if (!compradorSeleccionado) return;
-    const sku = normalizeValue(comboDraft.sku);
-    if (!sku) return;
-    const quantity = Math.max(1, Number(comboDraft.cantidad) || 1);
-    const reward = isComboRewardRole(comboDraft.role);
-    const benefitValue = normalizeValue(comboDraft.valor);
-    const precioAhora = comboDraft.beneficio === "precio" ? benefitValue : reward && comboDraft.beneficio === "gratis" ? 0 : "";
-    const descuento = comboDraft.beneficio === "descuento" ? (benefitValue.includes("%") ? benefitValue : `${benefitValue}%`) : reward && comboDraft.beneficio === "gratis" ? "100%" : "";
-    const comentario = reward ? `Regalia combo: entrega ${quantity}` : `Principal combo: compra ${quantity}`;
-    const newRow = buildPromoRow({ sku, promoType: "Combo", group: comboGroup, tipoSku: reward ? "regalia" : "principal", tipoCantidad: "Exacta", cantidadMinima: quantity, precioAhora, descuento, comentario });
-    setRows((prev) => [...prev, newRow]);
-    setComboDraft((prev) => ({ ...prev, group: comboGroup, sku: "", cantidad: reward ? 1 : prev.cantidad, valor: "" }));
-    pushLog(`Agregó SKU ${sku} al ${comboGroup} como ${reward ? "regalía" : "principal"}`);
+    const validPrincipals = comboPrincipals
+      .map((line) => ({ ...line, sku: normalizeValue(line.sku), cantidad: Math.max(1, Number(line.cantidad) || 1) }))
+      .filter((line) => line.sku && canUseComboBenefit(line.beneficio, line.valor));
+    const validRewards = comboRewards
+      .map((line) => ({ ...line, sku: normalizeValue(line.sku), cantidad: Math.max(1, Number(line.cantidad) || 1) }))
+      .filter((line) => line.sku && canUseComboBenefit(line.beneficio, line.valor));
+    if (!validPrincipals.length || !validRewards.length) return;
+    const group = comboGroup;
+    const principalRows = validPrincipals.map((line) => {
+      const benefit = getComboBenefitValues(line.beneficio, line.valor);
+      return buildPromoRow({
+        sku: line.sku,
+        promoType: "Combo",
+        group,
+        tipoSku: "principal",
+        tipoCantidad: "Exacta",
+        cantidadMinima: line.cantidad,
+        precioAhora: benefit.precioAhora,
+        descuento: benefit.descuento,
+        comentario: `Combo ${group}: principal compra ${line.cantidad}`,
+      });
+    });
+    const rewardRows = validRewards.map((line) => {
+      const benefit = getComboBenefitValues(line.beneficio, line.valor, true);
+      return buildPromoRow({
+        sku: line.sku,
+        promoType: "Combo",
+        group,
+        tipoSku: "regalia",
+        tipoCantidad: "Exacta",
+        cantidadMinima: line.cantidad,
+        precioAhora: benefit.precioAhora,
+        descuento: benefit.descuento,
+        comentario: `Combo ${group}: regalia entrega ${line.cantidad}`,
+      });
+    });
+    setRows((prev) => [...prev, ...principalRows, ...rewardRows]);
+    setComboDraft(createEmptyComboDraft());
+    pushLog(`Agregó combo completo ${group}: ${validPrincipals.length} principal(es) y ${validRewards.length} regalía(s)`);
   };
   const addRow = (sku = "") => {
     if (!compradorSeleccionado) return;
     sku = normalizeValue(sku);
     if (sku && !isNumericSku(sku)) return;
-    const newRow = tipoActivo === "Combo" ? buildPromoRow({ sku, promoType: "Combo", group: comboGroup, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: 1 }) : buildPromoRow({ sku });
-    if (tipoActivo === "Combo") setComboDraft((prev) => ({ ...prev, group: comboGroup }));
+    if (tipoActivo === "Combo") return;
+    const newRow = buildPromoRow({ sku });
     setRows((prev) => [...prev, newRow]);
     pushLog(`Agregó SKU ${sku || "sin código"} en ${tipoActivo}`);
   };
@@ -712,7 +805,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setBulkColumn(tipoActivo === "Umbral" ? BULK_COLUMN_UMBRAL_TABLE : tipoActivo === "Combo" ? BULK_COLUMN_COMBO_TABLE : BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? BULK_COLUMN_BUY_X_GET_X_TABLE : tipoActivo === "Precio fijo" ? "precioAhora" : tipoActivo === "Descuento" ? "descuento" : "sku");
     setSegmentMode(false);
     setSelectedSegments([]);
-    setComboDraft({ group: "", role: "principal", sku: "", cantidad: 1, beneficio: "descuento", valor: "" });
+    setComboDraft(createEmptyComboDraft());
   };
   const { updateRow, deleteRow } = usePromos({
     setRows,
@@ -728,10 +821,29 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const bulkPlaceholder = isBuyXGetXTablePaste ? "sku\tvariante\tahora c IVA\tdescuento\n147072842\t4x3\t982\t\n139760160\t5x3\t543\t\n10081749\t5x4\t\t15%\n10081802\t15x12\t\t20%" : isComboTablePaste ? "Tipo\tSku\tAhora con iva\tdescuento\nPrincipal\t152737466\t200\t\nRegalia\t152736551\t\t100%\nPrincipal\t156890097\t789\t\nRegalia\t156890396\t\t100%" : isUmbralTablePaste ? "Sku\t1 a mas\t20 a mas\t30 a mas\t50 a mas\n103163662\t5%\t10%\t15%\t25%" : bulkColumn === "sku" ? "Pegue aqui una columna de SKU copiada desde Excel" : `Pegue aqui dos columnas: SKU y ${labels[bulkColumn]}`;
   const canApplyBulkPreview = bulkPreview.length > 0 && bulkPreview.some((item) => item.canApply !== false);
   const isComboActive = tipoActivo === "Combo";
-  const comboIsReward = isComboRewardRole(comboDraft.role);
-  const comboNeedsValue = comboDraft.beneficio !== "gratis" && comboDraft.beneficio !== "sin";
-  const canAddComboLine = compradorSeleccionado && normalizeValue(comboDraft.sku) && (!comboNeedsValue || normalizeValue(comboDraft.valor));
-  const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder"><label className="field"><span>Oferta</span><select value={comboDraft.group} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group} value={group}>{group}</option>)}</select></label><label className="field"><span>Rol</span><select value={comboDraft.role} onChange={(e) => updateComboDraft("role", e.target.value)} disabled={!compradorSeleccionado}><option value="principal">Principal</option><option value="regalia">Regalía</option></select></label><label className="field"><span>SKU</span><input value={comboDraft.sku} onChange={(e) => updateComboDraft("sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={comboIsReward ? "SKU de regalía" : "SKU principal"} /></label><label className="field"><span>{comboIsReward ? "Cantidad entregada" : "Cantidad comprada"}</span><input type="number" min="1" step="1" value={comboDraft.cantidad} onChange={(e) => updateComboDraft("cantidad", e.target.value)} disabled={!compradorSeleccionado} /></label><label className="field"><span>Beneficio</span><select value={comboDraft.beneficio} onChange={(e) => updateComboDraft("beneficio", e.target.value)} disabled={!compradorSeleccionado}><option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="gratis">Gratis / regalía</option><option value="sin">Sin beneficio</option></select></label><label className="field"><span>Valor beneficio</span><input value={comboDraft.valor} onChange={(e) => updateComboDraft("valor", e.target.value)} disabled={!compradorSeleccionado || !comboNeedsValue} placeholder={comboDraft.beneficio === "precio" ? "250" : "10%"} /></label><div className="button-row"><Button onClick={addComboLine} disabled={!canAddComboLine}><Plus size={16}/> Agregar al combo</Button></div></div></CardContent></Card> : null;
+  const principalCompleteCount = comboPrincipals.filter((line) => normalizeValue(line.sku) && canUseComboBenefit(line.beneficio, line.valor)).length;
+  const rewardCompleteCount = comboRewards.filter((line) => normalizeValue(line.sku) && canUseComboBenefit(line.beneficio, line.valor)).length;
+  const canAddComboPair = compradorSeleccionado
+    && principalCompleteCount > 0
+    && rewardCompleteCount > 0
+    && principalCompleteCount === comboPrincipals.length
+    && rewardCompleteCount === comboRewards.length;
+  const renderComboLine = (role, line, index, total) => {
+    const isReward = role === "reward";
+    const collectionLabel = isReward ? "regalía" : "principal";
+    const needsValue = comboBenefitNeedsValue(line.beneficio);
+    return <div className="combo-line" key={line.id}>
+      <div className="combo-line-head">
+        <strong>{collectionLabel} {index + 1}</strong>
+        <button type="button" className="icon-btn" onClick={() => removeComboDraftLine(role, line.id)} disabled={total <= 1} title={`Quitar ${collectionLabel}`} aria-label={`Quitar ${collectionLabel}`}><Trash2 size={15}/></button>
+      </div>
+      <label className="field"><span>SKU</span><input value={line.sku || ""} onChange={(e) => updateComboLine(role, line.id, "sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={isReward ? "SKU de regalía" : "SKU principal"} /></label>
+      <label className="field"><span>{isReward ? "Cantidad entregada" : "Cantidad comprada"}</span><input type="number" min="1" step="1" value={line.cantidad || 1} onChange={(e) => updateComboLine(role, line.id, "cantidad", e.target.value)} disabled={!compradorSeleccionado} /></label>
+      <label className="field"><span>Beneficio</span><select value={line.beneficio || (isReward ? "gratis" : "descuento")} onChange={(e) => updateComboLine(role, line.id, "beneficio", e.target.value)} disabled={!compradorSeleccionado}>{isReward && <option value="gratis">Gratis / regalía</option>}<option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="sin">Sin beneficio</option></select></label>
+      <label className="field"><span>Valor beneficio</span><input value={line.valor || ""} onChange={(e) => updateComboLine(role, line.id, "valor", e.target.value)} disabled={!compradorSeleccionado || !needsValue} placeholder={line.beneficio === "precio" ? "250" : "10%"} /></label>
+    </div>;
+  };
+  const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder combo-builder-pair"><label className="field wide"><span>Oferta</span><select value={comboDraft.group || ""} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group}>{group}</option>)}</select></label><div className="combo-role-panel principal"><div className="combo-role-head"><div><strong>Principales</strong><span>SKU que compra el cliente</span></div><Button variant="outline" onClick={() => addComboDraftLine("principal")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboPrincipals.map((line, index) => renderComboLine("principal", line, index, comboPrincipals.length))}</div></div><div className="combo-role-panel reward"><div className="combo-role-head"><div><strong>Regalías</strong><span>SKU entregados como beneficio</span></div><Button variant="outline" onClick={() => addComboDraftLine("reward")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboRewards.map((line, index) => renderComboLine("reward", line, index, comboRewards.length))}</div></div><div className="combo-builder-summary"><span>{principalCompleteCount}/{comboPrincipals.length} principales completos</span><span>{rewardCompleteCount}/{comboRewards.length} regalías completas</span></div><div className="button-row combo-pair-actions"><Button onClick={addComboPair} disabled={!canAddComboPair}><Plus size={16}/> Agregar combo completo</Button></div></div></CardContent></Card> : null;
   const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
   const activityCommentStatus = openActivityComments.length ? `${openActivityComments.length} abierto(s)` : activityComments.length ? `${activityComments.length} registrado(s)` : "Sin comentarios";
   const buyerAvancePanel = compradorSeleccionado && canEditAvances ? <div className="avance-mini-panel"><div className="segment-panel-head"><div><strong>Estado de carga</strong><span>Marque terminado cuando complete sus ofertas por division.</span></div></div>{buyerDivisionesAvance.length ? <div className="segment-chip-list">{buyerDivisionesAvance.map((division) => { const terminado = isAvanceTerminado(avanceCatalogos, currentCatalogoAvanceId, division, comprador); return <button key={division} type="button" className={terminado ? "segment-chip selected" : "segment-chip"} onClick={() => toggleBuyerAvance(division)}>{terminado ? <CheckCircle2 size={14}/> : <CircleDashed size={14}/>} {division}</button>; })}</div> : <div className="empty-state">Este comprador no tiene divisiones configuradas en Ajustes.</div>}</div> : null;
@@ -748,7 +860,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
           <label className="field"><span>{"Tipo de promoci\u00f3n"}</span><select value={tipoActivo} onChange={(e) => changeTipoActivo(e.target.value)} disabled={!compradorSeleccionado}>{todosTipos.map((t) => <option key={t}>{t}</option>)}</select></label>
           <input ref={promoTemplateFileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={loadPromoTemplate}/>
           <div className="button-row promo-action-row">
-            {canEditPromos && <Button onClick={() => addRow()} disabled={!compradorSeleccionado}><Plus size={16}/> Fila</Button>}
+            {canEditPromos && <Button onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> Fila</Button>}
             {canEditPromos && <Button variant="outline" onClick={pasteSkus} disabled={!compradorSeleccionado}><ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? "Pegar tabla" : "Pegar SKU"}</Button>}
             {canEditPromos && <Button variant="outline" onClick={() => promoTemplateFileInputRef.current?.click()} disabled={!compradorSeleccionado}><FileSpreadsheet size={16}/> Plantilla</Button>}
           </div>
@@ -761,7 +873,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       {comboBuilder}
       <Card className="grid-card">
         <CardContent>
-        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripci\u00f3n"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado}><Plus size={16}/> {"Agregar l\u00ednea"}</Button>}{canSyncSupabase && <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> {saveDriveLabel}</Button>}</div></div>
+        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripci\u00f3n"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar l\u00ednea"}</Button>}{canSyncSupabase && <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> {saveDriveLabel}</Button>}</div></div>
           {!esCompleja && <div className="promo-integrity-row"><p className={classNames("promo-integrity-note", missingBenefitCount ? "warning" : "ok")}>{benefitStatusText}</p></div>}
           <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{filteredRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><button className="icon-btn" onClick={() => deleteRow(row.id)}><Trash2 size={15}/></button></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
         </CardContent>

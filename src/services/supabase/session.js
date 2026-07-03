@@ -7,6 +7,7 @@ import {
   fetchWithTimeout,
   getAnonKey,
   getHeaders,
+  getEnvValue,
   getSupabaseUrl,
 } from "./config";
 
@@ -41,6 +42,15 @@ export function saveStoredSupabaseConnection(connection) {
 
 export function hasSupabaseConnection(connection) {
   return Boolean(getSupabaseUrl(connection) && getAnonKey(connection));
+}
+
+export function getAuthRedirectUrl(connection = {}) {
+  const configuredRedirect = cleanText(connection.authRedirectUrl || connection.redirectUrl || getEnvValue("VITE_SUPABASE_AUTH_REDIRECT_URL"));
+  if (configuredRedirect) return configuredRedirect.replace(/\/$/, "");
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${window.location.pathname}`;
+  }
+  return getSupabaseUrl(connection);
 }
 
 export function loadStoredAppSession() {
@@ -85,6 +95,67 @@ export async function signInAppUser(connection, email, password) {
   };
   window.sessionStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(session));
   return session;
+}
+
+export async function requestPasswordRecovery(connection, email) {
+  const cleanEmail = cleanText(email);
+  if (!getSupabaseUrl(connection) || !getAnonKey(connection)) {
+    throw new Error("Configure URL y anon key de Supabase para recuperar la contraseña.");
+  }
+  if (!cleanEmail) {
+    throw new Error("Ingrese el correo del usuario para recuperar la contraseña.");
+  }
+
+  let response;
+  try {
+    response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/auth/v1/recover`, {
+      method: "POST",
+      headers: getHeaders(connection, null),
+      body: JSON.stringify({
+        email: cleanEmail,
+        options: {
+          redirectTo: getAuthRedirectUrl(connection),
+        },
+      }),
+    });
+  } catch (error) {
+    throw new Error(`No se pudo contactar Supabase Auth. Detalle: ${error.message || error}`);
+  }
+
+  await assertOk(response, "No se pudo enviar el correo de recuperacion.");
+}
+
+export async function updateRecoveredPassword(connection, recoverySession, password) {
+  if (!recoverySession?.access_token) {
+    throw new Error("No hay una sesion de recuperacion valida.");
+  }
+  const cleanPassword = cleanText(password);
+  if (!cleanPassword) {
+    throw new Error("Ingrese una nueva contraseña.");
+  }
+
+  let response;
+  try {
+    response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/auth/v1/user`, {
+      method: "PUT",
+      headers: getHeaders(connection, recoverySession.access_token),
+      body: JSON.stringify({ password: cleanPassword }),
+    });
+  } catch (error) {
+    throw new Error(`No se pudo contactar Supabase Auth. Detalle: ${error.message || error}`);
+  }
+
+  return assertOk(response, "No se pudo actualizar la contraseña.");
+}
+
+export async function loadAuthUserFromSession(connection, session) {
+  if (!session?.access_token) {
+    throw new Error("No hay una sesion activa para consultar el usuario.");
+  }
+  const response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/auth/v1/user`, {
+    headers: getHeaders(connection, session.access_token),
+  });
+  return assertOk(response, "No se pudo consultar el usuario autenticado.");
 }
 
 function buildAppUserQuery(params) {

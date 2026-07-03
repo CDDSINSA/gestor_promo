@@ -369,9 +369,23 @@ main {
   line-height: 1.2rem;
 }
 
+.login-status.success {
+  color: #047857;
+}
+
 .login-status.error,
 .logs-status.error {
   color: #b91c1c;
+}
+
+.recovery-info {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.82rem;
+  line-height: 1.2rem;
 }
 
 .metrics {
@@ -1327,6 +1341,106 @@ button:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 0.75rem;
   align-items: end;
+}
+
+.combo-builder-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.combo-builder-pair .wide,
+.combo-pair-actions {
+  grid-column: 1 / -1;
+}
+
+.combo-role-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, auto);
+  gap: 0.75rem;
+  align-content: start;
+  padding: 0.85rem;
+  border: 1px solid #dbe5ee;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+
+.combo-role-panel.principal {
+  border-left: 0.25rem solid #006b3f;
+}
+
+.combo-role-panel.reward {
+  border-left: 0.25rem solid #00a6c8;
+}
+
+.combo-role-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.combo-role-head > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.combo-role-head strong,
+.combo-line-head strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.combo-role-head span {
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.combo-line-list {
+  display: grid;
+  gap: 0.75rem;
+  min-height: 0;
+  max-height: 28rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  scrollbar-gutter: stable;
+}
+
+.combo-line {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.65rem;
+  background: #ffffff;
+}
+
+.combo-line-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.combo-line .field {
+  min-width: 0;
+}
+
+.combo-builder-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.combo-builder-summary span {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid #dbe5ee;
+  border-radius: 999px;
+  color: #475569;
+  background: #ffffff;
+  font-size: 0.76rem;
 }
 
 .form-grid {
@@ -2911,6 +3025,7 @@ td b {
   .special-board,
   .special-detail-grid,
   .special-timeline,
+  .combo-builder-pair,
   .catalog-grid,
   .export-grid {
     grid-template-columns: 1fr;
@@ -2926,6 +3041,18 @@ td b {
 
   .promo-controls-card > div {
     grid-template-columns: 1fr;
+  }
+
+  .combo-line {
+    grid-template-columns: 1fr;
+  }
+
+  .combo-role-panel {
+    min-height: 0;
+  }
+
+  .combo-line-list {
+    max-height: 22rem;
   }
 
   .promo-controls-card .promo-action-row {

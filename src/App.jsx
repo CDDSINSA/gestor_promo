@@ -5,9 +5,17 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ArrowLeft,
+  KeyRound,
   LogIn,
   LogOut,
+  Mail,
+  ShieldAlert,
   Search,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 import { loadCatalogFromExcel, loadSkuMasterFromExcel, saveCatalogToExcel } from "./services/excelService";
 import {
@@ -15,14 +23,17 @@ import {
   loadAppUserProfile,
   loadCatalogFromSupabase,
   loadLogsFromSupabase,
+  loadAuthUserFromSession,
   loadStoredAppSession,
   loadStoredSupabaseConnection,
+  requestPasswordRecovery,
   pingSupabaseConnection,
   saveCatalogToSupabase,
   saveSettingsToSupabase,
   saveStoredSupabaseConnection,
   signInAppUser,
   signOutAppUser,
+  updateRecoveredPassword,
 } from "./services/supabaseService";
 import {
   catalogosIniciales,
@@ -92,6 +103,13 @@ function Button({ children, className = "", variant = "default", ...props }) {
 }
 function Card({ children, className = "" }) { return <div className={classNames("card", className)}>{children}</div>; }
 function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
+function ModalButton({ children, className = "", variant = "default", ...props }) {
+  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
+}
+
+function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, onConfirm, onCancel }) {
+  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className="modal-note"><Icon size={16}/> {note}</p></div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton onClick={onConfirm}>{confirmLabel}</ModalButton></div></div></div>;
+}
 
 function AppShell({ active, setActive, currentUser, currentRole, onLogout }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -108,7 +126,41 @@ function MobileNav({ active, setActive }) {
   return <div className="mobile-nav">{visibleItems.map((item) => { const Icon = item.icon; return <button key={item.id} onClick={() => setActive(item.id)} className={active === item.id ? "active" : ""}><Icon size={18}/><span>{item.label}</span></button>; })}</div>;
 }
 
-function LoginPage({ onLogin, loginStatus, connectionStatus }) {
+function parseRecoverySessionFromLocation() {
+  if (typeof window === "undefined") return null;
+  const fragments = [];
+  if (window.location.hash) fragments.push(window.location.hash.replace(/^#/, ""));
+  if (window.location.search) fragments.push(window.location.search.replace(/^\?/, ""));
+  const params = new URLSearchParams(fragments.join("&"));
+  const type = String(params.get("type") || "").trim().toLowerCase();
+  const accessToken = String(params.get("access_token") || "").trim();
+  if (type !== "recovery" || !accessToken) return null;
+  const expiresAtRaw = String(params.get("expires_at") || "").trim();
+  const expiresInRaw = String(params.get("expires_in") || "").trim();
+  const expiresAt = expiresAtRaw
+    ? (Number(expiresAtRaw) > 1e12 ? Number(expiresAtRaw) : Number(expiresAtRaw) * 1000)
+    : Date.now() + Number(expiresInRaw || 3600) * 1000;
+  return {
+    access_token: accessToken,
+    refresh_token: String(params.get("refresh_token") || "").trim(),
+    expires_at: Number.isNaN(expiresAt) ? Date.now() + 3600 * 1000 : expiresAt,
+    token_type: String(params.get("token_type") || "bearer").trim(),
+    type: "recovery",
+    user_email: String(params.get("email") || "").trim(),
+  };
+}
+
+function clearAuthTokensFromUrl() {
+  if (typeof window === "undefined" || !window.history?.replaceState) return;
+  const nextUrl = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState({}, document.title, nextUrl);
+}
+
+function AuthBrand({ message }) {
+  return <div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor de Promociones</h1><p>{message}</p></div></div>;
+}
+
+function LoginPage({ onLogin, onForgotPassword, loginStatus, connectionStatus }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const isLoading = loginStatus.type === "loading";
@@ -117,11 +169,35 @@ function LoginPage({ onLogin, loginStatus, connectionStatus }) {
     onLogin(email, password);
   };
 
-  return <div className="login-shell"><Card className="login-card"><CardContent><div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor de Promociones</h1><p>Ingrese con su usuario autorizado.</p></div></div><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{loginStatus.message && <p className={classNames("login-status", loginStatus.type === "error" && "error")}>{loginStatus.message}</p>}<Button type="submit" disabled={isLoading}><LogIn size={16}/> {isLoading ? "Ingresando..." : "Ingresar"}</Button></form></CardContent></Card></div>;
+  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Ingrese con su usuario autorizado." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{loginStatus.message && <p className={classNames("login-status", loginStatus.type === "error" && "error")}>{loginStatus.message}</p>}<div className="button-row"><Button type="submit" disabled={isLoading}><LogIn size={16}/> {isLoading ? "Ingresando..." : "Ingresar"}</Button><Button type="button" variant="outline" onClick={onForgotPassword} disabled={isLoading}><KeyRound size={16}/> Olvide mi contraseña</Button></div></form></CardContent></Card></div>;
+}
+
+function ForgotPasswordPage({ onSubmit, onBack, recoveryStatus, connectionStatus }) {
+  const [email, setEmail] = useState("");
+  const isLoading = recoveryStatus.type === "loading";
+  const submit = (event) => {
+    event.preventDefault();
+    onSubmit(email);
+  };
+
+  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Recupere el acceso con su correo corporativo." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><p className="login-status"><Mail size={14}/> Se enviara un enlace para crear una nueva contraseña.</p>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{recoveryStatus.message && <p className={classNames("login-status", recoveryStatus.type === "error" && "error", recoveryStatus.type === "success" && "success")}>{recoveryStatus.message}</p>}<div className="button-row"><Button type="button" variant="outline" onClick={onBack} disabled={isLoading}><ArrowLeft size={16}/> Volver</Button><Button type="submit" disabled={isLoading}><RefreshCw size={16}/> {isLoading ? "Enviando..." : "Enviar enlace"}</Button></div></form></CardContent></Card></div>;
+}
+
+function ResetPasswordPage({ recoverySession, recoveryUser, onSubmit, onBack, recoveryStatus, connectionStatus }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const isLoading = recoveryStatus.type === "loading";
+  const email = recoveryUser?.email || recoverySession?.user_email || "";
+  const submit = (event) => {
+    event.preventDefault();
+    onSubmit(password, confirmPassword);
+  };
+
+  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Defina una nueva contraseña para continuar." /><form className="login-form" onSubmit={submit}><div className="recovery-info"><ShieldAlert size={16}/> {email ? `Restableciendo acceso para ${email}` : "Restableciendo acceso con enlace de recuperacion."}</div><label className="field"><span>Nueva contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label className="field"><span>Confirmar contraseña</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{recoveryStatus.message && <p className={classNames("login-status", recoveryStatus.type === "error" && "error", recoveryStatus.type === "success" && "success")}>{recoveryStatus.message}</p>}<div className="button-row"><Button type="button" variant="outline" onClick={onBack} disabled={isLoading}><ArrowLeft size={16}/> Volver</Button><Button type="submit" disabled={isLoading}><KeyRound size={16}/> {isLoading ? "Guardando..." : "Actualizar contraseña"}</Button></div></form></CardContent></Card></div>;
 }
 
 function AuthLoadingPage({ message = "Cargando permisos..." }) {
-  return <div className="login-shell"><Card className="login-card"><CardContent><div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor de Promociones</h1><p>{message}</p></div></div></CardContent></Card></div>;
+  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message={message} /></CardContent></Card></div>;
 }
 
 function LogsPage({ logs, page, pageSize, hasNextPage, status, driveReady, onConsult, onPrevious, onNext, onPageSizeChange }) {
@@ -416,6 +492,11 @@ export default function PromoMVP() {
   const [appUser, setAppUser] = useState(null);
   const [authStatus, setAuthStatus] = useState({ type: "idle", message: "" });
   const [loginStatus, setLoginStatus] = useState({ type: "idle", message: "" });
+  const [recoveryStatus, setRecoveryStatus] = useState({ type: "idle", message: "" });
+  const [authScreen, setAuthScreen] = useState("login");
+  const [recoverySession, setRecoverySession] = useState(null);
+  const [recoveryUser, setRecoveryUser] = useState(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState(null);
   const initialLoadSessionRef = React.useRef("");
   const syncedPromotionStateRef = React.useRef(new Map());
   const syncedBuyerStateRef = React.useRef(new Map());
@@ -437,6 +518,47 @@ export default function PromoMVP() {
     session: appSession,
     appUser,
   }), [driveConnection, appSession, appUser]);
+
+  const requestSupabaseSaveConfirmation = (payload) => {
+    if (isSyncing) return;
+    setPendingSaveAction(payload);
+  };
+
+  const executePendingSaveAction = async () => {
+    const current = pendingSaveAction;
+    if (!current) return;
+    setPendingSaveAction(null);
+    try {
+      await current.action();
+    } catch (error) {
+      setDriveStatus({ type: "error", message: error.message || "No se pudo completar el guardado." });
+    }
+  };
+
+  useEffect(() => {
+    const nextRecoverySession = parseRecoverySessionFromLocation();
+    if (!nextRecoverySession) return;
+    clearAuthTokensFromUrl();
+    setAuthScreen("reset");
+    setRecoverySession(nextRecoverySession);
+    setRecoveryUser(null);
+    setLoginStatus({ type: "idle", message: "" });
+    setRecoveryStatus({ type: "loading", message: "Validando enlace de recuperacion..." });
+    let cancelled = false;
+    loadAuthUserFromSession(driveConnection, nextRecoverySession)
+      .then((user) => {
+        if (cancelled) return;
+        setRecoveryUser(user);
+        setRecoveryStatus({ type: "idle", message: "" });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setRecoveryStatus({ type: "error", message: error.message || "No se pudo validar el enlace de recuperacion." });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [driveConnection]);
 
   useEffect(() => {
     if (!appSession?.access_token) {
@@ -624,12 +746,51 @@ export default function PromoMVP() {
     }
   };
 
+  const onRequestPasswordRecovery = async (email) => {
+    setRecoveryStatus({ type: "loading", message: "Enviando enlace de recuperacion..." });
+    try {
+      const savedConnection = saveStoredSupabaseConnection(driveConnection);
+      setDriveConnection(savedConnection);
+      await requestPasswordRecovery(savedConnection, email);
+      setRecoveryStatus({ type: "success", message: "Si el correo existe, recibira un enlace para restablecer la contraseña." });
+      setLoginStatus({ type: "idle", message: "" });
+    } catch (error) {
+      setRecoveryStatus({ type: "error", message: error.message || "No se pudo enviar el enlace de recuperacion." });
+    }
+  };
+
+  const onResetPassword = async (password, confirmPassword) => {
+    if (password !== confirmPassword) {
+      setRecoveryStatus({ type: "error", message: "Las contraseñas no coinciden." });
+      return;
+    }
+    setRecoveryStatus({ type: "loading", message: "Actualizando contraseña..." });
+    try {
+      const savedConnection = saveStoredSupabaseConnection(driveConnection);
+      setDriveConnection(savedConnection);
+      await updateRecoveredPassword(savedConnection, recoverySession, password);
+      signOutAppUser();
+      setAppSession(null);
+      setAppUser(null);
+      setRecoverySession(null);
+      setAuthScreen("login");
+      setRecoveryStatus({ type: "idle", message: "" });
+      setLoginStatus({ type: "success", message: "Contraseña actualizada. Ya puede iniciar sesion con la nueva contraseña." });
+    } catch (error) {
+      setRecoveryStatus({ type: "error", message: error.message || "No se pudo actualizar la contraseña." });
+    }
+  };
+
   const onLogout = () => {
     signOutAppUser();
     setAppSession(null);
     setAppUser(null);
     setAuthStatus({ type: "idle", message: "" });
     setLoginStatus({ type: "idle", message: "" });
+    setRecoveryStatus({ type: "idle", message: "" });
+    setRecoverySession(null);
+    setRecoveryUser(null);
+    setAuthScreen("login");
     initialLoadSessionRef.current = "";
   };
 
@@ -751,6 +912,30 @@ export default function PromoMVP() {
     }
   };
 
+  const onRequestSaveDrive = () => requestSupabaseSaveConfirmation({
+    title: "Confirmar guardado",
+    description: "Vas a guardar los cambios del catalogo en Supabase.",
+    note: "Este guardado sincroniza promociones, comentarios, avances y ajustes relacionados.",
+    confirmLabel: "Guardar Supabase",
+    action: onSaveDrive,
+  });
+
+  const onRequestSaveDriveSettings = () => requestSupabaseSaveConfirmation({
+    title: "Confirmar ajustes",
+    description: "Vas a guardar los ajustes de conexión en Supabase.",
+    note: "La conexión se actualizará con los valores actuales de la pantalla de Ajustes.",
+    confirmLabel: "Guardar Supabase",
+    action: onSaveDriveSettings,
+  });
+
+  const onRequestSaveCatalogSettings = (settings = {}) => requestSupabaseSaveConfirmation({
+    title: "Confirmar guardado",
+    description: "Vas a guardar compradores y catalogos en Supabase.",
+    note: "Este cambio impacta la estructura base del sistema y luego sincroniza el catálogo.",
+    confirmLabel: "Guardar Supabase",
+    action: () => onSaveCatalogSettings(settings),
+  });
+
   const onLoadExcel = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -798,7 +983,13 @@ export default function PromoMVP() {
   }, [active, currentRole]);
 
   if (!appSession?.access_token) {
-    return <LoginPage onLogin={onLogin} loginStatus={loginStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+    if (authScreen === "forgot") {
+      return <ForgotPasswordPage onSubmit={onRequestPasswordRecovery} onBack={() => { setAuthScreen("login"); setRecoveryStatus({ type: "idle", message: "" }); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+    }
+    if (authScreen === "reset") {
+      return <ResetPasswordPage recoverySession={recoverySession} recoveryUser={recoveryUser} onSubmit={onResetPassword} onBack={() => { clearAuthTokensFromUrl(); setRecoverySession(null); setRecoveryUser(null); setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("login"); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+    }
+    return <LoginPage onLogin={onLogin} onForgotPassword={() => { setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("forgot"); }} loginStatus={loginStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
   }
 
   if (!appUser) {
@@ -806,22 +997,32 @@ export default function PromoMVP() {
   }
 
   const currentUser = appSession.user_email || appSession.user?.email || "";
+  const saveSupabaseDataLabel = pendingSaveAction?.confirmLabel || "Guardar";
 
   return <AuthProvider value={authValue}><div className="app">
     <AppShell active={active} setActive={setActive} currentUser={currentUser} currentRole={currentRole} onLogout={onLogout}/>
     <main>
-      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadDrive={onLoadDrive} onSaveDrive={onSaveDrive} driveConnection={driveConnection} driveStatus={driveStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
-      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveDrive={onSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
-      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} driveConnection={driveConnection} setDriveConnection={setDriveConnection} onSaveDriveSettings={onSaveDriveSettings} onSaveCatalogSettings={onSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestDriveConnection={onTestDriveConnection} onSetupDriveWorkbook={onSetupDriveWorkbook} driveStatus={driveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
+      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadDrive={onLoadDrive} driveConnection={driveConnection} driveStatus={driveStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
+      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
+      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} driveConnection={driveConnection} setDriveConnection={setDriveConnection} onSaveDriveSettings={onRequestSaveDriveSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestDriveConnection={onTestDriveConnection} onSetupDriveWorkbook={onSetupDriveWorkbook} driveStatus={driveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
       {active === "consulta" && <ProtectedRoute permission={MODULE_PERMISSIONS.consulta}><ConsultaSkuPage rows={rows} actividades={actividades}/></ProtectedRoute>}
-      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
-      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveDrive={onSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
+      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
       {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} driveReady={hasSupabaseConnection(driveConnection)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
       {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores}/></ProtectedRoute>}
       {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios}/></ProtectedRoute>}
     </main>
     <MobileNav active={active} setActive={setActive}/>
+    {pendingSaveAction && <ConfirmModal
+      title={pendingSaveAction.title || "Confirmar guardado"}
+      description={pendingSaveAction.description || "Vas a guardar cambios en Supabase."}
+      note={pendingSaveAction.note || "Este paso sincroniza los cambios con la base de datos y puede tardar unos segundos."}
+      confirmLabel={saveSupabaseDataLabel}
+      cancelLabel="Cancelar"
+      onConfirm={executePendingSaveAction}
+      onCancel={() => setPendingSaveAction(null)}
+    />}
   </div></AuthProvider>;
 }
 

@@ -40,11 +40,13 @@ Variables principales:
 ```text
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
+VITE_SUPABASE_AUTH_REDIRECT_URL
 ```
 
 Notas operativas:
 
 - El login de entrada usa Supabase Auth.
+- La recuperacion de contraseña usa el redirect configurado en Supabase Auth.
 - Los permisos se leen desde `public.usuarios_app.rol`.
 - La sincronizacion de datos usa el token del usuario logueado y queda protegida por RLS.
 - Roles vigentes: `ADMIN`, `BUYER`, `MARK`, `OPER`, `AUD`.

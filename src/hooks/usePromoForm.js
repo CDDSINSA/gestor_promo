@@ -16,7 +16,11 @@ export function usePromoForm({ initialComprador = "", initialTipoPromo = "Descue
   const [bulkPreview, setBulkPreview] = useState([]);
   const [segmentMode, setSegmentMode] = useState(false);
   const [selectedSegments, setSelectedSegments] = useState([]);
-  const [comboDraft, setComboDraft] = useState({ group: "", role: "principal", sku: "", cantidad: 1, beneficio: "descuento", valor: "" });
+  const [comboDraft, setComboDraft] = useState({
+    group: "",
+    principals: [{ id: "principal-1", sku: "", cantidad: 1, beneficio: "descuento", valor: "" }],
+    rewards: [{ id: "reward-1", sku: "", cantidad: 1, beneficio: "gratis", valor: "" }],
+  });
   const [showActivityComment, setShowActivityComment] = useState(false);
   const [activityCommentDraft, setActivityCommentDraft] = useState("");
   const segmentText = segmentMode && selectedSegments.length ? selectedSegments.join(" | ") : "";

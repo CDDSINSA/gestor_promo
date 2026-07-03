@@ -4,12 +4,11 @@ import {
   Bell,
   BellOff,
   CalendarDays,
-  Download,
   History,
   LayoutDashboard,
   ListChecks,
   Plus,
-  Save,
+  RefreshCw,
   Settings,
 } from "lucide-react";
 import { hasSupabaseConnection } from "../services/supabaseService";
@@ -35,7 +34,7 @@ export default function HomePage({ catalogos, rows = [], rowsCount, logsCount, s
   const activos = catalogosVisibles.filter((c) => c.estado === "Activo").length;
   const driveReady = hasSupabaseConnection(driveConnection);
   const statusType = driveStatus?.type || (driveReady ? "ready" : "idle");
-  const statusMessage = driveStatus?.message || (driveReady ? "Conexion lista para Supabase." : "Configure Supabase.");
+  const statusMessage = driveStatus?.message || (driveReady ? "Conexión lista para actualizarse." : "Configure Supabase en Ajustes.");
   const catalogStats = useMemo(() => {
     const stats = new Map(catalogosVisibles.map((cat) => [cat.id, { compradores: new Set(), divisiones: new Set(), skus: new Set() }]));
     const byKey = new Map();
@@ -60,15 +59,14 @@ export default function HomePage({ catalogos, rows = [], rowsCount, logsCount, s
       <Metric title="Cambios recientes" value={logsCount} icon={History}/>
       <Metric title="Conexion Supabase" value={driveReady ? "ON" : "OFF"} icon={Bell}/>
     </div>
-    <div className={classNames("sync-panel", statusType)}>
+    <div className={classNames("sync-panel compact", statusType)}>
       <div>
-        <strong>Supabase</strong>
-        <span>{driveReady ? driveConnection.url : "Sin conexion configurada"}</span>
+        <strong>Conexión</strong>
+        <span>{driveReady ? "Supabase activo" : "Sin conexión configurada"}</span>
         <p>{statusMessage}</p>
       </div>
       <div className="toolbar-actions">
-        {can(PERMISSIONS.SYNC_SUPABASE) && <Button variant="outline" onClick={onLoadDrive} disabled={!driveReady || isSyncing}><Download size={16}/> Cargar Supabase</Button>}
-        {can(PERMISSIONS.SYNC_SUPABASE) && <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> Guardar Supabase</Button>}
+        {can(PERMISSIONS.SYNC_SUPABASE) && <Button variant="outline" className="sync-compact-btn" onClick={onLoadDrive} disabled={!driveReady || isSyncing}><RefreshCw size={16}/> Actualizar conexión</Button>}
         {!driveReady && can(PERMISSIONS.MANAGE_SETTINGS) && <Button variant="outline" onClick={() => setActive("ajustes")}><Settings size={16}/> Configurar</Button>}
       </div>
     </div>

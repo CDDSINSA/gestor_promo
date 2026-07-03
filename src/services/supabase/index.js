@@ -1,13 +1,17 @@
 export {
   SUPABASE_PROJECT_URL,
+  getAuthRedirectUrl,
   getDefaultSupabaseConnection,
   hasSupabaseConnection,
+  loadAuthUserFromSession,
   loadAppUserProfile,
   loadStoredAppSession,
   loadStoredSupabaseConnection,
+  requestPasswordRecovery,
   saveStoredSupabaseConnection,
   signInAppUser,
   signOutAppUser,
+  updateRecoveredPassword,
 } from "./session";
 export {
   loadCatalogFromSupabase,

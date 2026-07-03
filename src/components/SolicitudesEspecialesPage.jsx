@@ -14,7 +14,7 @@ import {
 import { SPECIAL_REQUEST_STATUSES } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
-import { classNames, formatDisplayDate } from "../utils/common";
+import { classNames, formatDateTime } from "../utils/common";
 import {
   addElapsedHours,
   diffHours,
@@ -46,12 +46,27 @@ function Metric({ title, value, icon: Icon }) {
   return <Card><CardContent className="metric"><div><p>{title}</p><strong>{value}</strong></div><div className="metric-icon"><Icon size={20}/></div></CardContent></Card>;
 }
 
+function getStatusLabel(status) {
+  return status === "Aprovado" ? "Aprobado" : status;
+}
+
+function getStatusBoardLabel(status) {
+  if (status === "Aprovado") return "Aprobadas";
+  if (status === "Nuevo") return "Nuevas";
+  if (status === "Finalizado") return "Finalizadas";
+  return status;
+}
+
 function normalizeIdList(value) {
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
     .join(", ");
+}
+
+function formatRequestDateTime(value) {
+  return value ? formatDateTime(value) : "Pendiente";
 }
 
 export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], responsablesSolicitudes = [], setLogs, setActive, onSaveDrive, driveReady, saveDriveStatus, isSyncing }) {
@@ -221,7 +236,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
     <div className="special-request-kpis">
       <Metric title="Nuevas" value={statusTotals.Nuevo || 0} icon={CircleDot}/>
-      <Metric title="Aprovadas" value={statusTotals.Aprovado || 0} icon={UserCheck}/>
+      <Metric title="Aprobadas" value={statusTotals.Aprovado || 0} icon={UserCheck}/>
       <Metric title="En trabajo" value={statusTotals["En trabajo"] || 0} icon={Clock3}/>
       <Metric title="Finalizadas" value={statusTotals.Finalizado || 0} icon={ListChecks}/>
     </div>
@@ -243,7 +258,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
               const isSelected = selected?.actividad_id === item.actividad_id;
               return <button key={item.actividad_id} className={classNames("special-request-row", isSelected && "selected")} onClick={() => setSelectedId(item.actividad_id)}>
                 <div><strong>{item.nombre_actividad || item.actividad_id}</strong><span>{item.actividad_id} · {item.comprador || item.solicitante || "Sin comprador"}</span></div>
-                <span className={classNames("status-badge", `status-${getSpecialRequestStatusKey(status)}`)}>{status}</span>
+                <span className={classNames("status-badge", `status-${getSpecialRequestStatusKey(status)}`)}>{getStatusLabel(status)}</span>
                 <small>{rowCounts.get(item.actividad_id) || 0} SKU · {item.canal || "Sin canal"}</small>
               </button>;
             })}
@@ -263,7 +278,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             </div>
           </div>
           {selected ? <div className="special-detail-grid">
-            <label className="field"><span>Estado</span><select value={selectedStatus} onChange={(e) => requestStatusChange(selected, e.target.value)} disabled={!canManageRequests}>{SPECIAL_REQUEST_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
+            <label className="field"><span>Estado</span><select value={selectedStatus} onChange={(e) => requestStatusChange(selected, e.target.value)} disabled={!canManageRequests}>{SPECIAL_REQUEST_STATUSES.map((status) => <option key={status} value={status}>{getStatusLabel(status)}</option>)}</select></label>
             <label className="field"><span>Responsable</span><select value={selected.responsable || ""} onChange={(e) => updateField(selected, "responsable", e.target.value)} disabled={!canManageRequests}><option value="">Sin asignar</option>{selected.responsable && !responsables.some((item) => item.nombre === selected.responsable) && <option value={selected.responsable}>{selected.responsable} - no esta en catalogo</option>}{responsables.map((item) => <option key={item.responsable_id || item.nombre} value={item.nombre}>{item.area ? `${item.nombre} - ${item.area}` : item.nombre}</option>)}</select></label>
             {assignmentError && <p className="modal-error wide">{assignmentError}</p>}
             <label className="field"><span>Comprador</span><input value={selected.comprador || selected.solicitante || ""} readOnly /></label>
@@ -275,7 +290,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             <label className="field wide"><span>Recursos ocupados</span><textarea value={selected.recursos_ocupados || ""} onChange={(e) => updateField(selected, "recursos_ocupados", e.target.value)} placeholder="Ej. pricing, pauta digital, diseno, rotulacion" readOnly={!canManageRequests} /></label>
             <div className="special-timeline wide">{SPECIAL_REQUEST_STATUSES.map((status) => {
               const key = getSpecialRequestStatusKey(status);
-              return <div key={status}><span>{status}</span><strong>{selected[`fecha_${key}`] ? formatDisplayDate(selected[`fecha_${key}`]) : "Pendiente"}</strong><small>{formatDurationHours(selected[`tiempo_${key}_horas`] || 0)}</small></div>;
+              return <div key={status}><span>{getStatusLabel(status)}</span><strong>{formatRequestDateTime(selected[`fecha_${key}`])}</strong><small>{formatDurationHours(selected[`tiempo_${key}_horas`] || 0)}</small></div>;
             })}</div>
           </div> : <div className="empty-state">Seleccione una solicitud para asignar responsable y recursos.</div>}
         </CardContent>
@@ -288,7 +303,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
         const items = filteredRequests.filter((item) => normalizeSpecialRequestStatus(item.estado) === status);
         const nextStatus = SPECIAL_REQUEST_STATUSES[SPECIAL_REQUEST_STATUSES.indexOf(status) + 1];
         return <section key={status} className={classNames("special-board-column", `status-${key}`)}>
-          <div className="special-board-head"><strong>{status}</strong><span>{items.length}</span></div>
+          <div className="special-board-head"><strong>{getStatusBoardLabel(status)}</strong><span>{items.length}</span></div>
           <div className="special-board-list">
             {items.map((item) => <article key={item.actividad_id} className={classNames("special-task-card", selected?.actividad_id === item.actividad_id && "selected")} onClick={() => setSelectedId(item.actividad_id)}>
               <div><strong>{item.nombre_actividad || item.actividad_id}</strong><span>{item.actividad_id}</span></div>
@@ -298,7 +313,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
                 <span><UserCheck size={13}/>{item.responsable || "Sin asignar"}</span>
                 <span><Clock3 size={13}/>{formatDurationHours(getTotalElapsed(item))}</span>
               </div>
-              {canManageRequests && nextStatus && <Button variant="outline" onClick={(event) => { event.stopPropagation(); requestStatusChange(item, nextStatus); }}><ArrowRight size={14}/> {nextStatus}</Button>}
+              {canManageRequests && nextStatus && <Button variant="outline" onClick={(event) => { event.stopPropagation(); requestStatusChange(item, nextStatus); }}><ArrowRight size={14}/> {getStatusLabel(nextStatus)}</Button>}
             </article>)}
             {!items.length && <div className="special-board-empty">Sin solicitudes</div>}
           </div>
