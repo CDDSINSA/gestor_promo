@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import {
   ArrowRight,
   CircleDot,
@@ -69,7 +69,7 @@ function formatRequestDateTime(value) {
   return value ? formatDateTime(value) : "Pendiente";
 }
 
-export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], responsablesSolicitudes = [], setLogs, setActive, onSaveDrive, driveReady, saveDriveStatus, isSyncing }) {
+export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
   const { can } = usePermissions();
   const canManageRequests = can(PERMISSIONS.MANAGE_SOLICITUDES);
   const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
@@ -230,7 +230,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     return acc;
   }, {});
   const selectedStatus = selected ? normalizeSpecialRequestStatus(selected.estado) : "";
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
 
   return <div>
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
@@ -274,7 +274,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             <div><h2>{selected ? selected.nombre_actividad : "Detalle"}</h2><span>{selected ? selected.actividad_id : "Seleccione una solicitud"}</span></div>
             <div className="toolbar-actions">
               {selected && canCreateSpecial && <Button variant="outline" onClick={() => setActive("especial")}><Plus size={16}/> Nueva especial</Button>}
-              {canSyncSupabase && <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> {saveDriveLabel}</Button>}
+              {canSyncSupabase && <Button onClick={onSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}
             </div>
           </div>
           {selected ? <div className="special-detail-grid">

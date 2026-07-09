@@ -200,9 +200,9 @@ function AuthLoadingPage({ message = "Cargando permisos..." }) {
   return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message={message} /></CardContent></Card></div>;
 }
 
-function LogsPage({ logs, page, pageSize, hasNextPage, status, driveReady, onConsult, onPrevious, onNext, onPageSizeChange }) {
+function LogsPage({ logs, page, pageSize, hasNextPage, status, supabaseReady, onConsult, onPrevious, onNext, onPageSizeChange }) {
   const isLoading = status.type === "loading";
-  return <div><Header title="Logs de cambios" subtitle="Trazabilidad de modificaciones relevantes por catalogo, comprador y accion."/><Card className="grid-card logs-card"><CardContent><div className="toolbar"><div><h2>Consulta bajo demanda</h2><p>Los logs se descargan solo al presionar consultar.</p></div><div className="toolbar-actions"><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} disabled={isLoading}><option value={25}>25 filas</option><option value={50}>50 filas</option><option value={100}>100 filas</option></select><Button onClick={() => onConsult(1)} disabled={!driveReady || isLoading}><Search size={16}/> {isLoading ? "Consultando..." : "Consultar"}</Button></div></div>{status.message && <div className={classNames("logs-status", status.type === "error" && "error")}>{status.message}</div>}<div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Catalogo</th><th>Accion</th><th>SKU/Fila</th></tr></thead><tbody>{logs.map((log) => <tr key={log.log_id || `${log.fecha}-${log.accion}`}><td>{log.fecha}</td><td>{log.usuario}</td><td>{log.catalogo}</td><td>{log.accion}</td><td>{log.row_id}</td></tr>)}{!logs.length && <tr><td colSpan={5}><div className="empty-state">Presione consultar para cargar los logs.</div></td></tr>}</tbody></table></div><div className="pagination-bar"><Button variant="outline" onClick={onPrevious} disabled={page <= 1 || isLoading}><ChevronLeft size={16}/> Anterior</Button><span>Pagina {page}</span><Button variant="outline" onClick={onNext} disabled={!hasNextPage || isLoading}>Siguiente <ChevronRight size={16}/></Button></div></CardContent></Card></div>;
+  return <div><Header title="Logs de cambios" subtitle="Trazabilidad de modificaciones relevantes por catalogo, comprador y accion."/><Card className="grid-card logs-card"><CardContent><div className="toolbar"><div><h2>Consulta bajo demanda</h2><p>Los logs se descargan solo al presionar consultar.</p></div><div className="toolbar-actions"><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} disabled={isLoading}><option value={25}>25 filas</option><option value={50}>50 filas</option><option value={100}>100 filas</option></select><Button onClick={() => onConsult(1)} disabled={!supabaseReady || isLoading}><Search size={16}/> {isLoading ? "Consultando..." : "Consultar"}</Button></div></div>{status.message && <div className={classNames("logs-status", status.type === "error" && "error")}>{status.message}</div>}<div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Catalogo</th><th>Accion</th><th>SKU/Fila</th></tr></thead><tbody>{logs.map((log) => <tr key={log.log_id || `${log.fecha}-${log.accion}`}><td>{log.fecha}</td><td>{log.usuario}</td><td>{log.catalogo}</td><td>{log.accion}</td><td>{log.row_id}</td></tr>)}{!logs.length && <tr><td colSpan={5}><div className="empty-state">Presione consultar para cargar los logs.</div></td></tr>}</tbody></table></div><div className="pagination-bar"><Button variant="outline" onClick={onPrevious} disabled={page <= 1 || isLoading}><ChevronLeft size={16}/> Anterior</Button><span>Pagina {page}</span><Button variant="outline" onClick={onNext} disabled={!hasNextPage || isLoading}>Siguiente <ChevronRight size={16}/></Button></div></CardContent></Card></div>;
 }
 function ExportPage() { return <div><Header title="Exportaciones" subtitle="Salidas preparadas para Pricing, Mercadeo, Planimetria y futura consolidacion."/><div className="export-grid">{LEGACY_EXPORT_PAGE_CARDS.map(([title, desc]) => <Card key={title}><CardContent><Download size={22}/><h3>{title}</h3><p>{desc}</p><Button>Generar</Button></CardContent></Card>)}</div></div>; }
 
@@ -484,9 +484,9 @@ export default function PromoMVP() {
   const [logsPageSize, setLogsPageSize] = useState(25);
   const [logsHasNextPage, setLogsHasNextPage] = useState(false);
   const [logsStatus, setLogsStatus] = useState({ type: "idle", message: "Presione consultar para cargar logs." });
-  const [driveConnection, setDriveConnection] = useState(loadStoredSupabaseConnection);
-  const [driveStatus, setDriveStatus] = useState({ type: "idle", message: "Configure Supabase para sincronizar datos." });
-  const [saveDriveStatus, setSaveDriveStatus] = useState("idle");
+  const [supabaseSettings, setSupabaseSettings] = useState(loadStoredSupabaseConnection);
+  const [supabaseStatus, setSupabaseStatus] = useState({ type: "idle", message: "Configure Supabase para sincronizar datos." });
+  const [saveSupabaseStatus, setSaveSupabaseStatus] = useState("idle");
   const [isSyncing, setIsSyncing] = useState(false);
   const [appSession, setAppSession] = useState(loadStoredAppSession);
   const [appUser, setAppUser] = useState(null);
@@ -514,10 +514,10 @@ export default function PromoMVP() {
     setLogsState((currentLogs) => ensureLogIds(typeof updater === "function" ? updater(currentLogs) : updater));
   }, []);
   const supabaseConnection = useMemo(() => ({
-    ...driveConnection,
+    ...supabaseSettings,
     session: appSession,
     appUser,
-  }), [driveConnection, appSession, appUser]);
+  }), [supabaseSettings, appSession, appUser]);
 
   const requestSupabaseSaveConfirmation = (payload) => {
     if (isSyncing) return;
@@ -531,7 +531,7 @@ export default function PromoMVP() {
     try {
       await current.action();
     } catch (error) {
-      setDriveStatus({ type: "error", message: error.message || "No se pudo completar el guardado." });
+      setSupabaseStatus({ type: "error", message: error.message || "No se pudo completar el guardado." });
     }
   };
 
@@ -545,7 +545,7 @@ export default function PromoMVP() {
     setLoginStatus({ type: "idle", message: "" });
     setRecoveryStatus({ type: "loading", message: "Validando enlace de recuperacion..." });
     let cancelled = false;
-    loadAuthUserFromSession(driveConnection, nextRecoverySession)
+    loadAuthUserFromSession(supabaseSettings, nextRecoverySession)
       .then((user) => {
         if (cancelled) return;
         setRecoveryUser(user);
@@ -558,7 +558,7 @@ export default function PromoMVP() {
     return () => {
       cancelled = true;
     };
-  }, [driveConnection]);
+  }, [supabaseSettings]);
 
   useEffect(() => {
     if (!appSession?.access_token) {
@@ -569,7 +569,7 @@ export default function PromoMVP() {
     }
     let cancelled = false;
     setAuthStatus({ type: "loading", message: "Cargando permisos..." });
-    loadAppUserProfile(driveConnection, appSession)
+    loadAppUserProfile(supabaseSettings, appSession)
       .then((profile) => {
         if (cancelled) return;
         setAppUser(profile);
@@ -586,17 +586,17 @@ export default function PromoMVP() {
     return () => {
       cancelled = true;
     };
-  }, [appSession, driveConnection]);
+  }, [appSession, supabaseSettings]);
 
   useEffect(() => {
     if (!appSession?.access_token || !appUser?.activo) return;
     if (!hasSupabaseConnection(supabaseConnection)) {
-      setDriveStatus({ type: "error", message: "Faltan variables de entorno de Supabase para cargar los datos automaticamente." });
+      setSupabaseStatus({ type: "error", message: "Faltan variables de entorno de Supabase para cargar los datos automaticamente." });
       return;
     }
     if (initialLoadSessionRef.current === appSession.access_token) return;
     initialLoadSessionRef.current = appSession.access_token;
-    void onLoadDrive();
+    void onLoadSupabase();
   }, [appSession, appUser, supabaseConnection]);
 
   const applyCatalogData = (data) => {
@@ -716,15 +716,15 @@ export default function PromoMVP() {
     };
   };
 
-  const runDriveOperation = async (loadingMessage, operation, successMessage) => {
+  const runSupabaseOperation = async (loadingMessage, operation, successMessage) => {
     setIsSyncing(true);
-    setDriveStatus({ type: "loading", message: loadingMessage });
+    setSupabaseStatus({ type: "loading", message: loadingMessage });
     try {
       const result = await operation();
-      setDriveStatus({ type: "ready", message: successMessage });
+      setSupabaseStatus({ type: "ready", message: successMessage });
       return result;
     } catch (error) {
-      setDriveStatus({ type: "error", message: error.message || "No se pudo completar la operacion." });
+      setSupabaseStatus({ type: "error", message: error.message || "No se pudo completar la operacion." });
       return null;
     } finally {
       setIsSyncing(false);
@@ -734,8 +734,8 @@ export default function PromoMVP() {
   const onLogin = async (email, password) => {
     setLoginStatus({ type: "loading", message: "Validando usuario..." });
     try {
-      const savedConnection = saveStoredSupabaseConnection(driveConnection);
-      setDriveConnection(savedConnection);
+      const savedConnection = saveStoredSupabaseConnection(supabaseSettings);
+      setSupabaseSettings(savedConnection);
       const session = await signInAppUser(savedConnection, email, password);
       const profile = await loadAppUserProfile(savedConnection, session);
       setAppUser(profile);
@@ -749,8 +749,8 @@ export default function PromoMVP() {
   const onRequestPasswordRecovery = async (email) => {
     setRecoveryStatus({ type: "loading", message: "Enviando enlace de recuperacion..." });
     try {
-      const savedConnection = saveStoredSupabaseConnection(driveConnection);
-      setDriveConnection(savedConnection);
+      const savedConnection = saveStoredSupabaseConnection(supabaseSettings);
+      setSupabaseSettings(savedConnection);
       await requestPasswordRecovery(savedConnection, email);
       setRecoveryStatus({ type: "success", message: "Si el correo existe, recibira un enlace para restablecer la contraseña." });
       setLoginStatus({ type: "idle", message: "" });
@@ -766,8 +766,8 @@ export default function PromoMVP() {
     }
     setRecoveryStatus({ type: "loading", message: "Actualizando contraseña..." });
     try {
-      const savedConnection = saveStoredSupabaseConnection(driveConnection);
-      setDriveConnection(savedConnection);
+      const savedConnection = saveStoredSupabaseConnection(supabaseSettings);
+      setSupabaseSettings(savedConnection);
       await updateRecoveredPassword(savedConnection, recoverySession, password);
       signOutAppUser();
       setAppSession(null);
@@ -817,25 +817,25 @@ export default function PromoMVP() {
     onConsultLogs(1, nextPageSize);
   };
 
-  const onSaveDriveSettings = () => {
-    const saved = saveStoredSupabaseConnection(driveConnection);
-    setDriveConnection(saved);
-    setDriveStatus({
+  const onSaveSupabaseSettings = () => {
+    const saved = saveStoredSupabaseConnection(supabaseSettings);
+    setSupabaseSettings(saved);
+    setSupabaseStatus({
       type: hasSupabaseConnection(saved) ? "ready" : "idle",
       message: hasSupabaseConnection(saved) ? "Conexion guardada. Ya puede probar o cargar desde Supabase." : "Complete URL y anon key para activar Supabase.",
     });
   };
 
-  const onTestDriveConnection = async () => {
-    const saved = saveStoredSupabaseConnection(driveConnection);
-    setDriveConnection(saved);
-    await runDriveOperation("Probando conexion con Supabase...", () => pingSupabaseConnection({ ...saved, session: appSession }), "Conexion con Supabase verificada.");
+  const onTestSupabaseConnection = async () => {
+    const saved = saveStoredSupabaseConnection(supabaseSettings);
+    setSupabaseSettings(saved);
+    await runSupabaseOperation("Probando conexion con Supabase...", () => pingSupabaseConnection({ ...saved, session: appSession }), "Conexion con Supabase verificada.");
   };
 
-  const onSetupDriveWorkbook = async () => {
-    const saved = saveStoredSupabaseConnection(driveConnection);
-    setDriveConnection(saved);
-    await runDriveOperation("Validando sesion de Supabase...", () => pingSupabaseConnection({ ...saved, session: appSession }), "Sesion de Supabase lista.");
+  const onValidateSupabaseSession = async () => {
+    const saved = saveStoredSupabaseConnection(supabaseSettings);
+    setSupabaseSettings(saved);
+    await runSupabaseOperation("Validando sesion de Supabase...", () => pingSupabaseConnection({ ...saved, session: appSession }), "Sesion de Supabase lista.");
   };
 
   const onSaveCatalogSettings = async (settings = {}) => {
@@ -846,12 +846,12 @@ export default function PromoMVP() {
     setCatalogos(nextCatalogos);
     setCompradores(nextCompradores);
     if (!hasSupabaseConnection(supabaseConnection)) {
-      setDriveStatus({ type: "ready", message: "Ajustes guardados en la app. Configure Supabase para sincronizarlos." });
+      setSupabaseStatus({ type: "ready", message: "Ajustes guardados en la app. Configure Supabase para sincronizarlos." });
       return;
     }
-    setSaveDriveStatus("saving");
+    setSaveSupabaseStatus("saving");
     const payload = buildSupabasePayload({ config: nextConfig, catalogos: nextCatalogos, compradores: nextCompradores });
-    const data = await runDriveOperation("Guardando ajustes en Supabase...", () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
+    const data = await runSupabaseOperation("Guardando ajustes en Supabase...", () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
     if (data) {
       if (data.sync_mode === "delta") {
         rememberSyncedPayload(payload);
@@ -861,9 +861,9 @@ export default function PromoMVP() {
         rememberSyncedSettings(data);
         rememberSyncedOperations(data);
       }
-      setSaveDriveStatus("success");
+      setSaveSupabaseStatus("success");
     } else {
-      setSaveDriveStatus("error");
+      setSaveSupabaseStatus("error");
     }
   };
 
@@ -882,8 +882,8 @@ export default function PromoMVP() {
     setActive("avances");
   };
 
-  const onLoadDrive = async () => {
-    const data = await runDriveOperation("Cargando catalogo desde Supabase...", () => loadCatalogFromSupabase(supabaseConnection), "Catalogo cargado desde Supabase.");
+  const onLoadSupabase = async () => {
+    const data = await runSupabaseOperation("Cargando catalogo desde Supabase...", () => loadCatalogFromSupabase(supabaseConnection), "Catalogo cargado desde Supabase.");
     if (data) {
       applyCatalogData(data);
       rememberSyncedPromotions(data.promociones || []);
@@ -893,10 +893,10 @@ export default function PromoMVP() {
     return data;
   };
 
-  const onSaveDrive = async () => {
-    setSaveDriveStatus("saving");
+  const onSaveSupabase = async () => {
+    setSaveSupabaseStatus("saving");
     const payload = buildSupabasePayload();
-    const data = await runDriveOperation("Guardando cambios en Supabase...", () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
+    const data = await runSupabaseOperation("Guardando cambios en Supabase...", () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
     if (data) {
       if (data.sync_mode === "delta") {
         rememberSyncedPayload(payload);
@@ -906,26 +906,26 @@ export default function PromoMVP() {
         rememberSyncedSettings(data);
         rememberSyncedOperations(data);
       }
-      setSaveDriveStatus("success");
+      setSaveSupabaseStatus("success");
     } else {
-      setSaveDriveStatus("error");
+      setSaveSupabaseStatus("error");
     }
   };
 
-  const onRequestSaveDrive = () => requestSupabaseSaveConfirmation({
+  const onRequestSaveSupabase = () => requestSupabaseSaveConfirmation({
     title: "Confirmar guardado",
     description: "Vas a guardar los cambios del catalogo en Supabase.",
     note: "Este guardado sincroniza promociones, comentarios, avances y ajustes relacionados.",
     confirmLabel: "Guardar Supabase",
-    action: onSaveDrive,
+    action: onSaveSupabase,
   });
 
-  const onRequestSaveDriveSettings = () => requestSupabaseSaveConfirmation({
+  const onRequestSaveSupabaseSettings = () => requestSupabaseSaveConfirmation({
     title: "Confirmar ajustes",
     description: "Vas a guardar los ajustes de conexión en Supabase.",
     note: "La conexión se actualizará con los valores actuales de la pantalla de Ajustes.",
     confirmLabel: "Guardar Supabase",
-    action: onSaveDriveSettings,
+    action: onSaveSupabaseSettings,
   });
 
   const onRequestSaveCatalogSettings = (settings = {}) => requestSupabaseSaveConfirmation({
@@ -943,9 +943,9 @@ export default function PromoMVP() {
       const data = await loadCatalogFromExcel(file);
       applyCatalogData(data);
       resetSyncedState();
-      setDriveStatus({ type: "ready", message: `Excel cargado: ${file.name}` });
+      setSupabaseStatus({ type: "ready", message: `Excel cargado: ${file.name}` });
     } catch (error) {
-      setDriveStatus({ type: "error", message: error.message || "No se pudo cargar el Excel." });
+      setSupabaseStatus({ type: "error", message: error.message || "No se pudo cargar el Excel." });
     } finally {
       event.target.value = "";
     }
@@ -963,9 +963,9 @@ export default function PromoMVP() {
   const onSaveExcel = async () => {
     try {
       await saveCatalogToExcel(buildCatalogPayload());
-      setDriveStatus({ type: "ready", message: "Excel exportado correctamente." });
+      setSupabaseStatus({ type: "ready", message: "Excel exportado correctamente." });
     } catch (error) {
-      setDriveStatus({ type: "error", message: error.message || "No se pudo exportar el Excel." });
+      setSupabaseStatus({ type: "error", message: error.message || "No se pudo exportar el Excel." });
     }
   };
 
@@ -984,12 +984,12 @@ export default function PromoMVP() {
 
   if (!appSession?.access_token) {
     if (authScreen === "forgot") {
-      return <ForgotPasswordPage onSubmit={onRequestPasswordRecovery} onBack={() => { setAuthScreen("login"); setRecoveryStatus({ type: "idle", message: "" }); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+      return <ForgotPasswordPage onSubmit={onRequestPasswordRecovery} onBack={() => { setAuthScreen("login"); setRecoveryStatus({ type: "idle", message: "" }); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(supabaseSettings) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
     }
     if (authScreen === "reset") {
-      return <ResetPasswordPage recoverySession={recoverySession} recoveryUser={recoveryUser} onSubmit={onResetPassword} onBack={() => { clearAuthTokensFromUrl(); setRecoverySession(null); setRecoveryUser(null); setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("login"); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+      return <ResetPasswordPage recoverySession={recoverySession} recoveryUser={recoveryUser} onSubmit={onResetPassword} onBack={() => { clearAuthTokensFromUrl(); setRecoverySession(null); setRecoveryUser(null); setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("login"); }} recoveryStatus={recoveryStatus} connectionStatus={hasSupabaseConnection(supabaseSettings) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
     }
-    return <LoginPage onLogin={onLogin} onForgotPassword={() => { setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("forgot"); }} loginStatus={loginStatus} connectionStatus={hasSupabaseConnection(driveConnection) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
+    return <LoginPage onLogin={onLogin} onForgotPassword={() => { setRecoveryStatus({ type: "idle", message: "" }); setAuthScreen("forgot"); }} loginStatus={loginStatus} connectionStatus={hasSupabaseConnection(supabaseSettings) ? "" : "Faltan variables de entorno de Supabase en este entorno."}/>;
   }
 
   if (!appUser) {
@@ -1002,15 +1002,15 @@ export default function PromoMVP() {
   return <AuthProvider value={authValue}><div className="app">
     <AppShell active={active} setActive={setActive} currentUser={currentUser} currentRole={currentRole} onLogout={onLogout}/>
     <main>
-      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadDrive={onLoadDrive} driveConnection={driveConnection} driveStatus={driveStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
-      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
-      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} driveConnection={driveConnection} setDriveConnection={setDriveConnection} onSaveDriveSettings={onRequestSaveDriveSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestDriveConnection={onTestDriveConnection} onSetupDriveWorkbook={onSetupDriveWorkbook} driveStatus={driveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
+      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} actividades={actividades} comentarios={comentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadSupabase={onLoadSupabase} supabaseSettings={supabaseSettings} supabaseStatus={supabaseStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
+      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
+      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} supabaseSettings={supabaseSettings} setSupabaseSettings={setSupabaseSettings} onSaveSupabaseSettings={onRequestSaveSupabaseSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestSupabaseConnection={onTestSupabaseConnection} onValidateSupabaseSession={onValidateSupabaseSession} supabaseStatus={supabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
       {active === "consulta" && <ProtectedRoute permission={MODULE_PERMISSIONS.consulta}><ConsultaSkuPage rows={rows} actividades={actividades}/></ProtectedRoute>}
-      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
-      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveDrive={onRequestSaveDrive} driveReady={hasSupabaseConnection(driveConnection)} saveDriveStatus={saveDriveStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} driveReady={hasSupabaseConnection(driveConnection)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
-      {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores}/></ProtectedRoute>}
+      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
+      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} supabaseReady={hasSupabaseConnection(supabaseSettings)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
+      {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} catalogos={catalogos} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
       {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios}/></ProtectedRoute>}
     </main>
     <MobileNav active={active} setActive={setActive}/>

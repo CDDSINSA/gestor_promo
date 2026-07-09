@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { Save, Plus } from "lucide-react";
 import { allPromoTypes as todosTipos } from "../promoTypes/promoTypeEngine";
 import { ALCANCE_TYPES } from "../constants";
@@ -88,9 +88,9 @@ export default function PromocionEspecialPage({
   onLoadSkuMaster,
   skuMasterFileInputRef,
   archivoComprador,
-  onSaveDrive,
-  driveReady,
-  saveDriveStatus,
+  onSaveSupabase,
+  supabaseReady,
+  saveSupabaseStatus,
   isSyncing,
   catalogos,
 }) {
@@ -324,9 +324,9 @@ export default function PromocionEspecialPage({
         onLoadSkuMaster={onLoadSkuMaster}
         skuMasterFileInputRef={skuMasterFileInputRef}
         archivoComprador={archivoComprador}
-        onSaveDrive={onSaveDrive}
-        driveReady={driveReady}
-        saveDriveStatus={saveDriveStatus}
+        onSaveSupabase={onSaveSupabase}
+        supabaseReady={supabaseReady}
+        saveSupabaseStatus={saveSupabaseStatus}
         isSyncing={isSyncing}
         activityContext={activityContext}
         initialComprador={draft.comprador}

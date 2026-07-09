@@ -1,6 +1,6 @@
-# SINSA Promo MVP
+﻿# SINSA Promo MVP
 
-Aplicacion React/Vite para gestion de promociones retail. El MVP conserva Excel como respaldo/exportacion y usa Supabase como persistencia principal operativa. La arquitectura mantiene la estructura Excel original para facilitar una migracion futura a base de datos corporativa o API interna.
+Aplicacion React/Vite para gestion de promociones retail. La app usa Supabase como unica base de datos operativa. Excel queda solo como respaldo, importacion/exportacion y compatibilidad con usuarios acostumbrados a trabajar archivos.
 
 ## Instalacion
 
@@ -69,11 +69,11 @@ El guardado hacia Supabase usa mutaciones incrementales:
 
 ## Flujo Excel de respaldo
 
-1. Cargar plantilla Excel desde Inicio.
+1. Cargar plantilla Excel desde Inicio solo cuando se requiera importar un respaldo.
 2. Revisar Consolidado.
 3. Crear/editar promociones.
 4. Agregar comentarios de Mercadeo.
-5. Guardar Excel actualizado.
+5. Exportar Excel actualizado solo como respaldo operativo.
 
 ## Modulos actuales
 

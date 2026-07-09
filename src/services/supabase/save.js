@@ -24,6 +24,8 @@ import { normalizeRole, ROLES } from "../../constants/permissions";
 export async function saveCatalogToSupabase(connection, data = {}) {
   const role = normalizeRole(connection.appUser?.rol || connection.role);
   const isAdmin = role === ROLES.ADMIN;
+  const isBuyer = role === ROLES.BUYER;
+  const currentBuyerId = cleanText(connection.appUser?.buyer_id || connection.buyer_id);
   const canWriteOperationalData = isAdmin || role === ROLES.BUYER;
   const canWriteComments = isAdmin || role === ROLES.BUYER || role === ROLES.MARK;
   if (!isAdmin && !canWriteOperationalData && !canWriteComments) {
@@ -76,9 +78,12 @@ export async function saveCatalogToSupabase(connection, data = {}) {
   const allCampanaRows = (data.actividades || [])
     .map((item) => toDbCampana(item, catalogosById, compradorByName))
     .filter((item) => item.legacy_actividad_id);
-  const campanaRowsToUpsert = canWriteOperationalData
-    ? (useActivityDiff ? allCampanaRows.filter((item) => changedActivityIds.has(item.legacy_actividad_id)) : allCampanaRows)
-    : [];
+  const changedCampanaRows = useActivityDiff ? allCampanaRows.filter((item) => changedActivityIds.has(item.legacy_actividad_id)) : allCampanaRows;
+  const campanaRowsToUpsert = isAdmin
+    ? changedCampanaRows
+    : isBuyer
+      ? changedCampanaRows.filter((item) => item.solicitante_buyer_id && cleanText(item.solicitante_buyer_id) === currentBuyerId)
+      : [];
   const upsertedCampanas = canWriteOperationalData ? await upsertRows(connection, "campanas", campanaRowsToUpsert, "legacy_actividad_id") : [];
   const campanas = canWriteOperationalData && !useActivityDiff
     ? upsertedCampanas
@@ -113,9 +118,12 @@ export async function saveCatalogToSupabase(connection, data = {}) {
   const allPromotionRows = (data.promociones || [])
     .map((item) => toDbPromocion(item, campanaByLegacy, compradorByName))
     .filter((item) => item.campana_id && item.buyer_id && item.sku);
-  const promotionRowsToUpsert = canWriteOperationalData
-    ? (usePromotionDiff ? allPromotionRows.filter((item) => changedPromotionIds.has(item.legacy_row_id)) : allPromotionRows)
-    : [];
+  const changedPromotionRows = usePromotionDiff ? allPromotionRows.filter((item) => changedPromotionIds.has(item.legacy_row_id)) : allPromotionRows;
+  const promotionRowsToUpsert = isAdmin
+    ? changedPromotionRows
+    : isBuyer
+      ? changedPromotionRows.filter((item) => item.buyer_id && cleanText(item.buyer_id) === currentBuyerId)
+      : [];
   const upsertedPromotions = canWriteOperationalData ? await upsertRows(connection, "promociones", promotionRowsToUpsert, "legacy_row_id") : [];
   const detalleSourceRows = usePromotionDiff
     ? (data.promociones_detalle || []).filter((item) => changedPromotionIds.has(cleanText(item.row_id || item.rowId)))
@@ -208,7 +216,11 @@ export async function saveCatalogToSupabase(connection, data = {}) {
   const avanceRows = useAvanceDiff
     ? (data.avances_catalogo || []).filter((item) => changedAvanceIds.has(cleanText(item.avance_id || item.avanceId || item.id)))
     : data.avances_catalogo || [];
-  if (canWriteOperationalData) await upsertRows(connection, "avances_catalogo", avanceRows.map((item) => ({
+  const avanceRowsToUpsert = isAdmin ? avanceRows : isBuyer ? avanceRows.filter((item) => {
+    const buyerName = cleanText(item.comprador);
+    return compradorByName[buyerName]?.id && cleanText(compradorByName[buyerName].id) === currentBuyerId;
+  }) : [];
+  if (canWriteOperationalData) await upsertRows(connection, "avances_catalogo", avanceRowsToUpsert.map((item) => ({
     avance_id: cleanText(item.avance_id),
     campana_id: campanaByLegacy[cleanText(item.catalogo_id)]?.id || null,
     catalogo_id: cleanText(item.catalogo_id),
@@ -222,26 +234,32 @@ export async function saveCatalogToSupabase(connection, data = {}) {
     usuario: cleanText(item.usuario),
   })).filter((item) => item.avance_id), "avance_id");
 
-  const existingLogs = canWriteOperationalData ? (useLogDiff
-    ? await selectRowsByValues(connection, "logs", "request_id", logSourceRows.map((item) => item.log_id || item.logId || item.id), "request_id")
-    : await selectAll(connection, "logs", { select: "request_id" })) : [];
-  const existingRequestIds = new Set(existingLogs.map((item) => item.request_id).filter(Boolean));
-  if (canWriteOperationalData) await upsertRows(connection, "logs", logSourceRows.filter((item) => !existingRequestIds.has(cleanText(item.log_id))).map((item) => {
-    const promo = promoByLegacy[cleanText(item.row_id)];
-    return {
-      usuario: cleanText(item.usuario),
-      entidad: "PROMOCIONES",
-      campana_id: promo?.campana_id || campanaByLegacy[cleanText(item.catalogo)]?.id || null,
-      promocion_id: promo?.id || null,
-      accion: cleanText(item.accion),
-      campo: cleanText(item.campo),
-      valor_anterior: cleanText(item.valor_anterior),
-      valor_nuevo: cleanText(item.valor_nuevo),
-      request_id: cleanText(item.log_id),
-      created_at: normalizeTimestamp(item.fecha) || new Date().toISOString(),
-      fecha_cierre: normalizeTimestamp(item.fecha_cierre),
-    };
-  }).filter((item) => item.accion), null);
+  if (canWriteOperationalData) {
+    try {
+      const existingLogs = isAdmin ? (useLogDiff
+        ? await selectRowsByValues(connection, "logs", "request_id", logSourceRows.map((item) => item.log_id || item.logId || item.id), "request_id")
+        : await selectAll(connection, "logs", { select: "request_id" })) : [];
+      const existingRequestIds = new Set(existingLogs.map((item) => item.request_id).filter(Boolean));
+      await upsertRows(connection, "logs", logSourceRows.filter((item) => !existingRequestIds.has(cleanText(item.log_id))).map((item) => {
+        const promo = promoByLegacy[cleanText(item.row_id)];
+        return {
+          usuario: cleanText(item.usuario),
+          entidad: "PROMOCIONES",
+          campana_id: promo?.campana_id || campanaByLegacy[cleanText(item.catalogo)]?.id || null,
+          promocion_id: promo?.id || null,
+          accion: cleanText(item.accion),
+          campo: cleanText(item.campo),
+          valor_anterior: cleanText(item.valor_anterior),
+          valor_nuevo: cleanText(item.valor_nuevo),
+          request_id: cleanText(item.log_id),
+          created_at: normalizeTimestamp(item.fecha) || new Date().toISOString(),
+          fecha_cierre: normalizeTimestamp(item.fecha_cierre),
+        };
+      }).filter((item) => item.accion), null);
+    } catch {
+      // El log no debe impedir que se guarden las promociones.
+    }
+  }
 
   if (returnMode === "delta") {
     return {

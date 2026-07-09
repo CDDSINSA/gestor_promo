@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import { Plus, Save, Search, FileSpreadsheet, Trash2 } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
 import { SUPABASE_PROJECT_URL } from "../services/supabaseService";
@@ -38,14 +38,14 @@ export default function AjustesPage({
   setCatalogos,
   compradores,
   setCompradores,
-  driveConnection,
-  setDriveConnection,
-  onSaveDriveSettings,
+  supabaseSettings,
+  setSupabaseSettings,
+  onSaveSupabaseSettings,
   onSaveCatalogSettings,
   onDeleteCatalogo,
-  onTestDriveConnection,
-  onSetupDriveWorkbook,
-  driveStatus,
+  onTestSupabaseConnection,
+  onValidateSupabaseSession,
+  supabaseStatus,
   isSyncing,
 }) {
   const [selectedId, setSelectedId] = useState(catalogos[0]?.id);
@@ -118,7 +118,7 @@ export default function AjustesPage({
     setSelectedId(nextId);
   };
 
-  const updateDrive = (field, value) => setDriveConnection((prev) => ({ ...prev, [field]: value }));
+  const updateSupabase = (field, value) => setSupabaseSettings((prev) => ({ ...prev, [field]: value }));
 
   const addComprador = () => {
     const nombre = `Nuevo comprador ${compradores.length + 1}`;
@@ -160,24 +160,24 @@ export default function AjustesPage({
         <div className="toolbar">
           <h2>Configuracion general</h2>
           <div className="toolbar-actions">
-            <Button className="settings-btn-save" onClick={onSaveDriveSettings} disabled={isSyncing}><Save size={16}/> Guardar conexion</Button>
-            <Button className="settings-btn-test" variant="outline" onClick={onTestDriveConnection} disabled={isSyncing}><Search size={16}/> Probar</Button>
-            <Button className="settings-btn-validate" variant="outline" onClick={onSetupDriveWorkbook} disabled={isSyncing}><FileSpreadsheet size={16}/> Validar sesion</Button>
+            <Button className="settings-btn-save" onClick={onSaveSupabaseSettings} disabled={isSyncing}><Save size={16}/> Guardar conexion</Button>
+            <Button className="settings-btn-test" variant="outline" onClick={onTestSupabaseConnection} disabled={isSyncing}><Search size={16}/> Probar</Button>
+            <Button className="settings-btn-validate" variant="outline" onClick={onValidateSupabaseSession} disabled={isSyncing}><FileSpreadsheet size={16}/> Validar sesion</Button>
           </div>
         </div>
         <div className="connection-panel">
           <div>
             <strong>Conexion Supabase</strong>
             <span>{SUPABASE_PROJECT_URL}</span>
-            <p>{driveStatus?.message || "Configure Supabase para operar con la sesion del usuario actual."}</p>
+            <p>{supabaseStatus?.message || "Configure Supabase para operar con la sesion del usuario actual."}</p>
           </div>
           <label className="field wide">
             <span>URL Supabase</span>
-            <input value={driveConnection.url || ""} onChange={(e) => updateDrive("url", e.target.value)} placeholder="https://hanvbbezofcengyorooc.supabase.co" />
+            <input value={supabaseSettings.url || ""} onChange={(e) => updateSupabase("url", e.target.value)} placeholder="https://hanvbbezofcengyorooc.supabase.co" />
           </label>
           <label className="field">
             <span>Anon key</span>
-            <input type="password" value={driveConnection.anonKey || ""} onChange={(e) => updateDrive("anonKey", e.target.value)} placeholder="sb_publishable_..." />
+            <input type="password" value={supabaseSettings.anonKey || ""} onChange={(e) => updateSupabase("anonKey", e.target.value)} placeholder="sb_publishable_..." />
           </label>
         </div>
       </CardContent>

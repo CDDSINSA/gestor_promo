@@ -7,6 +7,7 @@ import {
   ListChecks,
   MessageSquare,
   Plus,
+  Save,
   Search,
   X,
 } from "lucide-react";
@@ -52,10 +53,11 @@ function Metric({ title, value, icon: Icon }) {
   return <Card><CardContent className="metric"><div><p>{title}</p><strong>{value}</strong></div><div className="metric-icon"><Icon size={20}/></div></CardContent></Card>;
 }
 
-export default function ConsolidadoPage({ rows, actividades = [], comentarios, setComentarios, compradores }) {
+export default function ConsolidadoPage({ rows, actividades = [], catalogos = [], comentarios, setComentarios, compradores, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
   const { can } = usePermissions();
   const canManageComments = can(PERMISSIONS.MANAGE_MARKETING_COMMENTS);
   const canExport = can(PERMISSIONS.EXPORT_CONSOLIDADO);
+  const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
   const [compradorFiltro, setCompradorFiltro] = useState("Todos");
   const [tipoFiltro, setTipoFiltro] = useState("Todos");
   const [tipoActividadFiltro, setTipoActividadFiltro] = useState("Todos");
@@ -64,6 +66,7 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
   const [estadoComentarioFiltro, setEstadoComentarioFiltro] = useState("Todos");
   const [skuFiltro, setSkuFiltro] = useState("");
   const [actividadCatalogoFiltro, setActividadCatalogoFiltro] = useState("");
+  const [activityCatalogOpen, setActivityCatalogOpen] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState(null);
   const [commentDrafts, setCommentDrafts] = useState({});
 
@@ -75,8 +78,48 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
     [actividades],
   );
 
+  const activityCatalogOptions = useMemo(() => {
+    const catalogNameById = new Map((catalogos || []).map((catalogo) => [
+      String(catalogo.catalogo_id || catalogo.id || ""),
+      catalogo.nombre || catalogo.nombre_actividad || "",
+    ]));
+    const optionsById = new Map();
+    (actividades || []).forEach((item) => {
+      const activity = normalizeActividad(item);
+      const id = activity.actividad_id;
+      const displayName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || catalogNameById.get(String(id)) || "";
+      if (!id || !displayName) return;
+      optionsById.set(id, {
+        id,
+        displayName,
+      });
+    });
+    rows.forEach((row) => {
+      const id = row.actividadId || row.actividad_id || row.catalogo_id || "";
+      if (!id || optionsById.has(id)) return;
+      const activity = activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
+      const displayName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || catalogNameById.get(String(id)) || "";
+      if (!displayName) return;
+      optionsById.set(id, {
+        id,
+        displayName,
+      });
+    });
+    return Array.from(optionsById.values()).sort((left, right) => left.displayName.localeCompare(right.displayName));
+  }, [actividades, activityMap, catalogos, rows]);
+
+  const filteredActivityCatalogOptions = useMemo(() => {
+    const term = normalizeCanal(actividadCatalogoFiltro);
+    const source = term
+      ? activityCatalogOptions.filter((item) => normalizeCanal(item.displayName).includes(term))
+      : activityCatalogOptions;
+    return source.slice(0, 8);
+  }, [actividadCatalogoFiltro, activityCatalogOptions]);
+
   const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
+  const getOfferId = (row) => row.ofertaId || row.oferta_id || "";
+  const compareText = (left, right) => String(left || "").localeCompare(String(right || ""), "es", { numeric: true, sensitivity: "base" });
   const getComentariosRow = (rowId) => comentarios.filter((c) => isLineComment(c) && (c.rowId || c.row_id) === rowId);
   const getActivityComments = (activityId) => comentarios.filter((c) => isActivityComment(c) && (c.actividadId || c.actividad_id) === activityId);
 
@@ -151,9 +194,19 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
         || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)
         || (appliedFilters.estadoComentario === "Resueltos" && tieneResuelto)
         || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
+  }).sort((left, right) => {
+    const leftActivity = getActivity(left);
+    const rightActivity = getActivity(right);
+    const leftActivityLabel = leftActivity.nombre_actividad || leftActivity.nombreActividad || leftActivity.nombre || getActivityId(left);
+    const rightActivityLabel = rightActivity.nombre_actividad || rightActivity.nombreActividad || rightActivity.nombre || getActivityId(right);
+    return compareText(leftActivityLabel, rightActivityLabel)
+      || compareText(getOfferId(left), getOfferId(right))
+      || compareText(left.sku, right.sku)
+      || compareText(left.id || left.row_id || left.rowId, right.id || right.row_id || right.rowId);
   }) : [];
 
   const visibleActivityIds = new Set(rowsFiltradas.map(getActivityId).filter(Boolean));
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
   const generalComments = appliedFilters
     ? comentarios.filter((comment) => isActivityComment(comment) && visibleActivityIds.has(comment.actividadId || comment.actividad_id))
     : [];
@@ -177,9 +230,9 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
 
   const toggleComentario = (id) => setComentarios((prev) => prev.map((c) => ((c.id || c.comentario_id) === id ? { ...c, estado: String(c.estado).toLowerCase() === "abierto" ? "Resuelto" : "Abierto" } : c)));
 
-  const csvColumns = [
+  const exportColumns = [
     ["Actividad", (row, activity) => row.actividadId || row.actividad_id || row.catalogo_id],
-    ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""],
+    ["Oferta ID", (row) => getOfferId(row)],
     ["Tipo actividad", (row, activity) => activity.tipo_actividad || "CATALOGO"],
     ["Canal", (row, activity) => activity.canal || ""],
     ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""],
@@ -200,26 +253,20 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
     ["Comentarios linea", (row) => getComentariosRow(row.id).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
   ];
 
-  const escapeCsv = (value) => {
-    const text = String(value ?? "").replace(/\r?\n/g, " ");
-    return /[;"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-
-  const exportCsv = () => {
-    const lines = [
-      csvColumns.map(([label]) => escapeCsv(label)).join(";"),
+  const exportXlsx = async () => {
+    const XLSX = await import("xlsx");
+    const sheetRows = [
+      exportColumns.map(([label]) => label),
       ...rowsFiltradas.map((row) => {
         const activity = getActivity(row);
-        return csvColumns.map(([, getter]) => escapeCsv(getter(row, activity))).join(";");
+        return exportColumns.map(([, getter]) => getter(row, activity));
       }),
     ];
-    const blob = new Blob([`\ufeff${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `consolidado_promociones_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Consolidado");
+    XLSX.writeFile(workbook, `consolidado_promociones_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const generalCommentsPanel = appliedFilters && generalComments.length ? (
@@ -270,12 +317,13 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
                 <div className="toolbar-actions">
                   <Button variant="outline" onClick={applyFilters}><Search size={16}/> Buscar</Button>
                   <Button variant="outline" onClick={clearFilters}><X size={16}/> Limpiar</Button>
-                  {canExport && <Button variant="outline" onClick={exportCsv} disabled={!rowsFiltradas.length}><Download size={16}/> Exportar CSV</Button>}
+                  {canExport && <Button variant="outline" onClick={exportXlsx} disabled={!rowsFiltradas.length}><Download size={16}/> Exportar XLSX</Button>}
+                  {canManageComments && canSyncSupabase && <Button onClick={onSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}
                 </div>
               </div>
               <div className="filter-grid">
                 <label className="filter-field"><span>SKU</span><input value={skuFiltro} onChange={(e) => setSkuFiltro(e.target.value)} placeholder="Buscar SKU" /></label>
-                <label className="filter-field"><span>Actividad / catálogo</span><input value={actividadCatalogoFiltro} onChange={(e) => setActividadCatalogoFiltro(e.target.value)} placeholder="ID o nombre" /></label>
+                <label className="filter-field activity-combobox"><span>Actividad / catálogo</span><input value={actividadCatalogoFiltro} onFocus={() => setActivityCatalogOpen(true)} onBlur={() => window.setTimeout(() => setActivityCatalogOpen(false), 120)} onChange={(e) => { setActividadCatalogoFiltro(e.target.value); setActivityCatalogOpen(true); }} placeholder="Nombre de actividad o catálogo" autoComplete="off" />{activityCatalogOpen && filteredActivityCatalogOptions.length > 0 && <div className="activity-combobox-list" role="listbox">{filteredActivityCatalogOptions.map((item) => <button key={item.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setActividadCatalogoFiltro(item.displayName); setActivityCatalogOpen(false); }} role="option">{item.displayName}</button>)}</div>}</label>
                 <label className="filter-field"><span>Comprador</span><select value={compradorFiltro} onChange={(e) => setCompradorFiltro(e.target.value)}>{compradoresUnicos.map((item) => <option key={item}>{item}</option>)}</select></label>
                 <label className="filter-field"><span>Tipo actividad</span><select value={tipoActividadFiltro} onChange={(e) => setTipoActividadFiltro(e.target.value)}>{tiposActividad.map((item) => <option key={item}>{item}</option>)}</select></label>
                 <label className="filter-field"><span>Canal</span><select value={canalFiltro} onChange={(e) => setCanalFiltro(e.target.value)}>{canales.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -308,7 +356,7 @@ export default function ConsolidadoPage({ rows, actividades = [], comentarios, s
                     return (
                       <tr key={row.id} className={abiertos ? "row-warning" : ""}>
                         <td><b>{activityId}</b>{comentariosActividad.length > 0 && <small className="activity-comment-badge">{comentariosActividad.length} general</small>}</td>
-                        <td>{row.ofertaId || row.oferta_id || ""}</td>
+                        <td>{getOfferId(row)}</td>
                         <td><span className={activity.tipo_actividad === "ESPECIAL" ? "pill yellow" : "pill green"}>{activity.tipo_actividad || "CATALOGO"}</span></td>
                         <td>{activity.canal || ""}</td>
                         <td>{row.alcanceTipo || row.alcance_tipo || ""}</td>

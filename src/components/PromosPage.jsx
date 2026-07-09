@@ -23,13 +23,15 @@ import {
 import {
   BULK_COLUMN_BUY_X_GET_X_TABLE,
   BULK_COLUMN_COMBO_TABLE,
+  BULK_COLUMN_MEGAPACK_TABLE,
   BULK_COLUMN_UMBRAL_TABLE,
   BUY_X_GET_X_PROMO_TYPE,
   BUY_X_GET_X_PROMO_TYPES,
   BUY_X_GET_X_V2_PROMO_TYPE,
   MAX_UMBRAL_LEVELS,
+  MEGAPACK_PROMO_TYPE,
 } from "../constants";
-import { usePromoFilters } from "../hooks/usePromoFilters";
+import { getPromoRowActivityId, getPromoRowBuyer, usePromoFilters } from "../hooks/usePromoFilters";
 import { usePromoForm } from "../hooks/usePromoForm";
 import { usePromos } from "../hooks/usePromos";
 import { PERMISSIONS } from "../constants/permissions";
@@ -94,6 +96,7 @@ function getPromoTemplateConfig(promoType) {
   if (promoType === "Combo") return { sheetName: "COMBO", bulkColumn: BULK_COLUMN_COMBO_TABLE, mode: "combo" };
   if (promoType === "Umbral") return { sheetName: "UMBRAL", bulkColumn: BULK_COLUMN_UMBRAL_TABLE, mode: "raw" };
   if (BUY_X_GET_X_PROMO_TYPES.includes(promoType)) return { sheetName: "COMPRA_X_LLEVA_X", bulkColumn: BULK_COLUMN_BUY_X_GET_X_TABLE, mode: "buyxgetx" };
+  if (promoType === MEGAPACK_PROMO_TYPE) return { sheetName: "MEGAPACK", bulkColumn: BULK_COLUMN_MEGAPACK_TABLE, mode: "megapack" };
   return { sheetName: normalizeCanal(promoType).toUpperCase(), bulkColumn: "sku", mode: "raw" };
 }
 
@@ -131,6 +134,24 @@ function normalizeTemplateSheetRows(rows, config) {
     const priceIndex = findTemplateColumn(header, ["ahora c/iva", "ahora c iva", "ahora con iva", "precio ahora", "precio_ahora"], 2);
     const discountIndex = findTemplateColumn(header, ["descuento", "desc"], 3);
     return [["sku", "variante", "ahora c IVA", "descuento"], ...dataRows.map((row) => [row[skuIndex] || "", row[variantIndex] || "", row[priceIndex] || "", row[discountIndex] || ""])];
+  }
+  if (config.mode === "megapack") {
+    const principalSkuIndex = findTemplateColumn(header, ["sku principal", "sku_principal", "principal"], 0);
+    const principalQtyIndex = findTemplateColumn(header, ["cant principal", "cantidad principal", "cantidad compra", "cant"], 1);
+    const commentIndex = findTemplateColumn(header, ["comentario", "comentarios", "comment"], header.length - 1);
+    return [["Sku principal", "Cant", "Sku2", "Cant", "Sku3", "Cant", "Sku4", "Cant", "Sku5", "Cant", "Comentario"], ...dataRows.map((row) => [
+      row[principalSkuIndex] || "",
+      row[principalQtyIndex] || "",
+      row[2] || "",
+      row[3] || "",
+      row[4] || "",
+      row[5] || "",
+      row[6] || "",
+      row[7] || "",
+      row[8] || "",
+      row[9] || "",
+      commentIndex >= 0 ? row[commentIndex] || "" : "",
+    ])];
   }
   return nonEmptyRows;
 }
@@ -320,6 +341,50 @@ function buildBuyXGetXBulkPreview(text, skuMaster = {}, promoType = BUY_X_GET_X_
   return preview;
 }
 
+function parseMegapackQuantity(value) {
+  const parsed = Number(normalizePastedNumber(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function buildMegapackBulkPreview(text, skuMaster = {}) {
+  const pastedRows = parseClipboardRows(text);
+  if (pastedRows.length < 2) return [];
+  const preview = [];
+  pastedRows.slice(1).forEach((cells) => {
+    const principalSku = normalizeValue(cells[0]);
+    const principalQty = parseMegapackQuantity(cells[1]);
+    const comentario = normalizeValue(cells[10]);
+    const rewards = [2, 4, 6, 8]
+      .map((skuIndex) => ({
+        sku: normalizeValue(cells[skuIndex]),
+        quantity: parseMegapackQuantity(cells[skuIndex + 1]),
+      }))
+      .filter((item) => item.sku || item.quantity);
+    if (!principalSku && !principalQty && !rewards.length && !comentario) return;
+    const principalMaster = skuMaster[principalSku] || {};
+    const validRewards = rewards.filter((item) => item.sku && item.quantity > 0);
+    const missingRewardMaster = validRewards.some((item) => !skuMaster[item.sku]?.descripcion);
+    const rewardSummary = validRewards.map((item) => `${item.quantity} x ${item.sku}`).join(" | ");
+    const warning = !principalSku || !principalQty || !validRewards.length || !principalMaster.descripcion || missingRewardMaster;
+    preview.push({
+      index: preview.length + 1,
+      sku: principalSku || "SKU principal vacio",
+      descripcion: `${principalMaster.descripcion || "SKU principal no encontrado en archivo comprador"} | Regalías: ${rewardSummary || "sin regalías válidas"}`,
+      campo: MEGAPACK_PROMO_TYPE,
+      valorActual: "",
+      valorNuevo: `Compra ${principalQty || "?"} | Obsequia ${rewardSummary || "?"}`,
+      principalSku,
+      principalQty,
+      rewards: validRewards,
+      comentario,
+      warning,
+      canApply: Boolean(principalSku && principalQty && validRewards.length),
+    });
+  });
+  if (!preview.some((item) => item.canApply)) preview.push({ index: "Aviso", sku: "Sin megapack", descripcion: "Pegue columnas: Sku principal, Cant, Sku2, Cant, Sku3, Cant, Sku4, Cant, Sku5, Cant.", campo: "Formato", valorActual: "", valorNuevo: "Sin filas para aplicar", warning: true, canApply: false });
+  return preview;
+}
+
 function toAppRow(row) {
   const segmentValue = row.segmentoCliente || row.segmento_cliente || row.segmento || "";
   const aplicaSegmento = isSegmentedRow({ ...row, segmento: segmentValue }) ? "SI" : "NO";
@@ -396,11 +461,49 @@ function renderCell(row, col, updateRow, warning, segmentOptions = []) {
   return <input value={row[col] || ""} onChange={(e) => updateRow(row.id, col, e.target.value)} />;
 }
 
-export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, onLoadSkuMaster, skuMasterFileInputRef, archivoComprador, onSaveDrive, driveReady, saveDriveStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
+function hasPromoValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function hasPriceOrDiscount(row) {
+  return hasPromoValue(row.precioAhora) || hasPromoValue(row.precio_ahora) || hasPromoValue(row.descuento);
+}
+
+function getRowPromoType(row) {
+  return row.tipoPromo || row.tipo_promo || "";
+}
+
+function getRowGroup(row) {
+  return normalizeValue(row.grupoOferta || row.grupo_oferta);
+}
+
+function isIncompleteSimpleRow(row) {
+  const promoType = getRowPromoType(row);
+  return normalizeValue(row.sku) && !isComplexPromoType(promoType) && !hasPriceOrDiscount(row);
+}
+
+function getIncompleteComboGroups(rowList = []) {
+  const groups = new Map();
+  rowList.filter((row) => getRowPromoType(row) === "Combo").forEach((row) => {
+    const group = getRowGroup(row);
+    const key = group || `Sin grupo (${row.sku || row.id || "fila"})`;
+    const current = groups.get(key) || { group: key, principals: 0, rewards: 0, blankSku: 0, rows: 0 };
+    const role = normalizeCanal(row.tipoSku || row.tipo_sku);
+    current.rows += 1;
+    if (!normalizeValue(row.sku)) current.blankSku += 1;
+    if (role === "principal") current.principals += 1;
+    if (isComboRewardRole(role)) current.rewards += 1;
+    groups.set(key, current);
+  });
+  return Array.from(groups.values()).filter((group) => !group.principals || !group.rewards || group.blankSku);
+}
+
+export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, onLoadSkuMaster, skuMasterFileInputRef, archivoComprador, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
   const { can } = usePermissions();
   const canEditPromos = can(PERMISSIONS.EDIT_PROMOS);
   const canEditAvances = can(PERMISSIONS.EDIT_AVANCES);
   const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
+  const [saveWarning, setSaveWarning] = React.useState(null);
   const {
     comprador,
     setComprador,
@@ -436,6 +539,10 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const currentActivityId = activityContext?.actividad_id || catalogoActivo?.actividad_id || catalogoActivo?.actividadId || catalogoActivo?.id || catalogoActivo?.catalogo_id || "";
   const currentActivityName = activityContext?.nombre_actividad || catalogoActivo?.nombre || "Sin catalogo";
   const currentCatalogoAvanceId = getCatalogoAvanceId(activityContext || catalogoActivo) || currentActivityId;
+  const currentBuyerRows = useMemo(() => rows.filter((row) => {
+    if (!compradorSeleccionado || !currentActivityId) return false;
+    return getPromoRowActivityId(row) === currentActivityId && getPromoRowBuyer(row) === comprador;
+  }), [rows, compradorSeleccionado, currentActivityId, comprador]);
   const selectedBuyerConfig = compradores.find((buyer) => getCompradorNombre(buyer) === comprador);
   const hierarchyByDepId = useMemo(() => new Map((jerarquiaCategorias || []).filter((item) => item.activo !== false && item.dep_id).map((item) => [normalizeCanal(item.dep_id), item])), [jerarquiaCategorias]);
   const getMasterDivision = (master, fallback = "") => hierarchyByDepId.get(normalizeCanal(master?.dep_id || master?.dept))?.division || fallback;
@@ -643,9 +750,10 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       if (tipoActivo === "Umbral") { setBulkColumn(BULK_COLUMN_UMBRAL_TABLE); setBulkText(text); setBulkPreview(buildUmbralBulkPreview(text, skuMaster)); return; }
       if (tipoActivo === "Combo") { setBulkColumn(BULK_COLUMN_COMBO_TABLE); setBulkText(text); setBulkPreview(buildComboBulkPreview(text, skuMaster)); return; }
       if (BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo)) { setBulkColumn(BULK_COLUMN_BUY_X_GET_X_TABLE); setBulkText(text); setBulkPreview(buildBuyXGetXBulkPreview(text, skuMaster, tipoActivo)); return; }
+      if (tipoActivo === MEGAPACK_PROMO_TYPE) { setBulkColumn(BULK_COLUMN_MEGAPACK_TABLE); setBulkText(text); setBulkPreview(buildMegapackBulkPreview(text, skuMaster)); return; }
       parseClipboardValues(text).forEach(addRow);
     } catch {
-      setBulkColumn(tipoActivo === "Umbral" ? BULK_COLUMN_UMBRAL_TABLE : tipoActivo === "Combo" ? BULK_COLUMN_COMBO_TABLE : BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? BULK_COLUMN_BUY_X_GET_X_TABLE : tipoActivo === "Precio fijo" ? "precioAhora" : tipoActivo === "Descuento" ? "descuento" : "sku");
+      setBulkColumn(tipoActivo === "Umbral" ? BULK_COLUMN_UMBRAL_TABLE : tipoActivo === "Combo" ? BULK_COLUMN_COMBO_TABLE : BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? BULK_COLUMN_BUY_X_GET_X_TABLE : tipoActivo === MEGAPACK_PROMO_TYPE ? BULK_COLUMN_MEGAPACK_TABLE : tipoActivo === "Precio fijo" ? "precioAhora" : tipoActivo === "Descuento" ? "descuento" : "sku");
     }
   };
   const changeBulkColumn = (value) => { setBulkColumn(value); setBulkPreview([]); };
@@ -655,15 +763,17 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     if (value === "Umbral") setBulkColumn(BULK_COLUMN_UMBRAL_TABLE);
     else if (value === "Combo") setBulkColumn(BULK_COLUMN_COMBO_TABLE);
     else if (BUY_X_GET_X_PROMO_TYPES.includes(value)) setBulkColumn(BULK_COLUMN_BUY_X_GET_X_TABLE);
+    else if (value === MEGAPACK_PROMO_TYPE) setBulkColumn(BULK_COLUMN_MEGAPACK_TABLE);
     else if (value === "Precio fijo") setBulkColumn("precioAhora");
     else if (value === "Descuento") setBulkColumn("descuento");
-    else if ([BULK_COLUMN_UMBRAL_TABLE, BULK_COLUMN_COMBO_TABLE, BULK_COLUMN_BUY_X_GET_X_TABLE].includes(bulkColumn)) setBulkColumn("sku");
+    else if ([BULK_COLUMN_UMBRAL_TABLE, BULK_COLUMN_COMBO_TABLE, BULK_COLUMN_BUY_X_GET_X_TABLE, BULK_COLUMN_MEGAPACK_TABLE].includes(bulkColumn)) setBulkColumn("sku");
   };
   const buildBulkPreviewItems = (text = bulkText, column = bulkColumn) => {
     const pastedRows = parseClipboardRows(text); if (!pastedRows.length) return [];
     if (column === BULK_COLUMN_UMBRAL_TABLE) return buildUmbralBulkPreview(text, skuMaster);
     if (column === BULK_COLUMN_COMBO_TABLE) return buildComboBulkPreview(text, skuMaster);
     if (column === BULK_COLUMN_BUY_X_GET_X_TABLE) return buildBuyXGetXBulkPreview(text, skuMaster, tipoActivo);
+    if (column === BULK_COLUMN_MEGAPACK_TABLE) return buildMegapackBulkPreview(text, skuMaster);
     const numericRows = pastedRows.filter((cells) => isNumericSku(cells[0]));
     if (column === "sku") return numericRows.map((cells, index) => { const value = cells[0]; return { index:index+1, rowId:null, sku:value, descripcion:(skuMaster || {})[value]?.descripcion || "SKU no encontrado en archivo comprador", campo:"Nuevo SKU", valorActual:"", valorNuevo:value, warning:!value || !(skuMaster || {})[value] }; });
     const simpleRequiredPaste = column === (tipoActivo === "Precio fijo" ? "precioAhora" : tipoActivo === "Descuento" ? "descuento" : "");
@@ -770,6 +880,25 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       setBulkPreview([]);
       return;
     }
+    if (bulkColumn === BULK_COLUMN_MEGAPACK_TABLE) {
+      const applicableItems = bulkPreview.filter((item) => item.canApply !== false);
+      const newRows = [];
+      applicableItems.forEach((item) => {
+        const group = createGroupForCurrentActivity(MEGAPACK_PROMO_TYPE, [...rows, ...newRows]);
+        const baseComment = [`Megapack: compra ${item.principalQty}`, item.comentario].filter(Boolean).join(" | ");
+        newRows.push(buildPromoRow({ sku: item.principalSku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, comentario: baseComment }));
+        item.rewards.forEach((reward) => {
+          const rewardComment = [`Megapack: obsequio ${reward.quantity}`, item.comentario].filter(Boolean).join(" | ");
+          newRows.push(buildPromoRow({ sku: reward.sku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "regalia", tipoCantidad: "Exacta", cantidadMinima: reward.quantity, precioAhora: 0, descuento: "100%", comentario: rewardComment }));
+        });
+      });
+      if (!newRows.length) return;
+      setRows((prev) => [...prev, ...newRows]);
+      pushLog(`Pegó ${newRows.length} filas de ${MEGAPACK_PROMO_TYPE} para ${applicableItems.length} megapack`);
+      setBulkText("");
+      setBulkPreview([]);
+      return;
+    }
     if (isSimpleRequiredValuePaste) {
       const applicableItems = bulkPreview.filter((item) => item.canApply !== false && isNumericSku(item.sku));
       if (!applicableItems.length) return;
@@ -817,8 +946,9 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const isUmbralTablePaste = bulkColumn === BULK_COLUMN_UMBRAL_TABLE;
   const isComboTablePaste = bulkColumn === BULK_COLUMN_COMBO_TABLE;
   const isBuyXGetXTablePaste = bulkColumn === BULK_COLUMN_BUY_X_GET_X_TABLE;
-  const bulkInstructions = isBuyXGetXTablePaste ? (tipoActivo === BUY_X_GET_X_V2_PROMO_TYPE ? "Pegue una tabla con columnas: SKU, variante, ahora c IVA y descuento. V2 conserva una sola fila por SKU y registra las cantidades en comentario." : "Pegue una tabla con columnas: SKU, variante, ahora c IVA y descuento. La variante AxB crea principal con la cantidad menor y regalia con la diferencia.") : isComboTablePaste ? "Pegue una tabla con columnas: Tipo, Sku, Ahora con iva y descuento. Se crea un combo nuevo cuando una fila Principal viene despues de una Regalia. La cantidad se crea en 1 y puede ajustarse manualmente." : isUmbralTablePaste ? `Pegue una tabla con primera columna SKU y hasta ${MAX_UMBRAL_LEVELS} umbrales. Use % para descuento o numero para precio fijo.` : isSimpleRequiredValuePaste ? `Pegue dos columnas desde Excel: SKU y ${labels[bulkColumn]}. Si el SKU no existe, se crea; si ya existe, se actualiza.` : bulkColumn === "sku" ? "Pegue una columna de SKU para agregar filas nuevas." : `Pegue dos columnas desde Excel: SKU y ${labels[bulkColumn]}.`;
-  const bulkPlaceholder = isBuyXGetXTablePaste ? "sku\tvariante\tahora c IVA\tdescuento\n147072842\t4x3\t982\t\n139760160\t5x3\t543\t\n10081749\t5x4\t\t15%\n10081802\t15x12\t\t20%" : isComboTablePaste ? "Tipo\tSku\tAhora con iva\tdescuento\nPrincipal\t152737466\t200\t\nRegalia\t152736551\t\t100%\nPrincipal\t156890097\t789\t\nRegalia\t156890396\t\t100%" : isUmbralTablePaste ? "Sku\t1 a mas\t20 a mas\t30 a mas\t50 a mas\n103163662\t5%\t10%\t15%\t25%" : bulkColumn === "sku" ? "Pegue aqui una columna de SKU copiada desde Excel" : `Pegue aqui dos columnas: SKU y ${labels[bulkColumn]}`;
+  const isMegapackTablePaste = bulkColumn === BULK_COLUMN_MEGAPACK_TABLE;
+  const bulkInstructions = isMegapackTablePaste ? "Pegue una tabla con columnas: Sku principal, Cant, Sku2, Cant, Sku3, Cant, Sku4, Cant, Sku5, Cant. Se crea una fila principal y las regalías al 100%." : isBuyXGetXTablePaste ? (tipoActivo === BUY_X_GET_X_V2_PROMO_TYPE ? "Pegue una tabla con columnas: SKU, variante, ahora c IVA y descuento. V2 conserva una sola fila por SKU y registra las cantidades en comentario." : "Pegue una tabla con columnas: SKU, variante, ahora c IVA y descuento. La variante AxB crea principal con la cantidad menor y regalia con la diferencia.") : isComboTablePaste ? "Pegue una tabla con columnas: Tipo, Sku, Ahora con iva y descuento. Se crea un combo nuevo cuando una fila Principal viene despues de una Regalia. La cantidad se crea en 1 y puede ajustarse manualmente." : isUmbralTablePaste ? `Pegue una tabla con primera columna SKU y hasta ${MAX_UMBRAL_LEVELS} umbrales. Use % para descuento o numero para precio fijo.` : isSimpleRequiredValuePaste ? `Pegue dos columnas desde Excel: SKU y ${labels[bulkColumn]}. Si el SKU no existe, se crea; si ya existe, se actualiza.` : bulkColumn === "sku" ? "Pegue una columna de SKU para agregar filas nuevas." : `Pegue dos columnas desde Excel: SKU y ${labels[bulkColumn]}.`;
+  const bulkPlaceholder = isMegapackTablePaste ? "Sku principal\tCant\tSku2\tCant\tSku3\tCant\tSku4\tCant\tSku5\tCant\tComentario\nSKU_X\t25\tSKU_X\t5\tSKU_Y\t5\tSKU_Z\t5\tSKU_W\t2\tMegapack ejemplo" : isBuyXGetXTablePaste ? "sku\tvariante\tahora c IVA\tdescuento\n147072842\t4x3\t982\t\n139760160\t5x3\t543\t\n10081749\t5x4\t\t15%\n10081802\t15x12\t\t20%" : isComboTablePaste ? "Tipo\tSku\tAhora con iva\tdescuento\nPrincipal\t152737466\t200\t\nRegalia\t152736551\t\t100%\nPrincipal\t156890097\t789\t\nRegalia\t156890396\t\t100%" : isUmbralTablePaste ? "Sku\t1 a mas\t20 a mas\t30 a mas\t50 a mas\n103163662\t5%\t10%\t15%\t25%" : bulkColumn === "sku" ? "Pegue aqui una columna de SKU copiada desde Excel" : `Pegue aqui dos columnas: SKU y ${labels[bulkColumn]}`;
   const canApplyBulkPreview = bulkPreview.length > 0 && bulkPreview.some((item) => item.canApply !== false);
   const isComboActive = tipoActivo === "Combo";
   const principalCompleteCount = comboPrincipals.filter((line) => normalizeValue(line.sku) && canUseComboBenefit(line.beneficio, line.valor)).length;
@@ -828,6 +958,19 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     && rewardCompleteCount > 0
     && principalCompleteCount === comboPrincipals.length
     && rewardCompleteCount === comboRewards.length;
+  const validateBeforeSave = () => {
+    const incompleteSimpleRows = currentBuyerRows.filter(isIncompleteSimpleRow);
+    const incompleteComboGroups = getIncompleteComboGroups(currentBuyerRows);
+    return { incompleteSimpleRows, incompleteComboGroups };
+  };
+  const handleSaveSupabase = () => {
+    const validation = validateBeforeSave();
+    if (validation.incompleteSimpleRows.length || validation.incompleteComboGroups.length) {
+      setSaveWarning(validation);
+      return;
+    }
+    onSaveSupabase?.();
+  };
   const renderComboLine = (role, line, index, total) => {
     const isReward = role === "reward";
     const collectionLabel = isReward ? "regalía" : "principal";
@@ -844,7 +987,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     </div>;
   };
   const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder combo-builder-pair"><label className="field wide"><span>Oferta</span><select value={comboDraft.group || ""} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group}>{group}</option>)}</select></label><div className="combo-role-panel principal"><div className="combo-role-head"><div><strong>Principales</strong><span>SKU que compra el cliente</span></div><Button variant="outline" onClick={() => addComboDraftLine("principal")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboPrincipals.map((line, index) => renderComboLine("principal", line, index, comboPrincipals.length))}</div></div><div className="combo-role-panel reward"><div className="combo-role-head"><div><strong>Regalías</strong><span>SKU entregados como beneficio</span></div><Button variant="outline" onClick={() => addComboDraftLine("reward")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboRewards.map((line, index) => renderComboLine("reward", line, index, comboRewards.length))}</div></div><div className="combo-builder-summary"><span>{principalCompleteCount}/{comboPrincipals.length} principales completos</span><span>{rewardCompleteCount}/{comboRewards.length} regalías completas</span></div><div className="button-row combo-pair-actions"><Button onClick={addComboPair} disabled={!canAddComboPair}><Plus size={16}/> Agregar combo completo</Button></div></div></CardContent></Card> : null;
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
   const activityCommentStatus = openActivityComments.length ? `${openActivityComments.length} abierto(s)` : activityComments.length ? `${activityComments.length} registrado(s)` : "Sin comentarios";
   const buyerAvancePanel = compradorSeleccionado && canEditAvances ? <div className="avance-mini-panel"><div className="segment-panel-head"><div><strong>Estado de carga</strong><span>Marque terminado cuando complete sus ofertas por division.</span></div></div>{buyerDivisionesAvance.length ? <div className="segment-chip-list">{buyerDivisionesAvance.map((division) => { const terminado = isAvanceTerminado(avanceCatalogos, currentCatalogoAvanceId, division, comprador); return <button key={division} type="button" className={terminado ? "segment-chip selected" : "segment-chip"} onClick={() => toggleBuyerAvance(division)}>{terminado ? <CheckCircle2 size={14}/> : <CircleDashed size={14}/>} {division}</button>; })}</div> : <div className="empty-state">Este comprador no tiene divisiones configuradas en Ajustes.</div>}</div> : null;
   const activityCommentPanel = <div className="activity-comment-panel"><div className="activity-comment-head"><div><strong>Comentario general</strong><span>{activityCommentStatus}</span></div>{canEditPromos && <Button variant="outline" onClick={() => setShowActivityComment((value) => !value)} disabled={!currentActivityId || !compradorSeleccionado}><MessageSquare size={16}/> {showActivityComment ? "Ocultar" : "Agregar"}</Button>}</div>{latestActivityComment && <div className="activity-comment-latest"><span className={String(latestActivityComment.estado).toLowerCase() === "abierto" ? "pill yellow" : "pill green"}>{latestActivityComment.estado}</span><p>{latestActivityComment.texto || latestActivityComment.comentario}</p></div>}{canEditPromos && showActivityComment && <div className="activity-comment-form"><textarea value={activityCommentDraft} onChange={(e) => setActivityCommentDraft(e.target.value)} placeholder="Ej. 20% de descuento en categoria Puertas" /><div className="button-row"><Button onClick={addActivityComment} disabled={!normalizeValue(activityCommentDraft)}><Save size={16}/> Guardar comentario</Button></div></div>}</div>;
@@ -861,24 +1004,49 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
           <input ref={promoTemplateFileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={loadPromoTemplate}/>
           <div className="button-row promo-action-row">
             {canEditPromos && <Button onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> Fila</Button>}
-            {canEditPromos && <Button variant="outline" onClick={pasteSkus} disabled={!compradorSeleccionado}><ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? "Pegar tabla" : "Pegar SKU"}</Button>}
+            {canEditPromos && <Button variant="outline" onClick={pasteSkus} disabled={!compradorSeleccionado}><ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) || tipoActivo === MEGAPACK_PROMO_TYPE ? "Pegar tabla" : "Pegar SKU"}</Button>}
             {canEditPromos && <Button variant="outline" onClick={() => promoTemplateFileInputRef.current?.click()} disabled={!compradorSeleccionado}><FileSpreadsheet size={16}/> Plantilla</Button>}
           </div>
           {buyerAvancePanel}
           {activityCommentPanel}
           {canEditPromos && !activityContext && <div className="segment-panel"><div className="segment-panel-head"><div><strong>{"P\u00fablico objetivo"}</strong><span>{segmentMode && segmentText ? segmentText : "Todos"}</span></div><Button variant={segmentMode ? "default" : "outline"} onClick={toggleSegmentMode} disabled={!compradorSeleccionado || !segmentOptions.length}><Users size={16}/> Segmento</Button></div>{segmentMode && <div className="segment-chip-list">{segmentOptions.map((item) => <button key={item.segmento_id} type="button" className={selectedSegments.includes(item.segmento_id) ? "segment-chip selected" : "segment-chip"} onClick={() => toggleSegment(item.segmento_id)}>{item.segmento_id} {"\u00b7"} {item.segmento}</button>)}<Button variant="outline" onClick={applySegmentsToGrid} disabled={!filteredRows.length || (segmentMode && !segmentText)}><Users size={16}/> Aplicar a grilla</Button></div>}</div>}
-          {canEditPromos && <div className="bulk-box"><p><AlertTriangle size={16}/> {bulkInstructions}</p><label className="field"><span>Pegar valores en</span><select value={bulkColumn} onChange={(e) => changeBulkColumn(e.target.value)} disabled={!compradorSeleccionado}><option value="sku">SKU nuevos</option>{tipoActivo === "Umbral" && <option value={BULK_COLUMN_UMBRAL_TABLE}>Tabla de umbrales</option>}{tipoActivo === "Combo" && <option value={BULK_COLUMN_COMBO_TABLE}>Tabla de combos</option>}{BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) && <option value={BULK_COLUMN_BUY_X_GET_X_TABLE}>Tabla compra X lleva X</option>}<option value="precioAhora">Precio ahora c/IVA</option><option value="descuento">Descuento</option><option value="cantidadMinima">{"Cantidad m\u00ednima"}</option><option value="comentario">Comentario adicional</option></select></label><textarea placeholder={bulkPlaceholder} value={bulkText} onChange={(e) => setBulkText(e.target.value)} disabled={!compradorSeleccionado} /><div className="button-row"><Button variant="outline" onClick={buildBulkPreview} disabled={!compradorSeleccionado}><Search size={16}/> Vista previa</Button><Button variant="outline" onClick={applyBulkPaste} disabled={!compradorSeleccionado || !canApplyBulkPreview}><ClipboardPaste size={16}/> Aplicar</Button></div>{bulkPreview.length > 0 && <div className="preview-list">{bulkPreview.map((item) => <div key={`${item.index}-${item.sku}`} className={item.warning ? "warning" : ""}><strong>{item.index}. {item.sku}</strong><span>{item.descripcion}</span><p>{item.campo}: <s>{String(item.valorActual)}</s> -&gt; <b>{String(item.valorNuevo)}</b></p></div>)}</div>}</div>}
+          {canEditPromos && <div className="bulk-box"><p><AlertTriangle size={16}/> {bulkInstructions}</p><label className="field"><span>Pegar valores en</span><select value={bulkColumn} onChange={(e) => changeBulkColumn(e.target.value)} disabled={!compradorSeleccionado}><option value="sku">SKU nuevos</option>{tipoActivo === "Umbral" && <option value={BULK_COLUMN_UMBRAL_TABLE}>Tabla de umbrales</option>}{tipoActivo === "Combo" && <option value={BULK_COLUMN_COMBO_TABLE}>Tabla de combos</option>}{BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) && <option value={BULK_COLUMN_BUY_X_GET_X_TABLE}>Tabla compra X lleva X</option>}{tipoActivo === MEGAPACK_PROMO_TYPE && <option value={BULK_COLUMN_MEGAPACK_TABLE}>Tabla Megapack</option>}<option value="precioAhora">Precio ahora c/IVA</option><option value="descuento">Descuento</option><option value="cantidadMinima">{"Cantidad m\u00ednima"}</option><option value="comentario">Comentario adicional</option></select></label><textarea placeholder={bulkPlaceholder} value={bulkText} onChange={(e) => setBulkText(e.target.value)} disabled={!compradorSeleccionado} /><div className="button-row"><Button variant="outline" onClick={buildBulkPreview} disabled={!compradorSeleccionado}><Search size={16}/> Vista previa</Button><Button variant="outline" onClick={applyBulkPaste} disabled={!compradorSeleccionado || !canApplyBulkPreview}><ClipboardPaste size={16}/> Aplicar</Button></div>{bulkPreview.length > 0 && <div className="preview-list">{bulkPreview.map((item) => <div key={`${item.index}-${item.sku}`} className={item.warning ? "warning" : ""}><strong>{item.index}. {item.sku}</strong><span>{item.descripcion}</span><p>{item.campo}: <s>{String(item.valorActual)}</s> -&gt; <b>{String(item.valorNuevo)}</b></p></div>)}</div>}</div>}
         </CardContent>
       </Card>
       {comboBuilder}
       <Card className="grid-card">
         <CardContent>
-        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripci\u00f3n"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar l\u00ednea"}</Button>}{canSyncSupabase && <Button onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> {saveDriveLabel}</Button>}</div></div>
+        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar línea"}</Button>}{canSyncSupabase && <Button onClick={handleSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}</div></div>
           {!esCompleja && <div className="promo-integrity-row"><p className={classNames("promo-integrity-note", missingBenefitCount ? "warning" : "ok")}>{benefitStatusText}</p></div>}
           <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{filteredRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><button className="icon-btn" onClick={() => deleteRow(row.id)}><Trash2 size={15}/></button></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
         </CardContent>
       </Card>
     </div>
+    {saveWarning && <div className="modal-backdrop" role="presentation">
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="promo-save-warning-title">
+        <div className="modal-head">
+          <div>
+            <h2 id="promo-save-warning-title">Revisar ofertas incompletas</h2>
+            <p>No se guardo porque hay promociones que necesitan completar informacion.</p>
+          </div>
+          <button type="button" className="icon-btn" onClick={() => setSaveWarning(null)} aria-label="Cerrar advertencia"><X size={18}/></button>
+        </div>
+        <div className="modal-body">
+          <p className="modal-note"><AlertTriangle size={16}/> Complete las ofertas indicadas y vuelva a presionar Guardar Supabase.</p>
+          {saveWarning.incompleteSimpleRows.length > 0 && <div className="validation-list">
+            <strong>{saveWarning.incompleteSimpleRows.length} promocion(es) simple(s) sin precio ahora ni descuento</strong>
+            {saveWarning.incompleteSimpleRows.slice(0, 5).map((row) => <span key={row.id || row.row_id}>{row.sku || "SKU sin codigo"} - {getRowPromoType(row) || "Promocion simple"}</span>)}
+          </div>}
+          {saveWarning.incompleteComboGroups.length > 0 && <div className="validation-list">
+            <strong>{saveWarning.incompleteComboGroups.length} combo(s) incompleto(s)</strong>
+            {saveWarning.incompleteComboGroups.slice(0, 5).map((group) => <span key={group.group}>{group.group}: {group.principals || 0} principal(es), {group.rewards || 0} regalia(s){group.blankSku ? `, ${group.blankSku} linea(s) sin SKU` : ""}</span>)}
+          </div>}
+        </div>
+        <div className="modal-actions">
+          <Button onClick={() => setSaveWarning(null)}>Revisar ofertas</Button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 

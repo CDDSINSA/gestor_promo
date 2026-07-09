@@ -133,11 +133,6 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
         || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
   }) : [];
 
-  const escapeCsv = (value) => {
-    const text = String(value ?? "").replace(/\r?\n/g, " ");
-    return /[;"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-
   const makeCommon = (row) => {
     const activity = getActivity(row);
     const activityId = getActivityId(row);
@@ -183,25 +178,23 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
     },
   };
 
-  const downloadExport = (key) => {
+  const downloadExport = async (key) => {
     const def = exportDefs[key];
     if (!def || !rowsFiltradas.length) return;
 
-    const lines = [
-      def.columns.map(([label]) => escapeCsv(label)).join(";"),
+    const XLSX = await import("xlsx");
+    const sheetRows = [
+      def.columns.map(([label]) => label),
       ...rowsFiltradas.map((row) => {
         const ctx = makeCommon(row);
-        return def.columns.map(([, getter]) => escapeCsv(getter(row, ctx))).join(";");
+        return def.columns.map(([, getter]) => getter(row, ctx));
       }),
     ];
 
-    const blob = new Blob([`\ufeff${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${def.file}_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, def.title);
+    XLSX.writeFile(workbook, `${def.file}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
@@ -263,7 +256,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
               <h3>{def.title}</h3>
               <p>{def.desc}</p>
               {canDownload && <Button onClick={() => downloadExport(key)} disabled={!rowsFiltradas.length}>
-                <Download size={16} /> Descargar CSV
+                <Download size={16} /> Descargar XLSX
               </Button>}
             </CardContent>
           </Card>

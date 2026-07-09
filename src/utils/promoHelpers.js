@@ -701,7 +701,7 @@ export function toAppLog(item) {
     fecha: item.fecha || new Date().toLocaleString(),
     usuario: rawUsuario === "App React" ? "Sistema" : rawUsuario,
     catalogo: item.catalogo || item.catalogo_id || "",
-    accion: rawAccion === "Guardado en Google Sheets" ? "Sincronizacion con Google Sheets" : rawAccion === "Guardado de ajustes en Google Sheets" ? "Sincronizacion de ajustes con Google Sheets" : rawAccion,
+    accion: rawAccion === "Guardado en Google Sheets" ? "Sincronizacion importada a Supabase" : rawAccion === "Guardado de ajustes en Google Sheets" ? "Sincronizacion de ajustes importada a Supabase" : rawAccion,
   };
 }
 
@@ -713,7 +713,7 @@ export function toExcelLog(item) {
     fecha: item.fecha || new Date().toISOString(),
     usuario: rawUsuario === "App React" ? "Sistema" : rawUsuario,
     catalogo: item.catalogo || "",
-    accion: rawAccion === "Guardado en Google Sheets" ? "Sincronizacion con Google Sheets" : rawAccion === "Guardado de ajustes en Google Sheets" ? "Sincronizacion de ajustes con Google Sheets" : rawAccion,
+    accion: rawAccion === "Guardado en Google Sheets" ? "Sincronizacion importada a Supabase" : rawAccion === "Guardado de ajustes en Google Sheets" ? "Sincronizacion de ajustes importada a Supabase" : rawAccion,
     row_id: item.row_id || item.rowId || "",
     campo: item.campo || "",
     valor_anterior: item.valor_anterior || "",

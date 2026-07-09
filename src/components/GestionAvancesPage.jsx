@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, CircleDashed, Layers3, ListChecks, Save, Tag, Users } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
@@ -89,9 +89,9 @@ export default function GestionAvancesPage({
   avances = {},
   setAvanceCatalogos,
   setLogs,
-  onSaveDrive,
-  driveReady,
-  saveDriveStatus,
+  onSaveSupabase,
+  supabaseReady,
+  saveSupabaseStatus,
   isSyncing,
   onBack,
   onOpenCatalogo,
@@ -102,11 +102,6 @@ export default function GestionAvancesPage({
   const canOpenPromos = can(PERMISSIONS.VIEW_PROMOS);
   const catalogoId = getCatalogoAvanceId(catalogo);
   const divisionOptions = useMemo(() => getDivisionOptionsFromCompradores(compradores, DIVISIONES_CATALOGO), [compradores]);
-  const divisionesCatalogo = useMemo(() => {
-    const selected = normalizeDivisionesCatalogo(catalogo?.divisiones);
-    return selected.length ? selected : divisionOptions;
-  }, [catalogo, divisionOptions]);
-
   const activeBuyers = useMemo(() => compradores.filter((buyer) => buyer.activo !== false), [compradores]);
   const seniors = useMemo(() => activeBuyers.filter((buyer) => !isCompradorJunior(buyer)), [activeBuyers]);
   const juniors = useMemo(() => activeBuyers.filter(isCompradorJunior), [activeBuyers]);
@@ -157,6 +152,24 @@ export default function GestionAvancesPage({
       });
   };
   const rowMatchesDivision = (row, division) => getRowDivisionCandidates(row).some((candidate) => sameDivision(candidate, division));
+  const involvedDivisions = useMemo(() => {
+    const divisions = [];
+    const seen = new Set();
+    scopedRows.forEach((row) => {
+      getRowDivisionCandidates(row).forEach((division) => {
+        const key = normalizeKey(division);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        divisions.push(division);
+      });
+    });
+    return divisions;
+  }, [scopedRows, hierarchyByDepId, buyerDivisionMap]);
+  const divisionesCatalogo = useMemo(() => {
+    const selected = normalizeDivisionesCatalogo(catalogo?.divisiones);
+    const base = selected.length ? selected : involvedDivisions.length ? involvedDivisions : divisionOptions;
+    return base.filter((division, index, source) => source.findIndex((item) => sameDivision(item, division)) === index);
+  }, [catalogo, divisionOptions, involvedDivisions]);
 
   const getSupportJuniors = (senior, division) => {
     const directMatches = juniors.filter((junior) => compradorReferencesSenior(junior, senior));
@@ -207,7 +220,7 @@ export default function GestionAvancesPage({
       ofertas: divisions.reduce((total, division) => total + division.ofertas, 0),
       skus: divisions.reduce((total, division) => total + division.skus, 0),
     };
-  }), [avances, catalogoId, divisionesCatalogo, scopedRows, seniors, juniors, buyerDivisionMap, hierarchyByDepId]);
+  }).filter((senior) => senior.divisions.length > 0), [avances, catalogoId, divisionesCatalogo, scopedRows, seniors, juniors, buyerDivisionMap, hierarchyByDepId]);
 
   const selectedSenior = seniorSummaries.find((senior) => senior.key === selectedSeniorKey) || seniorSummaries[0];
   const totalDivisiones = seniorSummaries.reduce((total, senior) => total + senior.divisions.length, 0);
@@ -215,7 +228,7 @@ export default function GestionAvancesPage({
   const seniorsCompletos = seniorSummaries.filter((senior) => senior.completo).length;
   const totalOfertas = seniorSummaries.reduce((total, senior) => total + senior.ofertas, 0);
   const progress = totalDivisiones ? Math.round((totalDivisionesCompletas / totalDivisiones) * 100) : 0;
-  const saveDriveLabel = saveDriveStatus === "saving" ? "Guardando..." : saveDriveStatus === "error" ? "Fallo" : saveDriveStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
 
   const toggleDivision = (divisionStatus, seniorName) => {
     const division = divisionStatus?.division;
@@ -243,7 +256,7 @@ export default function GestionAvancesPage({
       <Header title="Gestion de Avances" subtitle={`Cumplimiento de carga por comprador Senior para ${catalogo?.nombre || "catalogo planificado"}.`} />
       <div className="toolbar-actions">
         <Button variant="outline" onClick={onBack}><ArrowLeft size={16}/> Volver</Button>
-        {canSyncSupabase && <Button variant="outline" onClick={onSaveDrive} disabled={!driveReady || isSyncing}><Save size={16}/> {saveDriveLabel}</Button>}
+        {canSyncSupabase && <Button variant="outline" onClick={onSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}
         {canOpenPromos && <Button onClick={() => onOpenCatalogo?.(catalogo)}><ListChecks size={16}/> Trabajar catalogo</Button>}
       </div>
     </div>

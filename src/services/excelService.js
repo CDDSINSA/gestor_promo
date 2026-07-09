@@ -1,9 +1,10 @@
-import {
+﻿import {
   ACTIVITY_TYPES,
   ALCANCE_TYPES,
   COMMENT_SCOPE_ACTIVITY,
   COMMENT_SCOPE_LINE,
   COMBO_REWARD_ROLES,
+  MEGAPACK_PROMO_TYPE,
   REQUIRED_SHEETS,
   SHEETS,
 } from "../constants";
@@ -33,12 +34,12 @@ function validateWorkbook(workbook) {
 function normalizeBoolean(value) {
   if (typeof value === "boolean") return value;
   const text = String(value || "").trim().toUpperCase();
-  return text === "TRUE" || text === "SI" || text === "SÍ" || text === "ACTIVO";
+  return text === "TRUE" || text === "SI" || text === "SÃ" || text === "ACTIVO";
 }
 
 function normalizeAplicaSegmento(value, segmento) {
   const text = String(value || "").trim().toUpperCase();
-  if (text === "SI" || text === "SÍ" || text === "TRUE" || text === "1" || text === "APLICA") return "SI";
+  if (text === "SI" || text === "SÃ" || text === "TRUE" || text === "1" || text === "APLICA") return "SI";
   if (text === "NO" || text === "FALSE" || text === "0") return "NO";
   return segmento && String(segmento).toLowerCase() !== "todos" ? "SI" : "NO";
 }
@@ -82,7 +83,7 @@ function normalizeHeader(value) {
 }
 
 function isComplexType(value) {
-  return ["Combo", "Umbral", "Compra X lleva X", "Compra X Lleva X V2"].map(normalizeHeader).includes(normalizeHeader(value));
+  return ["Combo", "Umbral", "Compra X lleva X", "Compra X Lleva X V2", MEGAPACK_PROMO_TYPE].map(normalizeHeader).includes(normalizeHeader(value));
 }
 
 function getOfferOwnerKey({ usuarioId, compradorId } = {}) {
@@ -105,8 +106,8 @@ function resolveOfferId(row, rowId, actividadId, tipoPromo, grupoOferta) {
 
 function getCommentScope(row) {
   const explicit = String(row?.alcance_comentario || row?.alcanceComentario || row?.tipo_comentario || "").trim().toUpperCase();
-  if (["ACTIVIDAD", "CATALOGO", "CATÁLOGO", "GENERAL"].includes(explicit)) return COMMENT_SCOPE_ACTIVITY;
-  if (["LINEA", "LÍNEA", "SKU"].includes(explicit)) return COMMENT_SCOPE_LINE;
+  if (["ACTIVIDAD", "CATALOGO", "CATÃLOGO", "GENERAL"].includes(explicit)) return COMMENT_SCOPE_ACTIVITY;
+  if (["LINEA", "LÃNEA", "SKU"].includes(explicit)) return COMMENT_SCOPE_LINE;
   return row?.row_id || row?.rowId ? COMMENT_SCOPE_LINE : COMMENT_SCOPE_ACTIVITY;
 }
 
@@ -557,23 +558,23 @@ export function validateActividades(actividades = []) {
   });
   return errors;
 }
-
 export function validatePromociones(promociones, actividades = []) {
   const errors = [];
   const activityMap = buildActivityMap(actividades);
   const comboGroups = {};
   const buyXGetYGroups = {};
+  const megapackGroups = {};
   promociones.forEach((promo, index) => {
     const rowNumber = index + 2;
     const enriched = enrichPromoWithActivity(promo, activityMap);
     const activity = getPromoActivity(promo, activityMap);
-    if (!promo.sku) errors.push(`Fila ${rowNumber}: SKU vacío.`);
-    if (!promo.tipo_promo) errors.push(`Fila ${rowNumber}: tipo_promo vacío.`);
-    if (!promo.comprador) errors.push(`Fila ${rowNumber}: comprador vacío.`);
-    if (!enriched.actividad_id) errors.push(`Fila ${rowNumber}: actividad_id vacío.`);
-    if (!enriched.oferta_id) errors.push(`Fila ${rowNumber}: oferta_id vacío.`);
-    if (enriched.tipo_actividad && !ACTIVITY_TYPES.includes(enriched.tipo_actividad)) errors.push(`Fila ${rowNumber}: tipo_actividad inválido.`);
-    if (enriched.alcance_tipo && !ALCANCE_TYPES.includes(enriched.alcance_tipo)) errors.push(`Fila ${rowNumber}: alcance_tipo inválido.`);
+    if (!promo.sku) errors.push(`Fila ${rowNumber}: SKU vacÃ­o.`);
+    if (!promo.tipo_promo) errors.push(`Fila ${rowNumber}: tipo_promo vacÃ­o.`);
+    if (!promo.comprador) errors.push(`Fila ${rowNumber}: comprador vacÃ­o.`);
+    if (!enriched.actividad_id) errors.push(`Fila ${rowNumber}: actividad_id vacÃ­o.`);
+    if (!enriched.oferta_id) errors.push(`Fila ${rowNumber}: oferta_id vacÃ­o.`);
+    if (enriched.tipo_actividad && !ACTIVITY_TYPES.includes(enriched.tipo_actividad)) errors.push(`Fila ${rowNumber}: tipo_actividad invÃ¡lido.`);
+    if (enriched.alcance_tipo && !ALCANCE_TYPES.includes(enriched.alcance_tipo)) errors.push(`Fila ${rowNumber}: alcance_tipo invÃ¡lido.`);
     if (enriched.alcance_tipo === "SEGMENTO") {
       if (enriched.aplica_segmento !== "SI") errors.push(`Fila ${rowNumber}: alcance SEGMENTO debe aplicar segmento.`);
       if (!enriched.segmento_cliente || enriched.segmento_cliente !== enriched.alcance_valor) errors.push(`Fila ${rowNumber}: segmento_cliente debe ser igual a alcance_valor.`);
@@ -589,9 +590,9 @@ export function validatePromociones(promociones, actividades = []) {
         if (!activity.fecha_fin) errors.push(`Fila ${rowNumber}: especial sin fecha_fin.`);
       }
     }
-    if (["Combo", "Umbral", "Compra X lleva X", "Compra X Lleva X V2"].includes(promo.tipo_promo)) {
-      if (!promo.grupo_oferta) errors.push(`Fila ${rowNumber}: promoción compleja sin grupo_oferta.`);
-      if (!promo.tipo_sku) errors.push(`Fila ${rowNumber}: promoción compleja sin tipo_sku.`);
+    if (isComplexType(promo.tipo_promo)) {
+      if (!promo.grupo_oferta) errors.push(`Fila ${rowNumber}: promociÃ³n compleja sin grupo_oferta.`);
+      if (!promo.tipo_sku) errors.push(`Fila ${rowNumber}: promociÃ³n compleja sin tipo_sku.`);
     }
     if (["Compra X lleva X", "Compra X Lleva X V2"].includes(promo.tipo_promo) && !promo.variante) errors.push(`Fila ${rowNumber}: ${promo.tipo_promo} sin variante.`);
     const offerGroupKey = `${enriched.actividad_id}::${promo.tipo_promo}::${enriched.oferta_id}`;
@@ -603,18 +604,28 @@ export function validatePromociones(promociones, actividades = []) {
       if (!buyXGetYGroups[offerGroupKey]) buyXGetYGroups[offerGroupKey] = [];
       buyXGetYGroups[offerGroupKey].push(promo);
     }
+    if (promo.tipo_promo === MEGAPACK_PROMO_TYPE && enriched.oferta_id) {
+      if (!megapackGroups[offerGroupKey]) megapackGroups[offerGroupKey] = [];
+      megapackGroups[offerGroupKey].push(promo);
+    }
   });
   Object.entries(comboGroups).forEach(([group, items]) => {
     const hasPrincipal = items.some((item) => String(item.tipo_sku || "").toLowerCase() === "principal");
     const hasReward = items.some((item) => COMBO_REWARD_ROLES.includes(String(item.tipo_sku || "").toLowerCase()));
     if (!hasPrincipal) errors.push(`Grupo ${group}: combo sin SKU principal.`);
-    if (!hasReward) errors.push(`Grupo ${group}: combo sin regalía.`);
+    if (!hasReward) errors.push(`Grupo ${group}: combo sin regalÃ­a.`);
   });
   Object.entries(buyXGetYGroups).forEach(([group, items]) => {
     const hasPrincipal = items.some((item) => String(item.tipo_sku || "").toLowerCase() === "principal");
     const hasReward = items.some((item) => COMBO_REWARD_ROLES.includes(String(item.tipo_sku || "").toLowerCase()));
     if (!hasPrincipal) errors.push(`Grupo ${group}: Compra X lleva X sin principal.`);
-    if (!hasReward) errors.push(`Grupo ${group}: Compra X lleva X sin regalía.`);
+    if (!hasReward) errors.push(`Grupo ${group}: Compra X lleva X sin regalÃ­a.`);
+  });
+  Object.entries(megapackGroups).forEach(([group, items]) => {
+    const hasPrincipal = items.some((item) => String(item.tipo_sku || "").toLowerCase() === "principal");
+    const hasReward = items.some((item) => COMBO_REWARD_ROLES.includes(String(item.tipo_sku || "").toLowerCase()));
+    if (!hasPrincipal) errors.push(`Grupo ${group}: Megapack sin SKU principal.`);
+    if (!hasReward) errors.push(`Grupo ${group}: Megapack sin regalía.`);
   });
   return errors;
 }

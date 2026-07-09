@@ -1,4 +1,4 @@
-# Plan de migracion de Drive a Supabase
+# Retiro de Drive y operacion con Supabase
 
 ## Estado actual revisado
 
@@ -12,11 +12,10 @@ Archivos revisados:
 - `docs/supabase_schema.sql`
 - `docs/supabase_delta_operativo_2026_06_22.sql`
 - `src/App.jsx`
-- `src/services/googleSheetsService.js`
 - `src/services/excelService.js`
 - `apps-script/Code.gs`
 
-Supabase sera la fuente principal. Google Sheets / Drive debe quedar solo como respaldo temporal o exportacion operativa durante la transicion.
+Supabase es la unica fuente operativa del frontend. Google Sheets / Drive ya no forma parte del codigo activo de la app. Excel se mantiene solo como respaldo, importacion/exportacion y puente operativo.
 
 El maestro SKU debe seguir fuera de Supabase.
 
@@ -298,7 +297,7 @@ Mapeo:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
 
-3. Se creo `src/services/supabaseService.js` con el mismo contrato operativo de Drive:
+3. Se creo `src/services/supabaseService.js` como contrato operativo de persistencia:
 
    - `hasSupabaseConnection()`
    - `signInAppUser()`
@@ -372,7 +371,7 @@ Esto reduce el cambio en pantallas y mantiene la migracion localizada en servici
    - avance de catalogo
    - ajuste de comprador
 
-13. Congelar Drive/Sheets como integracion futura opcional y mantener Excel como respaldo/exportacion.
+13. Retirar Drive/Sheets del frontend y mantener Excel como respaldo/exportacion.
 
 ## Criterios de aceptacion
 

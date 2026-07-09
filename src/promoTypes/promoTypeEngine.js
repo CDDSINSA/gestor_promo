@@ -61,6 +61,7 @@ export const promoLabels = {
   precioAhora: "Precio ahora c/IVA",
   descuento: "Descuento",
   comentario: "Comentario adicional",
+  tablaMegapack: "Tabla Megapack",
 };
 
 function normalizeKey(value) {
@@ -159,6 +160,9 @@ export const promoTypeEngines = {
     detailFields: ["cantidad_compra", "cantidad_lleva", "rol_beneficio"],
     createGroup: createUniqueGroup,
     validateRow: validateBuyXGetX,
+  }),
+  Megapack: complexEngine("Megapack", {
+    createGroup: createUniqueGroup,
   }),
 };
 
