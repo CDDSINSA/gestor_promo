@@ -271,7 +271,7 @@ export default function AjustesPage({
             <label className="field"><span>Vigencia</span><input value={selected?.vigencia || ""} readOnly /></label>
             <Field label="Documento ID" value={selected?.docId || ""} onChange={(v) => updateSelected("docId", v)}/>
             <Field label="Token de conexion" value={selected?.tokenConexion || ""} onChange={(v) => updateSelected("tokenConexion", v)} type="password"/>
-            <label className="field"><span>Estado</span><select value={selected?.estado || "Borrador"} onChange={(e) => updateSelected("estado", e.target.value)}><option>Activo</option><option>Borrador</option><option>Cerrado</option></select></label>
+            <label className="field"><span>Estado</span><select value={selected?.estado || "Borrador"} onChange={(e) => updateSelected("estado", e.target.value)}><option>Preliminar</option><option>Activo</option><option>Borrador</option><option>Cerrado</option></select></label>
             <label className="field wide"><span>Correos para notificacion por cambios</span><textarea value={selected?.correos || ""} onChange={(e) => updateSelected("correos", e.target.value)} /></label>
             <div className="switch-row wide"><div><strong>Enviar notificaciones por cambios</strong><p>Aplica cuando se modifica SKU, precio, descuento o logica de promocion.</p></div><button className={selected?.notificaciones ? "switch on" : "switch"} onClick={() => updateSelected("notificaciones", !selected?.notificaciones)}><span/></button></div>
           </div>

@@ -77,12 +77,12 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     })),
     [actividades],
   );
+  const catalogNameById = useMemo(() => new Map((catalogos || []).map((catalogo) => [
+    String(catalogo.catalogo_id || catalogo.id || ""),
+    catalogo.nombre || catalogo.nombre_actividad || "",
+  ])), [catalogos]);
 
   const activityCatalogOptions = useMemo(() => {
-    const catalogNameById = new Map((catalogos || []).map((catalogo) => [
-      String(catalogo.catalogo_id || catalogo.id || ""),
-      catalogo.nombre || catalogo.nombre_actividad || "",
-    ]));
     const optionsById = new Map();
     (actividades || []).forEach((item) => {
       const activity = normalizeActividad(item);
@@ -106,7 +106,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
       });
     });
     return Array.from(optionsById.values()).sort((left, right) => left.displayName.localeCompare(right.displayName));
-  }, [actividades, activityMap, catalogos, rows]);
+  }, [actividades, activityMap, catalogNameById, rows]);
 
   const filteredActivityCatalogOptions = useMemo(() => {
     const term = normalizeCanal(actividadCatalogoFiltro);
@@ -118,6 +118,10 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
 
   const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
+  const getActivityName = (row, activity = getActivity(row)) => {
+    const activityId = getActivityId(row);
+    return activity.nombre_actividad || activity.nombreActividad || activity.nombre || catalogNameById.get(String(activityId)) || "";
+  };
   const getOfferId = (row) => row.ofertaId || row.oferta_id || "";
   const compareText = (left, right) => String(left || "").localeCompare(String(right || ""), "es", { numeric: true, sensitivity: "base" });
   const getComentariosRow = (rowId) => comentarios.filter((c) => isLineComment(c) && (c.rowId || c.row_id) === rowId);
@@ -175,7 +179,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     const compradorRow = row.comprador || activity.comprador || activity.solicitante || "Sin comprador";
     const tipoActividad = activity.tipo_actividad || "CATALOGO";
     const activityId = getActivityId(row);
-    const activityName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || "";
+    const activityName = getActivityName(row, activity);
     const canal = activity.canal || "Sin canal";
     const alcance = row.alcanceTipo || row.alcance_tipo || "Sin alcance";
     const skuTerm = appliedFilters.sku.trim().toLowerCase();
@@ -197,8 +201,8 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   }).sort((left, right) => {
     const leftActivity = getActivity(left);
     const rightActivity = getActivity(right);
-    const leftActivityLabel = leftActivity.nombre_actividad || leftActivity.nombreActividad || leftActivity.nombre || getActivityId(left);
-    const rightActivityLabel = rightActivity.nombre_actividad || rightActivity.nombreActividad || rightActivity.nombre || getActivityId(right);
+    const leftActivityLabel = getActivityName(left, leftActivity) || getActivityId(left);
+    const rightActivityLabel = getActivityName(right, rightActivity) || getActivityId(right);
     return compareText(leftActivityLabel, rightActivityLabel)
       || compareText(getOfferId(left), getOfferId(right))
       || compareText(left.sku, right.sku)
@@ -231,14 +235,10 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   const toggleComentario = (id) => setComentarios((prev) => prev.map((c) => ((c.id || c.comentario_id) === id ? { ...c, estado: String(c.estado).toLowerCase() === "abierto" ? "Resuelto" : "Abierto" } : c)));
 
   const exportColumns = [
-    ["Actividad", (row, activity) => row.actividadId || row.actividad_id || row.catalogo_id],
+    ["Nombre actividad", (row, activity) => getActivityName(row, activity)],
     ["Oferta ID", (row) => getOfferId(row)],
-    ["Tipo actividad", (row, activity) => activity.tipo_actividad || "CATALOGO"],
-    ["Canal", (row, activity) => activity.canal || ""],
     ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""],
     ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""],
-    ["Segmenta", (row) => isSegmentedRow(row) ? "SI" : "NO"],
-    ["Segmento cliente", (row) => row.segmentoCliente || row.segmento_cliente || (isSegmentedRow(row) ? row.segmento : "")],
     ["Comprador", (row) => row.comprador || ""],
     ["Tipo promo", (row) => row.tipoPromo || ""],
     ["Oferta", (row) => row.grupoOferta || ""],
@@ -353,9 +353,11 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
                     const abiertos = comentariosTotales.filter((c) => String(c.estado).toLowerCase() === "abierto").length;
                     const segmenta = isSegmentedRow(row) ? "SI" : "NO";
                     const segmentoCliente = row.segmentoCliente || row.segmento_cliente || (segmenta === "SI" ? row.segmento : "");
+                    const activityName = getActivityName(row, activity);
                     return (
                       <tr key={row.id} className={abiertos ? "row-warning" : ""}>
                         <td><b>{activityId}</b>{comentariosActividad.length > 0 && <small className="activity-comment-badge">{comentariosActividad.length} general</small>}</td>
+                        <td>{activityName || "Sin nombre"}</td>
                         <td>{getOfferId(row)}</td>
                         <td><span className={activity.tipo_actividad === "ESPECIAL" ? "pill yellow" : "pill green"}>{activity.tipo_actividad || "CATALOGO"}</span></td>
                         <td>{activity.canal || ""}</td>

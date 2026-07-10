@@ -63,7 +63,7 @@ export const catalogosIniciales = [
 ];
 
 export const compradoresIniciales = [
-  { nombre: "Marcela Torrez", comprador: "Marcela Torrez", division: "Electrónica / Línea Blanca", correo: "", activo: true },
+  { nombre: "Marcela Torres", comprador: "Marcela Torres", division: "Electrónica / Línea Blanca", correo: "", activo: true },
   { nombre: "Rosa Rodriguez", comprador: "Rosa Rodriguez", division: "Hogar", correo: "", activo: true },
   { nombre: "Octavio Palacios", comprador: "Octavio Palacios", division: "Ferretería", correo: "", activo: true },
   { nombre: "Mariela Espinoza", comprador: "Mariela Espinoza", division: "Pinturas", correo: "", activo: true },
@@ -117,7 +117,7 @@ export const rowsIniciales = [
     descuento: "14%",
     comentario: "Producto destacado en página interior",
     comentario_comprador: "Producto destacado en página interior",
-    comprador: "Marcela Torrez",
+    comprador: "Marcela Torres",
     division: "Pinturas",
     estado_registro: "BORRADOR",
   },
@@ -147,7 +147,7 @@ export const rowsIniciales = [
     descuento: "20%",
     comentario: "Principal de combo",
     comentario_comprador: "Principal de combo",
-    comprador: "Marcela Torrez",
+    comprador: "Marcela Torres",
     division: "Electrónica / Línea Blanca",
     estado_registro: "BORRADOR",
   },
@@ -177,7 +177,7 @@ export const rowsIniciales = [
     descuento: "100%",
     comentario: "Regalía",
     comentario_comprador: "Regalía",
-    comprador: "Marcela Torrez",
+    comprador: "Marcela Torres",
     division: "Electrónica / Línea Blanca",
     estado_registro: "BORRADOR",
   },

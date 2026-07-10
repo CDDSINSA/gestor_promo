@@ -87,6 +87,7 @@ import AjustesPage from './components/AjustesPage';
 import ExportPageV2 from './components/ExportPageV2';
 import GestionAvancesPage from './components/GestionAvancesPage';
 import HomePage from './components/HomePage';
+import CatalogDesignPage from './components/CatalogDesignPage';
 import PromosPageView from './components/PromosPage';
 import PromocionEspecialPage from './components/PromocionEspecialPage';
 import SolicitudesEspecialesPageView from './components/SolicitudesEspecialesPage';
@@ -109,6 +110,11 @@ function ModalButton({ children, className = "", variant = "default", ...props }
 
 function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, onConfirm, onCancel }) {
   return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className="modal-note"><Icon size={16}/> {note}</p></div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton onClick={onConfirm}>{confirmLabel}</ModalButton></div></div></div>;
+}
+
+function SuccessToast({ toast, onClose }) {
+  if (!toast) return null;
+  return <div className="success-toast" role="status" aria-live="polite"><div className="success-toast-icon"><CheckCircle2 size={18}/></div><div className="success-toast-copy"><strong>{toast.title}</strong><span>{toast.message}</span></div><button type="button" className="success-toast-close" onClick={onClose} aria-label="Cerrar mensaje"><X size={16}/></button></div>;
 }
 
 function AppShell({ active, setActive, currentUser, currentRole, onLogout }) {
@@ -497,6 +503,7 @@ export default function PromoMVP() {
   const [recoverySession, setRecoverySession] = useState(null);
   const [recoveryUser, setRecoveryUser] = useState(null);
   const [pendingSaveAction, setPendingSaveAction] = useState(null);
+  const [successToast, setSuccessToast] = useState(null);
   const initialLoadSessionRef = React.useRef("");
   const syncedPromotionStateRef = React.useRef(new Map());
   const syncedBuyerStateRef = React.useRef(new Map());
@@ -522,6 +529,10 @@ export default function PromoMVP() {
   const requestSupabaseSaveConfirmation = (payload) => {
     if (isSyncing) return;
     setPendingSaveAction(payload);
+  };
+
+  const showSuccessToast = (message, title = "Cambios guardados") => {
+    setSuccessToast({ id: Date.now(), title, message });
   };
 
   const executePendingSaveAction = async () => {
@@ -559,6 +570,12 @@ export default function PromoMVP() {
       cancelled = true;
     };
   }, [supabaseSettings]);
+
+  useEffect(() => {
+    if (!successToast) return undefined;
+    const timeoutId = window.setTimeout(() => setSuccessToast(null), 3600);
+    return () => window.clearTimeout(timeoutId);
+  }, [successToast]);
 
   useEffect(() => {
     if (!appSession?.access_token) {
@@ -824,6 +841,7 @@ export default function PromoMVP() {
       type: hasSupabaseConnection(saved) ? "ready" : "idle",
       message: hasSupabaseConnection(saved) ? "Conexion guardada. Ya puede probar o cargar desde Supabase." : "Complete URL y anon key para activar Supabase.",
     });
+    showSuccessToast("La configuracion de conexion se guardo correctamente.", "Conexion guardada");
   };
 
   const onTestSupabaseConnection = async () => {
@@ -847,6 +865,7 @@ export default function PromoMVP() {
     setCompradores(nextCompradores);
     if (!hasSupabaseConnection(supabaseConnection)) {
       setSupabaseStatus({ type: "ready", message: "Ajustes guardados en la app. Configure Supabase para sincronizarlos." });
+      showSuccessToast("Los ajustes quedaron guardados en la aplicacion.", "Ajustes guardados");
       return;
     }
     setSaveSupabaseStatus("saving");
@@ -862,6 +881,7 @@ export default function PromoMVP() {
         rememberSyncedOperations(data);
       }
       setSaveSupabaseStatus("success");
+      showSuccessToast("Compradores y catalogos se sincronizaron correctamente.", "Ajustes guardados");
     } else {
       setSaveSupabaseStatus("error");
     }
@@ -907,6 +927,7 @@ export default function PromoMVP() {
         rememberSyncedOperations(data);
       }
       setSaveSupabaseStatus("success");
+      showSuccessToast("La informacion se sincronizo correctamente en Supabase.");
     } else {
       setSaveSupabaseStatus("error");
     }
@@ -964,6 +985,7 @@ export default function PromoMVP() {
     try {
       await saveCatalogToExcel(buildCatalogPayload());
       setSupabaseStatus({ type: "ready", message: "Excel exportado correctamente." });
+      showSuccessToast("El archivo Excel se genero correctamente.", "Exportacion lista");
     } catch (error) {
       setSupabaseStatus({ type: "error", message: error.message || "No se pudo exportar el Excel." });
     }
@@ -1009,11 +1031,13 @@ export default function PromoMVP() {
       {active === "consulta" && <ProtectedRoute permission={MODULE_PERMISSIONS.consulta}><ConsultaSkuPage rows={rows} actividades={actividades}/></ProtectedRoute>}
       {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
       {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "catalogDesign" && <ProtectedRoute permission={MODULE_PERMISSIONS.catalogDesign}><CatalogDesignPage catalogos={catalogos} supabaseConnection={supabaseConnection} supabaseReady={hasSupabaseConnection(supabaseConnection)}/></ProtectedRoute>}
       {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} supabaseReady={hasSupabaseConnection(supabaseSettings)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
       {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} catalogos={catalogos} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
       {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios}/></ProtectedRoute>}
     </main>
     <MobileNav active={active} setActive={setActive}/>
+    <SuccessToast toast={successToast} onClose={() => setSuccessToast(null)}/>
     {pendingSaveAction && <ConfirmModal
       title={pendingSaveAction.title || "Confirmar guardado"}
       description={pendingSaveAction.description || "Vas a guardar cambios en Supabase."}
