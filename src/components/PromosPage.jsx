@@ -7,10 +7,10 @@ import {
   FileSpreadsheet,
   MessageSquare,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Trash2,
-  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -55,6 +55,30 @@ import {
 
 function Header({ title, subtitle }) {
   return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
+}
+
+function formatSkuMasterTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("es-NI", { hour: "2-digit", minute: "2-digit" });
+}
+
+function SkuMasterStatus({ status, total, source, onRefresh }) {
+  const statusType = status?.type || (total ? "ready" : "idle");
+  const Icon = statusType === "ready" ? CheckCircle2 : statusType === "error" ? AlertTriangle : CircleDashed;
+  const updatedAt = formatSkuMasterTime(source?.fecha);
+  const isLoading = statusType === "loading";
+  const progress = Math.max(0, Math.min(100, Number(status?.progress ?? (isLoading ? 12 : total ? 100 : 0))));
+  const title = statusType === "loading" ? "Actualizando ERP" : statusType === "error" ? "ERP no disponible" : total ? "ERP actualizado" : "ERP pendiente";
+  const detail = statusType === "loading"
+    ? `Descargando archivo publicado (${progress}%)`
+    : statusType === "error"
+      ? status?.message || "No se pudo cargar el archivo"
+      : total
+        ? `${total} SKU cargados${updatedAt ? ` · ${updatedAt}` : ""}`
+        : status?.message || "Esperando carga automatica";
+  return <div className={classNames("sku-master-status", statusType)}><Icon size={18}/><div className="sku-master-status-main"><div className="sku-master-status-top"><strong>{title}</strong>{onRefresh && <button type="button" className="sku-master-refresh" onClick={onRefresh} disabled={isLoading} title="Actualizar archivo ERP"><RefreshCw size={13}/> Actualizar</button>}</div><span>{detail}</span><div className="sku-master-progress" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div></div></div>;
 }
 
 function Button({ children, className = "", variant = "default", ...props }) {
@@ -498,7 +522,7 @@ function getIncompleteComboGroups(rowList = []) {
   return Array.from(groups.values()).filter((group) => !group.principals || !group.rewards || group.blankSku);
 }
 
-export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, onLoadSkuMaster, skuMasterFileInputRef, archivoComprador, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
+export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
   const { can } = usePermissions();
   const canEditPromos = can(PERMISSIONS.EDIT_PROMOS);
   const canEditAvances = can(PERMISSIONS.EDIT_AVANCES);
@@ -529,6 +553,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setActivityCommentDraft,
     segmentText,
   } = usePromoForm({ initialComprador, initialTipoPromo });
+  const [showBulkTools, setShowBulkTools] = React.useState(false);
   const promoTemplateFileInputRef = React.useRef(null);
   const buyerList = compradores.filter((c) => c.activo !== false).map((c) => c.comprador || c.nombre).filter(Boolean);
   const compradorSeleccionado = Boolean(comprador);
@@ -745,6 +770,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   };
   const pasteSkus = async () => {
     if (!compradorSeleccionado) return;
+    setShowBulkTools(true);
     try {
       const text = await navigator.clipboard.readText();
       if (tipoActivo === "Umbral") { setBulkColumn(BULK_COLUMN_UMBRAL_TABLE); setBulkText(text); setBulkPreview(buildUmbralBulkPreview(text, skuMaster)); return; }
@@ -760,6 +786,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const changeTipoActivo = (value) => {
     setTipoActivo(value);
     setBulkPreview([]);
+    setShowBulkTools(false);
     if (value === "Umbral") setBulkColumn(BULK_COLUMN_UMBRAL_TABLE);
     else if (value === "Combo") setBulkColumn(BULK_COLUMN_COMBO_TABLE);
     else if (BUY_X_GET_X_PROMO_TYPES.includes(value)) setBulkColumn(BULK_COLUMN_BUY_X_GET_X_TABLE);
@@ -811,6 +838,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const loadPromoTemplate = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !compradorSeleccionado) return;
+    setShowBulkTools(true);
     try {
       const result = await readPromoTemplateFile(file, tipoActivo);
       const preview = buildBulkPreviewItems(result.text, result.bulkColumn);
@@ -822,6 +850,11 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     } finally {
       event.target.value = "";
     }
+  };
+  const openTemplatePicker = () => {
+    if (!compradorSeleccionado) return;
+    setShowBulkTools(true);
+    promoTemplateFileInputRef.current?.click();
   };
   const applyBulkPaste = () => {
     if (!compradorSeleccionado) return;
@@ -992,25 +1025,25 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const buyerAvancePanel = compradorSeleccionado && canEditAvances ? <div className="avance-mini-panel"><div className="segment-panel-head"><div><strong>Estado de carga</strong><span>Marque terminado cuando complete sus ofertas por division.</span></div></div>{buyerDivisionesAvance.length ? <div className="segment-chip-list">{buyerDivisionesAvance.map((division) => { const terminado = isAvanceTerminado(avanceCatalogos, currentCatalogoAvanceId, division, comprador); return <button key={division} type="button" className={terminado ? "segment-chip selected" : "segment-chip"} onClick={() => toggleBuyerAvance(division)}>{terminado ? <CheckCircle2 size={14}/> : <CircleDashed size={14}/>} {division}</button>; })}</div> : <div className="empty-state">Este comprador no tiene divisiones configuradas en Ajustes.</div>}</div> : null;
   const activityCommentPanel = <div className="activity-comment-panel"><div className="activity-comment-head"><div><strong>Comentario general</strong><span>{activityCommentStatus}</span></div>{canEditPromos && <Button variant="outline" onClick={() => setShowActivityComment((value) => !value)} disabled={!currentActivityId || !compradorSeleccionado}><MessageSquare size={16}/> {showActivityComment ? "Ocultar" : "Agregar"}</Button>}</div>{latestActivityComment && <div className="activity-comment-latest"><span className={String(latestActivityComment.estado).toLowerCase() === "abierto" ? "pill yellow" : "pill green"}>{latestActivityComment.estado}</span><p>{latestActivityComment.texto || latestActivityComment.comentario}</p></div>}{canEditPromos && showActivityComment && <div className="activity-comment-form"><textarea value={activityCommentDraft} onChange={(e) => setActivityCommentDraft(e.target.value)} placeholder="Ej. 20% de descuento en categoria Puertas" /><div className="button-row"><Button onClick={addActivityComment} disabled={!normalizeValue(activityCommentDraft)}><Save size={16}/> Guardar comentario</Button></div></div>}</div>;
   return <div>
-    <Header title={title} subtitle={subtitle} />
+    <div className="promo-page-head">
+      <Header title={title} subtitle={subtitle} />
+      <SkuMasterStatus status={skuMasterStatus} total={skuMasterTotal} source={archivoComprador} onRefresh={onRefreshSkuMaster} />
+    </div>
     <div className="promos-layout">
       <Card className="promo-controls-card">
         <CardContent>
           <label className="field"><span>{activityContext ? "Actividad" : "Catalogo activo"}</span><div className="readonly">{activityContext?.nombre_actividad || catalogoActivo?.nombre || "Seleccione catalogo"}</div></label>
           <label className="field"><span>Comprador</span><select value={comprador} onChange={(e) => setComprador(e.target.value)} disabled={lockComprador}><option value="">Seleccione comprador</option>{buyerList.map((c) => <option key={c}>{c}</option>)}</select></label>
-          <input ref={skuMasterFileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={onLoadSkuMaster}/>
-          {canEditPromos && <button type="button" className="upload-box upload-trigger" onClick={() => skuMasterFileInputRef.current?.click()} disabled={!compradorSeleccionado}><Upload size={18}/><div><strong>Archivo comprador ERP</strong><span>{archivoComprador ? `${skuMasterTotal} SKU cargados desde ${archivoComprador.nombre}` : "Cargar Excel con SKU, VPN, descripcion y precio"}</span></div></button>}
           <label className="field"><span>{"Tipo de promoci\u00f3n"}</span><select value={tipoActivo} onChange={(e) => changeTipoActivo(e.target.value)} disabled={!compradorSeleccionado}>{todosTipos.map((t) => <option key={t}>{t}</option>)}</select></label>
           <input ref={promoTemplateFileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={loadPromoTemplate}/>
-          <div className="button-row promo-action-row">
-            {canEditPromos && <Button onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> Fila</Button>}
-            {canEditPromos && <Button variant="outline" onClick={pasteSkus} disabled={!compradorSeleccionado}><ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) || tipoActivo === MEGAPACK_PROMO_TYPE ? "Pegar tabla" : "Pegar SKU"}</Button>}
-            {canEditPromos && <Button variant="outline" onClick={() => promoTemplateFileInputRef.current?.click()} disabled={!compradorSeleccionado}><FileSpreadsheet size={16}/> Plantilla</Button>}
-          </div>
           {buyerAvancePanel}
           {activityCommentPanel}
           {canEditPromos && !activityContext && <div className="segment-panel"><div className="segment-panel-head"><div><strong>{"P\u00fablico objetivo"}</strong><span>{segmentMode && segmentText ? segmentText : "Todos"}</span></div><Button variant={segmentMode ? "default" : "outline"} onClick={toggleSegmentMode} disabled={!compradorSeleccionado || !segmentOptions.length}><Users size={16}/> Segmento</Button></div>{segmentMode && <div className="segment-chip-list">{segmentOptions.map((item) => <button key={item.segmento_id} type="button" className={selectedSegments.includes(item.segmento_id) ? "segment-chip selected" : "segment-chip"} onClick={() => toggleSegment(item.segmento_id)}>{item.segmento_id} {"\u00b7"} {item.segmento}</button>)}<Button variant="outline" onClick={applySegmentsToGrid} disabled={!filteredRows.length || (segmentMode && !segmentText)}><Users size={16}/> Aplicar a grilla</Button></div>}</div>}
-          {canEditPromos && <div className="bulk-box"><p><AlertTriangle size={16}/> {bulkInstructions}</p><label className="field"><span>Pegar valores en</span><select value={bulkColumn} onChange={(e) => changeBulkColumn(e.target.value)} disabled={!compradorSeleccionado}><option value="sku">SKU nuevos</option>{tipoActivo === "Umbral" && <option value={BULK_COLUMN_UMBRAL_TABLE}>Tabla de umbrales</option>}{tipoActivo === "Combo" && <option value={BULK_COLUMN_COMBO_TABLE}>Tabla de combos</option>}{BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) && <option value={BULK_COLUMN_BUY_X_GET_X_TABLE}>Tabla compra X lleva X</option>}{tipoActivo === MEGAPACK_PROMO_TYPE && <option value={BULK_COLUMN_MEGAPACK_TABLE}>Tabla Megapack</option>}<option value="precioAhora">Precio ahora c/IVA</option><option value="descuento">Descuento</option><option value="cantidadMinima">{"Cantidad m\u00ednima"}</option><option value="comentario">Comentario adicional</option></select></label><textarea placeholder={bulkPlaceholder} value={bulkText} onChange={(e) => setBulkText(e.target.value)} disabled={!compradorSeleccionado} /><div className="button-row"><Button variant="outline" onClick={buildBulkPreview} disabled={!compradorSeleccionado}><Search size={16}/> Vista previa</Button><Button variant="outline" onClick={applyBulkPaste} disabled={!compradorSeleccionado || !canApplyBulkPreview}><ClipboardPaste size={16}/> Aplicar</Button></div>{bulkPreview.length > 0 && <div className="preview-list">{bulkPreview.map((item) => <div key={`${item.index}-${item.sku}`} className={item.warning ? "warning" : ""}><strong>{item.index}. {item.sku}</strong><span>{item.descripcion}</span><p>{item.campo}: <s>{String(item.valorActual)}</s> -&gt; <b>{String(item.valorNuevo)}</b></p></div>)}</div>}</div>}
+          {canEditPromos && <div className="button-row promo-action-row">
+            <Button variant="outline" onClick={pasteSkus} disabled={!compradorSeleccionado}><ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) || tipoActivo === MEGAPACK_PROMO_TYPE ? "Pegar tabla" : "Pegar SKU"}</Button>
+            <Button variant="outline" onClick={openTemplatePicker} disabled={!compradorSeleccionado}><FileSpreadsheet size={16}/> Plantilla</Button>
+          </div>}
+          {canEditPromos && showBulkTools && <div className="bulk-box"><p><AlertTriangle size={16}/> {bulkInstructions}</p><label className="field"><span>Pegar valores en</span><select value={bulkColumn} onChange={(e) => changeBulkColumn(e.target.value)} disabled={!compradorSeleccionado}><option value="sku">SKU nuevos</option>{tipoActivo === "Umbral" && <option value={BULK_COLUMN_UMBRAL_TABLE}>Tabla de umbrales</option>}{tipoActivo === "Combo" && <option value={BULK_COLUMN_COMBO_TABLE}>Tabla de combos</option>}{BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) && <option value={BULK_COLUMN_BUY_X_GET_X_TABLE}>Tabla compra X lleva X</option>}{tipoActivo === MEGAPACK_PROMO_TYPE && <option value={BULK_COLUMN_MEGAPACK_TABLE}>Tabla Megapack</option>}<option value="precioAhora">Precio ahora c/IVA</option><option value="descuento">Descuento</option><option value="cantidadMinima">{"Cantidad m\u00ednima"}</option><option value="comentario">Comentario adicional</option></select></label><textarea placeholder={bulkPlaceholder} value={bulkText} onChange={(e) => setBulkText(e.target.value)} disabled={!compradorSeleccionado} /><div className="button-row"><Button variant="outline" onClick={buildBulkPreview} disabled={!compradorSeleccionado}><Search size={16}/> Vista previa</Button><Button variant="outline" onClick={applyBulkPaste} disabled={!compradorSeleccionado || !canApplyBulkPreview}><ClipboardPaste size={16}/> Aplicar</Button></div>{bulkPreview.length > 0 && <div className="preview-list">{bulkPreview.map((item) => <div key={`${item.index}-${item.sku}`} className={item.warning ? "warning" : ""}><strong>{item.index}. {item.sku}</strong><span>{item.descripcion}</span><p>{item.campo}: <s>{String(item.valorActual)}</s> -&gt; <b>{String(item.valorNuevo)}</b></p></div>)}</div>}</div>}
         </CardContent>
       </Card>
       {comboBuilder}

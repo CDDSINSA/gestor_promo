@@ -451,6 +451,47 @@ export async function loadSkuMasterFromExcel(file) {
   return { items, skuMaster, sheetName: firstSheetName };
 }
 
+export async function loadSkuMasterFromCsvUrl(url, onProgress) {
+  const XLSX = await loadXlsx();
+  onProgress?.(10);
+  const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`No se pudo descargar el archivo ERP (${response.status}).`);
+  onProgress?.(25);
+  let csvText = "";
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (response.body && contentLength > 0) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let received = 0;
+    let done = false;
+    while (!done) {
+      const result = await reader.read();
+      done = result.done;
+      if (result.value) {
+        received += result.value.length;
+        csvText += decoder.decode(result.value, { stream: !done });
+        onProgress?.(Math.min(70, 25 + Math.round((received / contentLength) * 45)));
+      }
+    }
+    csvText += decoder.decode();
+  } else {
+    csvText = await response.text();
+    onProgress?.(70);
+  }
+  onProgress?.(85);
+  const workbook = XLSX.read(csvText, { type: "string", raw: false });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new Error("El archivo ERP no contiene datos.");
+  const items = sheetToJson(workbook, firstSheetName).map(normalizeSkuMasterRow).filter(Boolean);
+  if (!items.length) throw new Error("No se encontraron SKU en el archivo ERP.");
+  const skuMaster = items.reduce((acc, item) => {
+    acc[item.sku] = item;
+    return acc;
+  }, {});
+  onProgress?.(100);
+  return { items, skuMaster, sheetName: firstSheetName };
+}
+
 export function buildConsolidado(promociones, comentarios = [], actividades = []) {
   const activityMap = buildActivityMap(actividades);
   return promociones.map((promo) => {

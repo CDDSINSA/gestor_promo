@@ -17,7 +17,7 @@ import {
   AlertTriangle,
   X,
 } from "lucide-react";
-import { loadCatalogFromExcel, loadSkuMasterFromExcel, saveCatalogToExcel } from "./services/excelService";
+import { loadCatalogFromExcel, loadSkuMasterFromCsvUrl, loadSkuMasterFromExcel, saveCatalogToExcel } from "./services/excelService";
 import {
   hasSupabaseConnection,
   loadAppUserProfile,
@@ -107,6 +107,8 @@ function CardContent({ children, className = "" }) { return <div className={clas
 function ModalButton({ children, className = "", variant = "default", ...props }) {
   return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
 }
+
+const ERP_SKU_MASTER_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSK3K3H_iL0iG-LqQt96jLXDly7ru3kCRzlr4our5GcIye1kr-NjBD9alSIsp6c4A/pub?output=csv";
 
 function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, onConfirm, onCancel }) {
   return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className="modal-note"><Icon size={16}/> {note}</p></div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton onClick={onConfirm}>{confirmLabel}</ModalButton></div></div></div>;
@@ -483,6 +485,7 @@ export default function PromoMVP() {
   const [notificaciones, setNotificaciones] = useState([]);
   const [skuMaster, setSkuMaster] = useState({});
   const [archivoComprador, setArchivoComprador] = useState(null);
+  const [skuMasterStatus, setSkuMasterStatus] = useState({ type: "idle", message: "Pendiente de cargar ERP." });
   const [comentarios, setComentarios] = useState(comentariosIniciales);
   const [logs, setLogsState] = useState([]);
   const [consultedLogs, setConsultedLogs] = useState([]);
@@ -515,6 +518,7 @@ export default function PromoMVP() {
   const syncedJerarquiaStateRef = React.useRef(new Map());
   const syncedSegmentoStateRef = React.useRef(new Map());
   const syncedNotificacionStateRef = React.useRef(new Map());
+  const skuMasterRemoteLoadRef = React.useRef("");
   const fileInputRef = React.useRef(null);
   const skuMasterFileInputRef = React.useRef(null);
   const setLogs = React.useCallback((updater) => {
@@ -534,6 +538,25 @@ export default function PromoMVP() {
   const showSuccessToast = (message, title = "Cambios guardados") => {
     setSuccessToast({ id: Date.now(), title, message });
   };
+
+  const loadSkuMasterFromRemote = React.useCallback(async () => {
+    setSkuMasterStatus({ type: "loading", message: "Actualizando archivo ERP...", progress: 5 });
+    try {
+      const data = await loadSkuMasterFromCsvUrl(ERP_SKU_MASTER_CSV_URL, (progress) => {
+        setSkuMasterStatus({ type: "loading", message: "Actualizando archivo ERP...", progress });
+      });
+      setSkuMaster(data.skuMaster);
+      setArchivoComprador({
+        nombre: "ERP publicado",
+        total: data.items.length,
+        hoja: data.sheetName,
+        fecha: new Date().toISOString(),
+      });
+      setSkuMasterStatus({ type: "ready", message: `${data.items.length} SKU cargados desde ERP.`, progress: 100 });
+    } catch (error) {
+      setSkuMasterStatus({ type: "error", message: error.message || "No se pudo cargar el archivo ERP.", progress: 0 });
+    }
+  }, []);
 
   const executePendingSaveAction = async () => {
     const current = pendingSaveAction;
@@ -615,6 +638,13 @@ export default function PromoMVP() {
     initialLoadSessionRef.current = appSession.access_token;
     void onLoadSupabase();
   }, [appSession, appUser, supabaseConnection]);
+
+  useEffect(() => {
+    if (!appSession?.access_token || !appUser?.activo) return;
+    if (skuMasterRemoteLoadRef.current === appSession.access_token) return;
+    skuMasterRemoteLoadRef.current = appSession.access_token;
+    void loadSkuMasterFromRemote();
+  }, [appSession, appUser, loadSkuMasterFromRemote]);
 
   const applyCatalogData = (data) => {
     const nextConfig = data.config || [];
@@ -975,10 +1005,17 @@ export default function PromoMVP() {
   const onLoadSkuMaster = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const data = await loadSkuMasterFromExcel(file);
-    setSkuMaster(data.skuMaster);
-    setArchivoComprador({ nombre:file.name, total:data.items.length, hoja:data.sheetName });
-    event.target.value = "";
+    setSkuMasterStatus({ type: "loading", message: "Cargando archivo ERP..." });
+    try {
+      const data = await loadSkuMasterFromExcel(file);
+      setSkuMaster(data.skuMaster);
+      setArchivoComprador({ nombre:file.name, total:data.items.length, hoja:data.sheetName, fecha: new Date().toISOString() });
+      setSkuMasterStatus({ type: "ready", message: `${data.items.length} SKU cargados desde ${file.name}.` });
+    } catch (error) {
+      setSkuMasterStatus({ type: "error", message: error.message || "No se pudo cargar el archivo ERP." });
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const onSaveExcel = async () => {
@@ -1027,11 +1064,11 @@ export default function PromoMVP() {
       {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} actividades={actividades} comentarios={comentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadSupabase={onLoadSupabase} supabaseSettings={supabaseSettings} supabaseStatus={supabaseStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
       {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
       {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} supabaseSettings={supabaseSettings} setSupabaseSettings={setSupabaseSettings} onSaveSupabaseSettings={onRequestSaveSupabaseSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestSupabaseConnection={onTestSupabaseConnection} onValidateSupabaseSession={onValidateSupabaseSession} supabaseStatus={supabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
+      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
       {active === "consulta" && <ProtectedRoute permission={MODULE_PERMISSIONS.consulta}><ConsultaSkuPage rows={rows} actividades={actividades}/></ProtectedRoute>}
       {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
-      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "catalogDesign" && <ProtectedRoute permission={MODULE_PERMISSIONS.catalogDesign}><CatalogDesignPage catalogos={catalogos} supabaseConnection={supabaseConnection} supabaseReady={hasSupabaseConnection(supabaseConnection)}/></ProtectedRoute>}
+      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "catalogDesign" && <ProtectedRoute permission={MODULE_PERMISSIONS.catalogDesign}><CatalogDesignPage catalogos={catalogos} rows={rows} supabaseConnection={supabaseConnection} supabaseReady={hasSupabaseConnection(supabaseConnection)}/></ProtectedRoute>}
       {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} supabaseReady={hasSupabaseConnection(supabaseSettings)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
       {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} catalogos={catalogos} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
       {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios}/></ProtectedRoute>}

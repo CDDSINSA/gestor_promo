@@ -3,6 +3,7 @@ import {
   ArrowRight,
   CircleDot,
   Clock3,
+  Edit3,
   ListChecks,
   Plus,
   Save,
@@ -25,6 +26,7 @@ import {
   normalizeSpecialRequestStatus,
   numberFromHours,
 } from "../utils/promoHelpers";
+import PromosPageView from "./PromosPage";
 
 function Header({ title, subtitle }) {
   return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
@@ -69,13 +71,16 @@ function formatRequestDateTime(value) {
   return value ? formatDateTime(value) : "Pendiente";
 }
 
-export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
+export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], setRows, comentarios = [], setComentarios, compradores = [], jerarquiaCategorias = [], segmentosClientes = [], skuMaster = {}, archivoComprador = null, skuMasterStatus = null, onRefreshSkuMaster, responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
   const { can } = usePermissions();
   const canManageRequests = can(PERMISSIONS.MANAGE_SOLICITUDES);
   const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
   const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
+  const [activeTab, setActiveTab] = useState("seguimiento");
   const [search, setSearch] = useState("");
+  const [buyerFilter, setBuyerFilter] = useState("Todos");
   const [appliedSearch, setAppliedSearch] = useState(null);
+  const [appliedBuyerFilter, setAppliedBuyerFilter] = useState("Todos");
   const [selectedId, setSelectedId] = useState("");
   const [finishModal, setFinishModal] = useState(null);
   const [assignmentError, setAssignmentError] = useState("");
@@ -99,23 +104,46 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
   }, new Map()), [rows]);
 
   const specialRequests = useMemo(() => actividades.map(normalizeActividad).filter((item) => item.tipo_actividad === "ESPECIAL"), [actividades]);
+  const buyerOptions = useMemo(() => {
+    const values = specialRequests.map((item) => item.comprador || item.solicitante).filter(Boolean);
+    return ["Todos", ...Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))];
+  }, [specialRequests]);
   const filteredRequests = useMemo(() => {
     if (appliedSearch === null) return [];
     const term = appliedSearch.trim().toLowerCase();
-    if (!term) return specialRequests;
-    return specialRequests.filter((item) => `${item.actividad_id} ${item.nombre_actividad} ${item.comprador || item.solicitante} ${item.responsable} ${item.canal}`.toLowerCase().includes(term));
-  }, [specialRequests, appliedSearch]);
+    const buyerTerm = appliedBuyerFilter === "Todos" ? "" : appliedBuyerFilter;
+    return specialRequests.filter((item) => {
+      const buyer = item.comprador || item.solicitante || "";
+      const matchesBuyer = !buyerTerm || buyer === buyerTerm;
+      const matchesTerm = !term || `${item.actividad_id} ${item.nombre_actividad} ${buyer} ${item.responsable} ${item.canal}`.toLowerCase().includes(term);
+      return matchesBuyer && matchesTerm;
+    });
+  }, [specialRequests, appliedSearch, appliedBuyerFilter]);
   const selected = filteredRequests.find((item) => item.actividad_id === selectedId) || filteredRequests[0] || null;
+  const selectedRows = useMemo(() => selected ? rows.filter((row) => (row.actividadId || row.actividad_id || row.catalogo_id || row.catalogoId || "") === selected.actividad_id) : [], [rows, selected]);
+  const firstSelectedRow = selectedRows[0] || {};
+  const selectedInitialPromoType = firstSelectedRow.tipoPromo || firstSelectedRow.tipo_promo || "Descuento";
+  const selectedActivityContext = selected ? {
+    actividad_id: selected.actividad_id,
+    nombre_actividad: selected.nombre_actividad,
+    alcance_tipo: firstSelectedRow.alcanceTipo || firstSelectedRow.alcance_tipo || selected.alcance_tipo || "CANAL",
+    alcance_valor: firstSelectedRow.alcanceValor || firstSelectedRow.alcance_valor || selected.alcance_valor || selected.canal || "",
+    aplica_segmento: firstSelectedRow.aplicaSegmento || firstSelectedRow.aplica_segmento || selected.aplica_segmento || "NO",
+    segmento_cliente: firstSelectedRow.segmentoCliente || firstSelectedRow.segmento_cliente || selected.segmento_cliente || "",
+  } : null;
 
   const applySearch = () => {
     setAppliedSearch(search);
+    setAppliedBuyerFilter(buyerFilter);
     setSelectedId("");
     setAssignmentError("");
   };
 
   const clearSearch = () => {
     setSearch("");
+    setBuyerFilter("Todos");
     setAppliedSearch(null);
+    setAppliedBuyerFilter("Todos");
     setSelectedId("");
     setAssignmentError("");
   };
@@ -154,7 +182,9 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
       applyActivityChanges(activity, { responsable: value, fecha_modificacion: new Date().toISOString() }, action);
       return;
     }
-    const action = "";
+    const action = field === "nombre_actividad" && value !== activity.nombre_actividad
+      ? `Actualizo nombre de solicitud ${activity.actividad_id}: ${value}`
+      : "";
     applyActivityChanges(activity, { [field]: value, fecha_modificacion: new Date().toISOString() }, action);
   };
 
@@ -234,12 +264,16 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
 
   return <div>
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
-    <div className="special-request-kpis">
+    <div className="special-request-tabs" role="tablist" aria-label="Vista de solicitudes especiales">
+      <button type="button" className={activeTab === "seguimiento" ? "selected" : ""} onClick={() => setActiveTab("seguimiento")}><ListChecks size={16}/> Seguimiento</button>
+      <button type="button" className={activeTab === "editar" ? "selected" : ""} onClick={() => setActiveTab("editar")}><Edit3 size={16}/> Editar solicitud</button>
+    </div>
+    {activeTab === "seguimiento" && <div className="special-request-kpis">
       <Metric title="Nuevas" value={statusTotals.Nuevo || 0} icon={CircleDot}/>
       <Metric title="Aprobadas" value={statusTotals.Aprovado || 0} icon={UserCheck}/>
       <Metric title="En trabajo" value={statusTotals["En trabajo"] || 0} icon={Clock3}/>
       <Metric title="Finalizadas" value={statusTotals.Finalizado || 0} icon={ListChecks}/>
-    </div>
+    </div>}
 
     <div className="special-request-top">
       <Card className="special-request-list-card">
@@ -247,6 +281,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
           <div className="section-head">
             <div><h2>Solicitudes</h2><span>{appliedSearch === null ? "Presione Buscar para cargar" : `${filteredRequests.length} visibles`}</span></div>
             <div className="toolbar-actions">
+              <label className="special-request-buyer-filter"><span>Comprador</span><select value={buyerFilter} onChange={(e) => setBuyerFilter(e.target.value)}>{buyerOptions.map((buyer) => <option key={buyer}>{buyer}</option>)}</select></label>
               <div className="search compact"><Search size={16}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar solicitud" /></div>
               <Button variant="outline" onClick={applySearch}><Search size={16}/> Buscar</Button>
               <Button variant="outline" onClick={clearSearch}><X size={16}/> Limpiar</Button>
@@ -268,7 +303,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
         </CardContent>
       </Card>
 
-      <Card className="special-request-detail-card">
+      {activeTab === "seguimiento" ? <Card className="special-request-detail-card">
         <CardContent>
           <div className="section-head">
             <div><h2>{selected ? selected.nombre_actividad : "Detalle"}</h2><span>{selected ? selected.actividad_id : "Seleccione una solicitud"}</span></div>
@@ -294,10 +329,54 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             })}</div>
           </div> : <div className="empty-state">Seleccione una solicitud para asignar responsable y recursos.</div>}
         </CardContent>
-      </Card>
+      </Card> : <Card className="special-request-detail-card">
+        <CardContent>
+          <div className="section-head">
+            <div><h2>{selected ? "Editar solicitud" : "Seleccione una solicitud"}</h2><span>{selected ? `${selected.actividad_id} · ${selectedRows.length} SKU` : "Use la lista para abrir la grilla"}</span></div>
+            <div className="toolbar-actions">
+              {canCreateSpecial && <Button variant="outline" onClick={() => setActive("especial")}><Plus size={16}/> Nueva especial</Button>}
+              {canSyncSupabase && <Button onClick={onSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}
+            </div>
+          </div>
+          {selected ? <div className="special-edit-summary">
+            <label className="field"><span>Nombre de solicitud</span><input value={selected.nombre_actividad || ""} onChange={(e) => updateField(selected, "nombre_actividad", e.target.value)} placeholder="Nombre de solicitud especial" /></label>
+            <div><strong>{selected.actividad_id}</strong><span>{selected.comprador || selected.solicitante || "Sin comprador"} · {selected.canal || "Sin canal"}</span></div>
+            <span className={classNames("status-badge", `status-${getSpecialRequestStatusKey(selectedStatus)}`)}>{getStatusLabel(selectedStatus)}</span>
+          </div> : <div className="empty-state">Busque y seleccione una solicitud especial para editar sus SKU.</div>}
+        </CardContent>
+      </Card>}
     </div>
 
-    <div className="special-board">
+    {activeTab === "editar" && selected ? <div className="special-request-editor">
+      <PromosPageView
+        key={selected.actividad_id}
+        catalogoActivo={{ id: selected.actividad_id, nombre: selected.nombre_actividad, canal: selected.canal }}
+        rows={rows}
+        setRows={setRows}
+        comentarios={comentarios}
+        setComentarios={setComentarios}
+        compradores={compradores}
+        jerarquiaCategorias={jerarquiaCategorias}
+        segmentosClientes={segmentosClientes}
+        skuMaster={skuMaster}
+        setLogs={setLogs}
+        archivoComprador={archivoComprador}
+        skuMasterStatus={skuMasterStatus}
+        onRefreshSkuMaster={onRefreshSkuMaster}
+        onSaveSupabase={onSaveSupabase}
+        supabaseReady={supabaseReady}
+        saveSupabaseStatus={saveSupabaseStatus}
+        isSyncing={isSyncing}
+        activityContext={selectedActivityContext}
+        initialComprador={selected.comprador || selected.solicitante || ""}
+        lockComprador
+        initialTipoPromo={selectedInitialPromoType}
+        title="Editar SKU de solicitud"
+        subtitle="Corrija descuentos, precios, SKU y comentarios de la solicitud especial seleccionada."
+      />
+    </div> : activeTab === "editar" ? <div className="empty-state">Use Buscar y seleccione una solicitud para habilitar la edición.</div> : null}
+
+    {activeTab === "seguimiento" && <div className="special-board">
       {SPECIAL_REQUEST_STATUSES.map((status) => {
         const key = getSpecialRequestStatusKey(status);
         const items = filteredRequests.filter((item) => normalizeSpecialRequestStatus(item.estado) === status);
@@ -319,7 +398,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
           </div>
         </section>;
       })}
-    </div>
+    </div>}
 
     {finishModal && <div className="modal-backdrop" role="presentation">
       <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="finish-special-title">

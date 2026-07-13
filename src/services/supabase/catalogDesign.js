@@ -154,7 +154,7 @@ export async function loadCatalogDesignData(connection) {
     selectAll(connection, "catalogo_pagina_comentarios", { order: "fecha_creacion.desc" }),
     selectAll(connection, "catalogo_consolidado_final", { order: "fecha_creacion.desc" }),
     selectAll(connection, "usuarios_app", { select: "id,auth_user_id,nombre,email,rol,buyer_id,activo", order: "nombre.asc" }),
-    selectAll(connection, "compradores", { select: "id,comprador,division,correo,activo", order: "comprador.asc" }),
+    selectAll(connection, "compradores", { select: "id,comprador,categoria_comprador,division,correo,activo,senior_id", order: "comprador.asc" }),
   ]);
 
   return { projects, pages, comments, finals, users, buyers };

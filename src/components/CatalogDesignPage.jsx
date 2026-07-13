@@ -6,11 +6,15 @@ import {
   Eye,
   ImageUp,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   Save,
+  Search,
   ZoomIn,
   ZoomOut,
+  X,
   XCircle,
 } from "lucide-react";
 import { PERMISSIONS, normalizeRole, ROLES } from "../constants/permissions";
@@ -30,7 +34,8 @@ import {
   updateCatalogDesignProject,
   uploadCatalogDesignPageImage,
 } from "../services/supabaseService";
-import { classNames } from "../utils/common";
+import { isCompradorJunior } from "../utils/avanceHelpers";
+import { classNames, normalizeValue } from "../utils/common";
 
 const PROJECT_STATES = ["planificacion", "en_diseno", "en_revision", "aprobado", "consolidado", "cancelado"];
 const PAGE_STATES = ["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"];
@@ -144,7 +149,23 @@ function buildInitialProject(catalogos = []) {
   };
 }
 
-export default function CatalogDesignPage({ catalogos = [], supabaseConnection, supabaseReady }) {
+function getPromoField(row = {}, ...fields) {
+  for (const field of fields) {
+    const value = normalizeValue(row[field]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function normalizeSkuKey(value) {
+  return normalizeValue(value).toLowerCase();
+}
+
+function formatSkuInfoValue(value) {
+  return normalizeValue(value) || "Sin dato";
+}
+
+export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseConnection, supabaseReady }) {
   const { appUser, role } = useAuth();
   const { can } = usePermissions();
   const currentRole = normalizeRole(role || appUser?.rol);
@@ -173,6 +194,10 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
   const [signedUrls, setSignedUrls] = useState({});
   const [viewerZoom, setViewerZoom] = useState(100);
   const [targetPageCount, setTargetPageCount] = useState("");
+  const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
+  const [skuFinderOpen, setSkuFinderOpen] = useState(false);
+  const [skuQuery, setSkuQuery] = useState("");
+  const [skuSearchTerm, setSkuSearchTerm] = useState("");
   const [status, setStatus] = useState({ type: "idle", message: "" });
 
   const visibleProjects = useMemo(() => projects.filter((project) => catalogoIdsTrabajables.has(String(project.catalogo_id || "").trim())), [projects, catalogoIdsTrabajables]);
@@ -198,6 +223,7 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
     const allowedRoles = new Set([ROLES.DESIGNER, ROLES.MARK, ROLES.ADMIN]);
     return users.filter((user) => user.activo !== false && allowedRoles.has(normalizeRole(user.rol)));
   }, [users]);
+  const seniorBuyerFilterOptions = useMemo(() => buyers.filter((buyer) => buyer.activo !== false && !isCompradorJunior(buyer)), [buyers]);
 
   const visiblePages = useMemo(() => {
     return pages.filter((page) => {
@@ -232,6 +258,33 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
   const selectedComments = useMemo(() => comments.filter((comment) => comment.pagina_id === selectedPage?.id), [comments, selectedPage]);
   const selectedPageIndex = visiblePages.findIndex((page) => page.id === selectedPage?.id);
   const selectedImageUrl = selectedPage ? signedUrls[selectedPage.id] || "" : "";
+  const selectedProjectPromoRows = useMemo(() => {
+    const projectCatalogId = normalizeValue(selectedProject?.catalogo_id);
+    const sourceRows = rows || [];
+    if (!projectCatalogId) return sourceRows;
+    const relatedRows = sourceRows.filter((row) => {
+      const rowCatalogIds = [
+        row.catalogo_id,
+        row.actividad_id,
+        row.actividadId,
+        row.catalogoId,
+      ].map(normalizeValue).filter(Boolean);
+      return rowCatalogIds.includes(projectCatalogId);
+    });
+    return relatedRows.length ? relatedRows : sourceRows;
+  }, [rows, selectedProject]);
+  const skuSearchResults = useMemo(() => {
+    const term = normalizeSkuKey(skuSearchTerm);
+    if (!term) return [];
+    const exactMatches = selectedProjectPromoRows.filter((row) => normalizeSkuKey(row.sku) === term);
+    if (exactMatches.length) return exactMatches;
+    return selectedProjectPromoRows.filter((row) => normalizeSkuKey(row.sku).includes(term));
+  }, [selectedProjectPromoRows, skuSearchTerm]);
+
+  const submitSkuSearch = (event) => {
+    event.preventDefault();
+    setSkuSearchTerm(normalizeValue(skuQuery));
+  };
 
   const selectViewerPage = (page) => {
     if (!page) return;
@@ -279,6 +332,12 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
       return buildInitialProject(catalogosTrabajables);
     });
   }, [catalogosTrabajables, catalogoIdsTrabajables]);
+
+  useEffect(() => {
+    if (!filters.buyer) return;
+    if (seniorBuyerFilterOptions.some((buyer) => buyer.id === filters.buyer)) return;
+    setFilters((current) => ({ ...current, buyer: "" }));
+  }, [filters.buyer, seniorBuyerFilterOptions]);
 
   useEffect(() => {
     setSelectedPageId((current) => pages.some((page) => page.id === current && page.proyecto_id === selectedProject?.id) ? current : "");
@@ -448,12 +507,19 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
       </div>
     </div>
 
-    <div className="catalog-design-layout">
-      <Card className="catalog-design-sidebar">
+    <div className={classNames("catalog-design-layout", projectPanelCollapsed && "projects-collapsed")}>
+      <Card className={classNames("catalog-design-sidebar", projectPanelCollapsed && "collapsed")}>
         <CardContent>
-          <div className="toolbar compact">
+          {projectPanelCollapsed ? <div className="catalog-design-sidebar-rail">
+            <button type="button" onClick={() => setProjectPanelCollapsed(false)} title="Mostrar proyectos" aria-label="Mostrar proyectos"><PanelLeftOpen size={18}/></button>
+            <span>Proyectos</span>
+          </div> : <>
+          <div className="toolbar compact catalog-design-sidebar-head">
             <h2>Proyectos</h2>
-            {canManage && <Button variant="outline" onClick={createProject} disabled={!canCreateProject} title={canCreateProject ? "" : "Seleccione un catalogo trabajable creado en Ajustes."}><Plus size={16}/> Crear</Button>}
+            <div className="toolbar-actions">
+              <button type="button" className="icon-btn catalog-design-collapse-btn" onClick={() => setProjectPanelCollapsed(true)} title="Contraer proyectos" aria-label="Contraer proyectos"><PanelLeftClose size={18}/></button>
+              {canManage && <Button variant="outline" onClick={createProject} disabled={!canCreateProject} title={canCreateProject ? "" : "Seleccione un catalogo trabajable creado en Ajustes."}><Plus size={16}/> Crear</Button>}
+            </div>
           </div>
           {canManage && <div className="catalog-design-form">
             <Field label="Catálogo">
@@ -512,6 +578,7 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
             <div><span>Listas</span><strong>{metrics.listas}</strong></div>
             <div className="catalog-design-kpi-progress"><span>Avance</span><strong>{metrics.porcentaje}%</strong></div>
           </div>
+          </>}
         </CardContent>
       </Card>
 
@@ -560,7 +627,7 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
               </div>
               <div className="toolbar-actions filters">
                 <select value={filters.designer} onChange={(event) => setFilters((current) => ({ ...current, designer: event.target.value }))}><option value="">Diseñador</option>{designerOptions.map((user) => <option key={user.id} value={user.id}>{user.nombre || user.email}</option>)}</select>
-                <select value={filters.buyer} onChange={(event) => setFilters((current) => ({ ...current, buyer: event.target.value }))}><option value="">Comprador</option>{buyers.map((buyer) => <option key={buyer.id} value={buyer.id}>{buyer.comprador}</option>)}</select>
+                <select value={filters.buyer} onChange={(event) => setFilters((current) => ({ ...current, buyer: event.target.value }))}><option value="">Comprador senior</option>{seniorBuyerFilterOptions.map((buyer) => <option key={buyer.id} value={buyer.id}>{buyer.comprador}</option>)}</select>
                 <select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))}><option value="">Estado</option>{PAGE_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select>
               </div>
             </div>
@@ -576,12 +643,46 @@ export default function CatalogDesignPage({ catalogos = [], supabaseConnection, 
                   <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(1)} disabled={selectedPageIndex < 0 || selectedPageIndex >= visiblePages.length - 1}>Siguiente <ChevronRight size={16}/></Button>
                   <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.max(60, value - 20))} disabled={!selectedPage} title="Reducir zoom" aria-label="Reducir zoom"><ZoomOut size={16}/></Button>
                   <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.min(180, value + 20))} disabled={!selectedPage} title="Aumentar zoom" aria-label="Aumentar zoom"><ZoomIn size={16}/></Button>
+                  <Button className="catalog-design-sku-btn" variant="outline" onClick={() => setSkuFinderOpen(true)} title="Buscar informacion de SKU"><Search size={16}/> Buscar SKU</Button>
                   {canUploadSelectedPage && <label className="btn btn-primary catalog-design-file-btn catalog-design-viewer-upload">
                     <ImageUp size={16}/> Actualizar imagen
                     <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => { uploadPageImage(selectedPage, event.target.files?.[0]); event.target.value = ""; }} />
                   </label>}
                 </div>
               </div>
+              {skuFinderOpen && <div className="catalog-design-sku-popover" role="dialog" aria-label="Buscar informacion de SKU">
+                <div className="catalog-design-sku-popover-head">
+                  <div>
+                    <strong>Buscar SKU</strong>
+                    <span>Valida datos promocionales contra la pagina visible.</span>
+                  </div>
+                  <button type="button" className="icon-btn" onClick={() => setSkuFinderOpen(false)} aria-label="Cerrar buscador SKU"><X size={16}/></button>
+                </div>
+                <form className="catalog-design-sku-search" onSubmit={submitSkuSearch}>
+                  <input value={skuQuery} onChange={(event) => setSkuQuery(event.target.value)} placeholder="Codigo SKU" autoFocus />
+                  <Button type="submit" disabled={!skuQuery.trim()}><Search size={16}/> Buscar</Button>
+                </form>
+                <div className="catalog-design-sku-results">
+                  {!skuSearchTerm && <div className="catalog-design-sku-empty">Ingrese un codigo para consultar descripcion, precios, descuento y comentario.</div>}
+                  {skuSearchTerm && !skuSearchResults.length && <div className="catalog-design-sku-empty">No se encontro informacion para el SKU {skuSearchTerm}.</div>}
+                  {skuSearchResults.map((row, index) => <div className="catalog-design-sku-result" key={`${row.id || row.row_id || row.sku}-${index}`}>
+                    <div className="catalog-design-sku-result-head">
+                      <span>SKU</span>
+                      <strong>{formatSkuInfoValue(row.sku)}</strong>
+                    </div>
+                    <p>{formatSkuInfoValue(getPromoField(row, "descripcion"))}</p>
+                    <div className="catalog-design-sku-data">
+                      <div><span>Antes</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAntes", "precio_antes"))}</strong></div>
+                      <div><span>Ahora</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAhora", "precio_ahora"))}</strong></div>
+                      <div><span>Descuento</span><strong>{formatSkuInfoValue(getPromoField(row, "descuento"))}</strong></div>
+                    </div>
+                    <div className="catalog-design-sku-comment">
+                      <span>Comentario</span>
+                      <p>{formatSkuInfoValue(getPromoField(row, "comentario", "comentario_comprador"))}</p>
+                    </div>
+                  </div>)}
+                </div>
+              </div>}
               <div className="catalog-design-viewer-stage">
                 {selectedImageUrl ? <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Pagina de catalogo"} style={{ width: `${viewerZoom}%` }} /> : <div className="catalog-design-viewer-empty">
                   <ImageUp size={30}/>
