@@ -74,7 +74,7 @@ export async function callRpc(connection, functionName, params = {}) {
   });
 }
 
-function toPostgrestIn(values = []) {
+export function toPostgrestIn(values = []) {
   const uniqueValues = Array.from(new Set(values.map(cleanText).filter(Boolean)));
   if (!uniqueValues.length) return "";
   return `in.(${uniqueValues.map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;

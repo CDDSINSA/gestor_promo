@@ -27,7 +27,6 @@ import {
 import { CONSOLIDADO_TABLE_HEADERS } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
-import { isComplexPromoType } from "../promoTypes/promoTypeEngine";
 import { Button, Card, CardContent, Header, Metric } from "./ui";
 
 const CONSOLIDADO_PAGE_SIZE = 100;
@@ -216,14 +215,6 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     ? comentarios.filter((comment) => isActivityComment(comment) && visibleActivityIds.has(comment.actividadId || comment.actividad_id))
     : [];
 
-  const resumenComprador = compradores
-    .map((buyer) => {
-      const nombre = buyer.comprador || buyer.nombre;
-      const buyerRows = rowsFiltradas.filter((row) => (row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador") === nombre);
-      return { nombre, division: buyer.division, total: buyerRows.length, complejas: buyerRows.filter((row) => isComplexPromoType(row.tipoPromo)).length };
-    })
-    .filter((item) => item.total > 0);
-
   const agregarComentario = (rowId) => {
     const texto = String(commentDrafts[rowId] || "").trim();
     if (!texto) return;
@@ -306,12 +297,6 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
       </div>
       <div className="consolidado-layout">
         <div className="consolidado-top">
-          <Card className="consolidado-summary-card">
-            <CardContent>
-              <div className="section-head"><h2>Resumen por comprador</h2><span>{appliedFilters ? `${resumenComprador.length} compradores` : "Presione Buscar"}</span></div>
-              <div className="summary-list compact">{resumenComprador.map((item) => <div key={item.nombre}><strong>{item.nombre}</strong><span>{item.division}</span><p><b>{item.total}</b> filas · {item.complejas} complejas</p></div>)}</div>
-            </CardContent>
-          </Card>
           <Card className="consolidado-filter-card">
             <CardContent>
               <div className="section-head">

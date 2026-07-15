@@ -148,7 +148,7 @@ export default function GestionAvancesPage({
   }, [scopedRows, hierarchyByDepId, buyerDivisionMap]);
   const divisionesCatalogo = useMemo(() => {
     const selected = normalizeDivisionesCatalogo(catalogo?.divisiones);
-    const base = selected.length ? selected : involvedDivisions.length ? involvedDivisions : divisionOptions;
+    const base = selected.length ? selected : divisionOptions.length ? divisionOptions : involvedDivisions;
     return base.filter((division, index, source) => source.findIndex((item) => sameDivision(item, division)) === index);
   }, [catalogo, divisionOptions, involvedDivisions]);
 
@@ -164,11 +164,27 @@ export default function GestionAvancesPage({
     });
   };
 
+  const getSeniorConfiguredDivisions = (senior) => {
+    const divisionsByKey = new Map();
+    const addDivision = (division) => {
+      if (!division || !divisionesCatalogo.some((catalogDivision) => sameDivision(catalogDivision, division))) return;
+      const key = normalizeKey(division);
+      if (key && !divisionsByKey.has(key)) divisionsByKey.set(key, division);
+    };
+
+    getCompradorDivisiones(senior).forEach(addDivision);
+    juniors
+      .filter((junior) => compradorReferencesSenior(junior, senior))
+      .flatMap(getCompradorDivisiones)
+      .forEach(addDivision);
+
+    return Array.from(divisionsByKey.values());
+  };
+
   const seniorSummaries = useMemo(() => seniors.map((senior) => {
     const seniorName = getCompradorNombre(senior);
-    const seniorDivisions = getCompradorDivisiones(senior)
-      .filter((division) => divisionesCatalogo.some((catalogDivision) => sameDivision(catalogDivision, division)));
-    const divisions = seniorDivisions.map((division) => {
+    const managedDivisions = getSeniorConfiguredDivisions(senior);
+    const divisions = managedDivisions.map((division) => {
       const supportJuniors = getSupportJuniors(senior, division);
       const responsibleNames = [seniorName, ...supportJuniors.map(getCompradorNombre).filter(Boolean)];
       const divisionRows = scopedRows.filter((row) => isBuyerName(row, responsibleNames) && rowMatchesDivision(row, division));

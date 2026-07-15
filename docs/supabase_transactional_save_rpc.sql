@@ -83,7 +83,7 @@ begin
       v_operation_id,
       auth.uid(),
       coalesce(p_payload ->> 'operation_type', ''),
-      encode(digest(p_payload::text, 'sha256'), 'hex')
+      md5(p_payload::text)
     )
     on conflict (operation_id) do nothing;
 

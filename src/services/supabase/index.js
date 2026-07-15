@@ -19,6 +19,9 @@ export {
   pingSupabaseConnection,
 } from "./catalog";
 export {
+  loadExportDataFromSupabase,
+} from "./exports";
+export {
   saveCatalogToSupabase,
   saveSettingsToSupabase,
 } from "./save";

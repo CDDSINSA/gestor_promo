@@ -1287,7 +1287,7 @@ button:focus-visible {
 
 .consolidado-top {
   display: grid;
-  grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 2.2fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   align-items: stretch;
 }

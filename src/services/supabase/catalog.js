@@ -6,6 +6,39 @@ import {
   toPromotionRow,
 } from "./mappers";
 
+const OPERATIONAL_PROMOTION_WINDOW_DAYS = 60;
+const CLOSED_ACTIVITY_STATUSES = new Set(["cerrado", "cerrada", "cancelado", "cancelada"]);
+
+function normalizeStatus(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getOperationalPromotionCampanaIds(campanas = []) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - OPERATIONAL_PROMOTION_WINDOW_DAYS);
+  cutoff.setHours(0, 0, 0, 0);
+
+  return campanas
+    .filter((campana) => {
+      const status = normalizeStatus(campana.estado);
+      const endDate = parseDateOnly(campana.fecha_fin);
+      if (!CLOSED_ACTIVITY_STATUSES.has(status)) return true;
+      return endDate ? endDate >= cutoff : false;
+    })
+    .map((campana) => campana.id)
+    .filter(Boolean);
+}
+
 export async function pingSupabaseConnection(connection) {
   const role = await supabaseRequest(connection, "/rest/v1/rpc/current_user_role", { method: "POST", body: "{}" });
   const currentRole = Array.isArray(role) ? role[0] : role;
@@ -23,9 +56,6 @@ export async function loadCatalogFromSupabase(connection) {
     responsables,
     jerarquias,
     avances,
-    promociones,
-    detalles,
-    comentarios,
     notificaciones,
     config,
   ] = await Promise.all([
@@ -35,12 +65,35 @@ export async function loadCatalogFromSupabase(connection) {
     selectAll(connection, "responsables_solicitudes", { order: "nombre.asc" }),
     selectAll(connection, "jerarquia_categorias", { order: "dep_id.asc" }),
     selectAll(connection, "avances_catalogo", { order: "fecha_estado.asc" }),
-    selectAll(connection, "promociones", { order: "created_at.asc" }),
-    selectAll(connection, "promociones_detalle", { order: "created_at.asc" }),
-    selectAll(connection, "comentarios", { order: "fecha.asc" }),
     selectAll(connection, "notificaciones", { order: "created_at.asc" }),
     selectAll(connection, "configuracion"),
   ]);
+
+  const operationalCampanaIds = getOperationalPromotionCampanaIds(campanas);
+  const promociones = operationalCampanaIds.length
+    ? await selectRowsByValues(connection, "promociones", "campana_id", operationalCampanaIds)
+    : [];
+  promociones.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+
+  const promotionIds = promociones.map((item) => item.id).filter(Boolean);
+  const [detalles, lineComments, activityComments] = await Promise.all([
+    promotionIds.length
+      ? selectRowsByValues(connection, "promociones_detalle", "promocion_id", promotionIds)
+      : [],
+    promotionIds.length
+      ? selectRowsByValues(connection, "comentarios", "promocion_id", promotionIds)
+      : [],
+    operationalCampanaIds.length
+      ? selectRowsByValues(connection, "comentarios", "campana_id", operationalCampanaIds)
+      : [],
+  ]);
+  detalles.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+  const comentariosById = new Map();
+  [...lineComments, ...activityComments].forEach((item) => {
+    if (item?.id) comentariosById.set(item.id, item);
+  });
+  const comentarios = Array.from(comentariosById.values())
+    .sort((left, right) => String(left.fecha || left.created_at || "").localeCompare(String(right.fecha || right.created_at || "")));
 
   const compradorById = keyBy(compradores, "id");
   const campanaById = keyBy(campanas, "id");

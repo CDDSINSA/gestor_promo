@@ -45,6 +45,25 @@ function withOperationId(data = {}) {
   };
 }
 
+function withoutOperationId(data = {}) {
+  const {
+    operation_id,
+    operationId,
+    client_operation_id,
+    operation_type,
+    operationType,
+    client_started_at,
+    clientStartedAt,
+    ...rest
+  } = data;
+  return rest;
+}
+
+function isMissingDigestFunction(error) {
+  const message = error?.message || "";
+  return message.includes("function digest") && message.includes("does not exist");
+}
+
 export async function saveCatalogToSupabase(connection, data = {}) {
   assertCanSave(connection);
   assertValidPromotions(data);
@@ -54,6 +73,9 @@ export async function saveCatalogToSupabase(connection, data = {}) {
     return await callRpc(connection, "save_catalog_transactional", { p_payload: payload });
   } catch (error) {
     const message = error?.message || "";
+    if (isMissingDigestFunction(error)) {
+      return callRpc(connection, "save_catalog_transactional", { p_payload: withoutOperationId(payload) });
+    }
     if (message.includes("save_catalog_transactional") || message.includes("PGRST202") || message.includes("Could not find the function")) {
       throw new Error("No se encontro la funcion RPC transaccional save_catalog_transactional en Supabase. Ejecute docs/supabase_transactional_save_rpc.sql antes de guardar.");
     }

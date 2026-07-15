@@ -79,6 +79,8 @@ function SkuMasterStatus({ status, total, source, onRefresh }) {
   return <div className={classNames("sku-master-status", statusType)}><Icon size={18}/><div className="sku-master-status-main"><div className="sku-master-status-top"><strong>{title}</strong>{onRefresh && <button type="button" className="sku-master-refresh" onClick={onRefresh} disabled={isLoading} title="Actualizar archivo ERP"><RefreshCw size={13}/> Actualizar</button>}</div><span>{detail}</span><div className="sku-master-progress" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div></div></div>;
 }
 
+const PROMO_GRID_PAGE_SIZE = 100;
+
 function parseClipboardRows(text) {
   const rawText = String(text || "");
   const normalizedText = rawText.replaceAll(String.fromCharCode(13), "");
@@ -471,13 +473,14 @@ function renderCell(row, col, updateRow, warning, segmentOptions = []) {
   return <input value={row[col] || ""} onChange={(e) => updateRow(row.id, col, e.target.value)} />;
 }
 
-export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
+export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, onSaveSupabaseDirect, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
   const { can } = usePermissions();
   const canEditPromos = can(PERMISSIONS.EDIT_PROMOS);
   const canEditAvances = can(PERMISSIONS.EDIT_AVANCES);
   const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
   const [saveWarning, setSaveWarning] = React.useState(null);
   const [selectedPromoIds, setSelectedPromoIds] = React.useState(() => new Set());
+  const [promoGridPage, setPromoGridPage] = React.useState(1);
   const selectVisibleCheckboxRef = React.useRef(null);
   const {
     comprador,
@@ -920,14 +923,27 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setSelectedSegments([]);
     setComboDraft(createEmptyComboDraft());
   };
-  const { updateRow, deleteRow, deleteRows } = usePromos({
+  const { updateRow, deleteRow } = usePromos({
     setRows,
     skuMaster,
     selectedBuyerConfig,
     getMasterDivision,
     normalizeRow: toAppRow,
   });
-  const selectableFilteredRowIds = useMemo(() => filteredRows.map((row) => row.id).filter(Boolean), [filteredRows]);
+  React.useEffect(() => {
+    setPromoGridPage(1);
+    setSelectedPromoIds(new Set());
+  }, [currentActivityId, comprador, tipoActivo, search, segmentMode, segmentText]);
+  const promoGridTotalPages = Math.max(1, Math.ceil(filteredRows.length / PROMO_GRID_PAGE_SIZE));
+  const safePromoGridPage = Math.min(promoGridPage, promoGridTotalPages);
+  React.useEffect(() => {
+    if (promoGridPage > promoGridTotalPages) setPromoGridPage(promoGridTotalPages);
+  }, [promoGridPage, promoGridTotalPages]);
+  const paginatedRows = useMemo(() => {
+    const start = (safePromoGridPage - 1) * PROMO_GRID_PAGE_SIZE;
+    return filteredRows.slice(start, start + PROMO_GRID_PAGE_SIZE);
+  }, [filteredRows, safePromoGridPage]);
+  const selectableFilteredRowIds = useMemo(() => paginatedRows.map((row) => row.id).filter(Boolean), [paginatedRows]);
   React.useEffect(() => {
     const visibleIds = new Set(selectableFilteredRowIds);
     setSelectedPromoIds((current) => {
@@ -968,8 +984,13 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     if (!ids.length) return;
     const confirmed = window.confirm(`Se eliminarán ${ids.length} línea(s) seleccionada(s). Esta acción no se puede deshacer.`);
     if (!confirmed) return;
-    deleteRows(ids);
+    const idsToDelete = new Set(ids);
+    const nextRows = rows.filter((row) => !idsToDelete.has(row.id));
+    setRows(nextRows);
     setSelectedPromoIds(new Set());
+    if (canSyncSupabase && supabaseReady && !isSyncing && onSaveSupabaseDirect) {
+      onSaveSupabaseDirect({ rows: nextRows });
+    }
   };
   const isUmbralTablePaste = bulkColumn === BULK_COLUMN_UMBRAL_TABLE;
   const isComboTablePaste = bulkColumn === BULK_COLUMN_COMBO_TABLE;
@@ -1045,9 +1066,10 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       {comboBuilder}
       <Card className="grid-card">
         <CardContent>
-        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && selectedPromoCount > 0 && <Button variant="outline" onClick={deleteSelectedPromos}><Trash2 size={16}/> Eliminar seleccionados ({selectedPromoCount})</Button>}{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar línea"}</Button>}{canSyncSupabase && <Button onClick={handleSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}</div></div>
+        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && selectedPromoCount > 0 && <Button variant="outline" onClick={deleteSelectedPromos} disabled={isSyncing}><Trash2 size={16}/> Eliminar seleccionados ({selectedPromoCount})</Button>}{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar línea"}</Button>}{canSyncSupabase && <Button onClick={handleSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}</div></div>
           {!esCompleja && <div className="promo-integrity-row"><p className={classNames("promo-integrity-note", missingBenefitCount ? "warning" : "ok")}>{benefitStatusText}</p></div>}
-          <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"><input ref={selectVisibleCheckboxRef} className="promo-row-checkbox" type="checkbox" checked={allFilteredRowsSelected} onChange={toggleVisiblePromoSelection} disabled={!selectableFilteredRowIds.length} title="Seleccionar visibles" aria-label="Seleccionar promociones visibles" /></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{filteredRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><div className="promo-row-actions"><input className="promo-row-checkbox" type="checkbox" checked={selectedPromoIds.has(row.id)} onChange={() => togglePromoSelection(row.id)} aria-label={`Seleccionar SKU ${row.sku || ""}`} /><button className="icon-btn" onClick={() => deleteRow(row.id)} title="Eliminar línea" aria-label="Eliminar línea"><Trash2 size={15}/></button></div></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"><input ref={selectVisibleCheckboxRef} className="promo-row-checkbox" type="checkbox" checked={allFilteredRowsSelected} onChange={toggleVisiblePromoSelection} disabled={!selectableFilteredRowIds.length} title="Seleccionar visibles" aria-label="Seleccionar promociones visibles" /></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{paginatedRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><div className="promo-row-actions"><input className="promo-row-checkbox" type="checkbox" checked={selectedPromoIds.has(row.id)} onChange={() => togglePromoSelection(row.id)} aria-label={`Seleccionar SKU ${row.sku || ""}`} /><button className="icon-btn" onClick={() => deleteRow(row.id)} title="Eliminar línea" aria-label="Eliminar línea"><Trash2 size={15}/></button></div></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
+          {filteredRows.length > PROMO_GRID_PAGE_SIZE && <div className="pagination-bar"><Button variant="outline" onClick={() => setPromoGridPage((page) => Math.max(1, page - 1))} disabled={safePromoGridPage <= 1}>Anterior</Button><span>Pagina {safePromoGridPage} de {promoGridTotalPages} · {filteredRows.length} filas filtradas</span><Button variant="outline" onClick={() => setPromoGridPage((page) => Math.min(promoGridTotalPages, page + 1))} disabled={safePromoGridPage >= promoGridTotalPages}>Siguiente</Button></div>}
         </CardContent>
       </Card>
     </div>

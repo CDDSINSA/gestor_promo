@@ -4,6 +4,7 @@ import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
 import { applyComplexPromoBanding, loadStyledXlsx } from "../services/excelStyleService";
 import { formatPromotionValidationErrors, validatePromotions } from "../services/promotionValidationService";
+import { loadExportDataFromSupabase } from "../services/supabaseService";
 import {
   channelMatchesFilter,
   isActivityComment,
@@ -12,6 +13,8 @@ import {
   normalizeActividad,
   normalizeCanal,
   splitChannelValues,
+  toAppComment,
+  toAppRow,
 } from "../utils/promoHelpers";
 import { Button, Card, CardContent, Header } from "./ui";
 
@@ -22,7 +25,7 @@ function isOperationalExportReady(row) {
   return OPERATIONAL_EXPORT_STATUSES.has(status);
 }
 
-export default function ExportPageV2({ rows = [], actividades = [], comentarios = [] }) {
+export default function ExportPageV2({ rows = [], actividades = [], comentarios = [], supabaseConnection = null, supabaseReady = false }) {
   const { can } = usePermissions();
   const canDownload = can(PERMISSIONS.DOWNLOAD_EXPORTS);
   const [compradorFiltro, setCompradorFiltro] = useState("Todos");
@@ -34,22 +37,37 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const [skuFiltro, setSkuFiltro] = useState("");
   const [actividadCatalogoFiltro, setActividadCatalogoFiltro] = useState("");
   const [appliedFilters, setAppliedFilters] = useState(null);
+  const [exportData, setExportData] = useState(null);
+  const [exportStatus, setExportStatus] = useState({ type: "idle", message: "" });
+
+  const sourceRows = exportData?.rows || rows;
+  const sourceActividades = exportData?.actividades || actividades;
+  const sourceComentarios = exportData?.comentarios || comentarios;
 
   const activityMap = useMemo(
-    () => new Map((actividades || []).map((item) => {
+    () => new Map((sourceActividades || []).map((item) => {
       const activity = normalizeActividad(item);
       return [activity.actividad_id, activity];
     })),
-    [actividades],
+    [sourceActividades],
+  );
+  const optionActivityMap = useMemo(
+    () => new Map([...(actividades || []), ...(sourceActividades || [])].map((item) => {
+      const activity = normalizeActividad(item);
+      return [activity.actividad_id, activity];
+    })),
+    [actividades, sourceActividades],
   );
 
   const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
   const getRowId = (row) => row.id || row.row_id || row.rowId || "";
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
+  const getOptionActivity = (row) => optionActivityMap.get(row.actividadId || row.actividad_id) || optionActivityMap.get(row.catalogo_id) || {};
+  const optionRows = exportData ? [...rows, ...sourceRows] : sourceRows;
   const commentIndexes = useMemo(() => {
     const byRowId = new Map();
     const byActivityId = new Map();
-    (comentarios || []).forEach((comment) => {
+    (sourceComentarios || []).forEach((comment) => {
       if (isLineComment(comment)) {
         const rowId = comment.rowId || comment.row_id || "";
         if (rowId) byRowId.set(rowId, [...(byRowId.get(rowId) || []), comment]);
@@ -60,15 +78,15 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       }
     });
     return { byRowId, byActivityId };
-  }, [comentarios]);
+  }, [sourceComentarios]);
   const getComentariosRow = (rowId) => commentIndexes.byRowId.get(rowId) || [];
   const getActivityComments = (activityId) => commentIndexes.byActivityId.get(activityId) || [];
 
-  const compradoresUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador")))];
-  const tiposUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.tipoPromo || "Sin tipo")))];
-  const tiposActividad = ["Todos", ...Array.from(new Set(rows.map((row) => getActivity(row).tipo_actividad || "CATALOGO")))];
-  const canales = ["Todos", ...Array.from(rows.reduce((map, row) => {
-    const values = splitChannelValues(getActivity(row).canal);
+  const compradoresUnicos = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.comprador || getOptionActivity(row).comprador || getOptionActivity(row).solicitante || "Sin comprador")))];
+  const tiposUnicos = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.tipoPromo || "Sin tipo")))];
+  const tiposActividad = ["Todos", ...Array.from(new Set(optionRows.map((row) => getOptionActivity(row).tipo_actividad || "CATALOGO")))];
+  const canales = ["Todos", ...Array.from(optionRows.reduce((map, row) => {
+    const values = splitChannelValues(getOptionActivity(row).canal);
     if (!values.length) {
       if (!map.has("sin-canal")) map.set("sin-canal", "Sin canal");
       return map;
@@ -79,19 +97,41 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
     });
     return map;
   }, new Map()).values())];
-  const alcances = ["Todos", ...Array.from(new Set(rows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
+  const alcances = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
 
-  const applyFilters = () => {
-    setAppliedFilters({
-      comprador: compradorFiltro,
-      tipo: tipoFiltro,
-      tipoActividad: tipoActividadFiltro,
-      canal: canalFiltro,
-      alcance: alcanceFiltro,
-      estadoComentario: estadoComentarioFiltro,
-      sku: skuFiltro,
-      actividadCatalogo: actividadCatalogoFiltro,
-    });
+  const buildCurrentFilters = () => ({
+    comprador: compradorFiltro,
+    tipo: tipoFiltro,
+    tipoActividad: tipoActividadFiltro,
+    canal: canalFiltro,
+    alcance: alcanceFiltro,
+    estadoComentario: estadoComentarioFiltro,
+    sku: skuFiltro,
+    actividadCatalogo: actividadCatalogoFiltro,
+  });
+
+  const applyFilters = async () => {
+    const nextFilters = buildCurrentFilters();
+    setAppliedFilters(nextFilters);
+    if (!supabaseReady || !supabaseConnection) {
+      setExportData(null);
+      setExportStatus({ type: "ready", message: "Filtros aplicados sobre la data cargada en memoria." });
+      return;
+    }
+
+    setExportStatus({ type: "loading", message: "Consultando promociones en Supabase..." });
+    try {
+      const data = await loadExportDataFromSupabase(supabaseConnection, nextFilters);
+      setExportData({
+        rows: (data.promociones || []).map(toAppRow),
+        actividades: data.actividades || [],
+        comentarios: (data.comentarios || []).map(toAppComment),
+      });
+      setExportStatus({ type: "ready", message: "Consulta lista desde Supabase." });
+    } catch (error) {
+      setExportData({ rows: [], actividades: [], comentarios: [] });
+      setExportStatus({ type: "error", message: error.message || "No se pudo consultar Supabase para exportar." });
+    }
   };
 
   const clearFilters = () => {
@@ -104,9 +144,11 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
     setSkuFiltro("");
     setActividadCatalogoFiltro("");
     setAppliedFilters(null);
+    setExportData(null);
+    setExportStatus({ type: "idle", message: "" });
   };
 
-  const rowsFiltradas = appliedFilters ? rows.filter((row) => {
+  const rowsFiltradas = appliedFilters ? sourceRows.filter((row) => {
     const activity = getActivity(row);
     const comentariosRow = getComentariosRow(getRowId(row));
     const comentariosActividad = getActivityComments(getActivityId(row));
@@ -194,7 +236,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       return;
     }
     const filteredRowIds = new Set(exportRows.map((row) => row.row_id || row.id).filter(Boolean));
-    const validation = validatePromotions(rows, { actividades, scopeRowIds: filteredRowIds });
+    const validation = validatePromotions(sourceRows, { actividades: sourceActividades, scopeRowIds: filteredRowIds });
     if (validation.errors.length) {
       window.alert(`No se puede exportar porque hay promociones incompletas o inválidas:\n${formatPromotionValidationErrors(validation).join("\n")}`);
       return;
@@ -224,13 +266,14 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
           <div className="section-head">
             <div>
               <h2>Filtros</h2>
-              <span>{appliedFilters ? `${rowsFiltradas.length} filas listas para exportar` : "Presione Buscar para preparar descargas"}</span>
+              <span>{exportStatus.type === "loading" ? exportStatus.message : appliedFilters ? `${rowsFiltradas.length} filas listas para exportar` : "Presione Buscar para preparar descargas"}</span>
             </div>
             <div className="toolbar-actions">
-              <Button variant="outline" onClick={applyFilters}><Search size={16}/> Buscar</Button>
-              <Button variant="outline" onClick={clearFilters}><X size={16}/> Limpiar</Button>
+              <Button variant="outline" onClick={applyFilters} disabled={exportStatus.type === "loading"}><Search size={16}/> Buscar</Button>
+              <Button variant="outline" onClick={clearFilters} disabled={exportStatus.type === "loading"}><X size={16}/> Limpiar</Button>
             </div>
           </div>
+          {exportStatus.type === "error" && <div className="status error">{exportStatus.message}</div>}
           <div className="filter-grid">
             <label className="filter-field">
               <span>SKU</span>
@@ -274,7 +317,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
               <Download size={22} />
               <h3>{def.title}</h3>
               <p>{def.desc}</p>
-              {canDownload && <Button onClick={() => downloadExport(key)} disabled={!rowsFiltradas.length}>
+              {canDownload && <Button onClick={() => downloadExport(key)} disabled={!rowsFiltradas.length || exportStatus.type === "loading"}>
                 <Download size={16} /> Descargar XLSX
               </Button>}
             </CardContent>

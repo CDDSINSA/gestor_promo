@@ -12,9 +12,11 @@ import {
   getSeniorIds,
   isCompradorJunior,
 } from "../utils/avanceHelpers";
-import { normalizeCatalogo } from "../utils/promoHelpers";
+import { normalizeCanal, normalizeCatalogo, splitChannelValues } from "../utils/promoHelpers";
 
 function Field({ label, value, onChange, type = "text", ...props }) { return <label className="field"><span>{label}</span><input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
+
+const CATALOG_CHANNEL_OPTIONS = ["Retail", "Comasa", "Galerón", "Ferrex", "Proyectos"];
 
 function normalizeDivisionKey(value) {
   return String(value || "")
@@ -87,10 +89,20 @@ export default function AjustesPage({
   const divisionOptions = [...divisionOptionsBase, ...selectedExtraDivisiones];
   const selectedDivisiones = selected?.divisiones?.length ? selected.divisiones : divisionOptions;
   const selectedDivisionKeys = new Set(selectedDivisiones.map(normalizeDivisionKey));
+  const selectedChannels = splitChannelValues(selected?.canal || "");
+  const selectedChannelKeys = new Set(selectedChannels.map(normalizeCanal));
   const updateCatalogDivisiones = (nextDivisiones) => {
     const nextKeys = new Set((nextDivisiones || []).map(normalizeDivisionKey));
     const cleaned = divisionOptions.filter((division) => nextKeys.has(normalizeDivisionKey(division)));
     updateSelected("divisiones", cleaned.length === divisionOptions.length ? [] : cleaned);
+  };
+  const toggleCatalogChannel = (channel) => {
+    const key = normalizeCanal(channel);
+    const next = selectedChannelKeys.has(key)
+      ? selectedChannels.filter((item) => normalizeCanal(item) !== key)
+      : [...selectedChannels, channel];
+    const ordered = CATALOG_CHANNEL_OPTIONS.filter((item) => next.some((selectedItem) => normalizeCanal(selectedItem) === normalizeCanal(item)));
+    updateSelected("canal", ordered.join(", "));
   };
 
   const toggleCatalogDivision = (division) => {
@@ -244,7 +256,17 @@ export default function AjustesPage({
           </div>
           <div className="form-grid">
             <Field label="Nombre del catalogo" value={selected?.nombre || ""} onChange={(v) => updateSelected("nombre", v)}/>
-            <Field label="Canal" value={selected?.canal || ""} onChange={(v) => updateSelected("canal", v)}/>
+            <div className="division-picker wide">
+              <div className="segment-panel-head">
+                <div>
+                  <strong>Canal</strong>
+                  <span>{selectedChannels.length ? selectedChannels.join(", ") : "Seleccione canal"}</span>
+                </div>
+              </div>
+              <div className="segment-chip-list">
+                {CATALOG_CHANNEL_OPTIONS.map((channel) => <button key={channel} type="button" className={selectedChannelKeys.has(normalizeCanal(channel)) ? "segment-chip selected" : "segment-chip"} onClick={() => toggleCatalogChannel(channel)}>{channel}</button>)}
+              </div>
+            </div>
             <div className="division-picker wide">
               <div className="segment-panel-head">
                 <div>
