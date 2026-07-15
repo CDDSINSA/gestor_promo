@@ -24,18 +24,7 @@ import {
   sameDivision,
 } from "../utils/avanceHelpers";
 import { isActivityComment, isLineComment, normalizeActividad, normalizeCanal } from "../utils/promoHelpers";
-
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) { return <div className={classNames("card", className)}>{children}</div>; }
-function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
-function Metric({ title, value, icon: Icon }) { return <Card><CardContent className="metric"><div><p>{title}</p><strong>{value}</strong></div><div className="metric-icon"><Icon size={20}/></div></CardContent></Card>; }
+import { Button, Card, CardContent, Header, Metric } from "./ui";
 
 export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseStatus, isSyncing }) {
   const { appUser } = useAuth();

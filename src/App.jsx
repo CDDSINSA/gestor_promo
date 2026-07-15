@@ -10,6 +10,7 @@ import {
   LogIn,
   LogOut,
   Mail,
+  MoreHorizontal,
   ShieldAlert,
   Search,
   RefreshCw,
@@ -91,19 +92,11 @@ import CatalogDesignPage from './components/CatalogDesignPage';
 import PromosPageView from './components/PromosPage';
 import PromocionEspecialPage from './components/PromocionEspecialPage';
 import SolicitudesEspecialesPageView from './components/SolicitudesEspecialesPage';
+import { Button, Card, CardContent, Header } from "./components/ui";
 import sinsaLogo from "./assets/sinsa.webp";
 import { canAccessModule, getFirstAllowedModule, MODULE_PERMISSIONS, normalizeRole, ROLE_LABELS } from "./constants/permissions";
 import { usePermissions } from "./hooks/usePermissions";
 
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-function Card({ children, className = "" }) { return <div className={classNames("card", className)}>{children}</div>; }
-function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
 function ModalButton({ children, className = "", variant = "default", ...props }) {
   return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
 }
@@ -129,9 +122,18 @@ function AppShell({ active, setActive, currentUser, currentRole, onLogout }) {
 }
 
 function MobileNav({ active, setActive }) {
+  const [moreOpen, setMoreOpen] = useState(false);
   const { can } = usePermissions();
   const visibleItems = MOBILE_NAV_ITEMS.filter((item) => can(item.permission));
-  return <div className="mobile-nav">{visibleItems.map((item) => { const Icon = item.icon; return <button key={item.id} onClick={() => setActive(item.id)} className={active === item.id ? "active" : ""}><Icon size={18}/><span>{item.label}</span></button>; })}</div>;
+  const primaryItems = visibleItems.slice(0, 4);
+  const overflowItems = visibleItems.slice(4);
+  const visibleNavItems = overflowItems.length ? primaryItems : visibleItems;
+  const activeInOverflow = overflowItems.some((item) => item.id === active);
+  const selectItem = (id) => {
+    setActive(id);
+    setMoreOpen(false);
+  };
+  return <div className="mobile-nav-wrap">{moreOpen && overflowItems.length > 0 && <div className="mobile-more-menu">{overflowItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => selectItem(item.id)} className={active === item.id ? "active" : ""}><Icon size={16}/><span>{item.label}</span></button>; })}</div>}<div className="mobile-nav">{visibleNavItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => selectItem(item.id)} className={active === item.id ? "active" : ""}><Icon size={18}/><span>{item.label}</span></button>; })}{overflowItems.length > 0 && <button type="button" onClick={() => setMoreOpen((value) => !value)} className={activeInOverflow || moreOpen ? "active" : ""}><MoreHorizontal size={18}/><span>Más</span></button>}</div></div>;
 }
 
 function parseRecoverySessionFromLocation() {
@@ -177,7 +179,7 @@ function LoginPage({ onLogin, onForgotPassword, loginStatus, connectionStatus })
     onLogin(email, password);
   };
 
-  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Ingrese con su usuario autorizado." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><label className="field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{loginStatus.message && <p className={classNames("login-status", loginStatus.type === "error" && "error")}>{loginStatus.message}</p>}<div className="button-row"><Button type="submit" disabled={isLoading}><LogIn size={16}/> {isLoading ? "Ingresando..." : "Ingresar"}</Button><Button type="button" variant="outline" onClick={onForgotPassword} disabled={isLoading}><KeyRound size={16}/> Olvide mi contraseña</Button></div></form></CardContent></Card></div>;
+  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Ingrese con su usuario autorizado." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><label className="field"><span>Contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{loginStatus.message && <p className={classNames("login-status", loginStatus.type === "error" && "error")}>{loginStatus.message}</p>}<div className="button-row"><Button type="submit" disabled={isLoading}><LogIn size={16}/> {isLoading ? "Ingresando..." : "Ingresar"}</Button><Button type="button" variant="outline" onClick={onForgotPassword} disabled={isLoading}><KeyRound size={16}/> Olvide mi contraseña</Button></div></form></CardContent></Card></div>;
 }
 
 function ForgotPasswordPage({ onSubmit, onBack, recoveryStatus, connectionStatus }) {
@@ -519,19 +521,26 @@ export default function PromoMVP() {
   const syncedSegmentoStateRef = React.useRef(new Map());
   const syncedNotificacionStateRef = React.useRef(new Map());
   const skuMasterRemoteLoadRef = React.useRef("");
+  const saveOperationInFlightRef = React.useRef(false);
+  const pendingSaveConfirmRef = React.useRef(false);
   const fileInputRef = React.useRef(null);
   const skuMasterFileInputRef = React.useRef(null);
   const setLogs = React.useCallback((updater) => {
     setLogsState((currentLogs) => ensureLogIds(typeof updater === "function" ? updater(currentLogs) : updater));
   }, []);
+  const handleSessionRefresh = React.useCallback((nextSession) => {
+    setAppSession(nextSession);
+  }, []);
   const supabaseConnection = useMemo(() => ({
     ...supabaseSettings,
     session: appSession,
     appUser,
-  }), [supabaseSettings, appSession, appUser]);
+    onSessionRefresh: handleSessionRefresh,
+  }), [supabaseSettings, appSession, appUser, handleSessionRefresh]);
 
   const requestSupabaseSaveConfirmation = (payload) => {
-    if (isSyncing) return;
+    if (isSyncing || saveOperationInFlightRef.current || pendingSaveConfirmRef.current) return;
+    pendingSaveConfirmRef.current = true;
     setPendingSaveAction(payload);
   };
 
@@ -560,7 +569,8 @@ export default function PromoMVP() {
 
   const executePendingSaveAction = async () => {
     const current = pendingSaveAction;
-    if (!current) return;
+    if (!current || saveOperationInFlightRef.current) return;
+    pendingSaveConfirmRef.current = false;
     setPendingSaveAction(null);
     try {
       await current.action();
@@ -609,7 +619,7 @@ export default function PromoMVP() {
     }
     let cancelled = false;
     setAuthStatus({ type: "loading", message: "Cargando permisos..." });
-    loadAppUserProfile(supabaseSettings, appSession)
+    loadAppUserProfile({ ...supabaseSettings, onSessionRefresh: handleSessionRefresh }, appSession)
       .then((profile) => {
         if (cancelled) return;
         setAppUser(profile);
@@ -626,7 +636,7 @@ export default function PromoMVP() {
     return () => {
       cancelled = true;
     };
-  }, [appSession, supabaseSettings]);
+  }, [appSession, supabaseSettings, handleSessionRefresh]);
 
   useEffect(() => {
     if (!appSession?.access_token || !appUser?.activo) return;
@@ -743,10 +753,14 @@ export default function PromoMVP() {
     syncedNotificacionStateRef.current = new Map();
   };
 
-  const buildSupabasePayload = (overrides = {}) => {
+  const buildSupabasePayload = (overrides = {}, operation = {}) => {
     const payload = buildCatalogPayload(overrides);
+    const operationId = operation.operationId || "";
     return {
       ...payload,
+      operation_id: operationId,
+      operation_type: operation.operationType || "",
+      client_started_at: operation.startedAt || "",
       sync_options: {
         return_mode: "delta",
         promociones: buildPromotionSyncOptions(payload.promociones, syncedPromotionStateRef.current),
@@ -776,6 +790,20 @@ export default function PromoMVP() {
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const buildSaveOperationSummary = (payload = {}) => {
+    const count = (items) => Array.isArray(items) ? items.length : 0;
+    return `${count(payload.promociones)} promociones, ${count(payload.comentarios)} comentarios, ${count(payload.avances_catalogo)} avances, ${count(payload.catalogos)} catalogos y ${count(payload.compradores)} compradores`;
+  };
+
+  const createSaveOperation = (operationType) => {
+    const operationId = window.crypto?.randomUUID?.() || makeId("SAVE");
+    return {
+      operationId: `save-${operationType}-${operationId}`,
+      operationType,
+      startedAt: new Date().toISOString(),
+    };
   };
 
   const onLogin = async (email, password) => {
@@ -898,22 +926,36 @@ export default function PromoMVP() {
       showSuccessToast("Los ajustes quedaron guardados en la aplicacion.", "Ajustes guardados");
       return;
     }
+    if (saveOperationInFlightRef.current) {
+      setSupabaseStatus({ type: "loading", message: "Ya hay un guardado en curso. Espere a que finalice antes de intentar nuevamente." });
+      return;
+    }
+    saveOperationInFlightRef.current = true;
     setSaveSupabaseStatus("saving");
-    const payload = buildSupabasePayload({ config: nextConfig, catalogos: nextCatalogos, compradores: nextCompradores });
-    const data = await runSupabaseOperation("Guardando ajustes en Supabase...", () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
-    if (data) {
-      if (data.sync_mode === "delta") {
-        rememberSyncedPayload(payload);
+    try {
+      const operation = createSaveOperation("settings");
+      const payload = buildSupabasePayload({ config: nextConfig, catalogos: nextCatalogos, compradores: nextCompradores }, operation);
+      const saveSummary = buildSaveOperationSummary(payload);
+      const data = await runSupabaseOperation(`Guardando ajustes en Supabase (${saveSummary})...`, () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
+      if (data) {
+        setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
+        if (data.sync_mode === "delta") {
+          rememberSyncedPayload(payload);
+        } else {
+          applyCatalogData(data);
+          rememberSyncedPromotions(data.promociones || []);
+          rememberSyncedSettings(data);
+          rememberSyncedOperations(data);
+        }
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Ajustes ya estaban guardados en Supabase." : "Ajustes guardados en Supabase." });
+        showSuccessToast("Compradores y catalogos se sincronizaron correctamente.", "Ajustes guardados");
       } else {
-        applyCatalogData(data);
-        rememberSyncedPromotions(data.promociones || []);
-        rememberSyncedSettings(data);
-        rememberSyncedOperations(data);
+        setSaveSupabaseStatus("error");
+        setSupabaseStatus((current) => ({ type: "error", message: `No se pudieron guardar los ajustes en Supabase. ${current?.message || "Revise la conexión y vuelva a intentar."}` }));
       }
-      setSaveSupabaseStatus("success");
-      showSuccessToast("Compradores y catalogos se sincronizaron correctamente.", "Ajustes guardados");
-    } else {
-      setSaveSupabaseStatus("error");
+    } finally {
+      saveOperationInFlightRef.current = false;
     }
   };
 
@@ -944,22 +986,36 @@ export default function PromoMVP() {
   };
 
   const onSaveSupabase = async () => {
+    if (saveOperationInFlightRef.current) {
+      setSupabaseStatus({ type: "loading", message: "Ya hay un guardado en curso. Espere a que finalice antes de intentar nuevamente." });
+      return;
+    }
+    saveOperationInFlightRef.current = true;
     setSaveSupabaseStatus("saving");
-    const payload = buildSupabasePayload();
-    const data = await runSupabaseOperation("Guardando cambios en Supabase...", () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
-    if (data) {
-      if (data.sync_mode === "delta") {
-        rememberSyncedPayload(payload);
+    try {
+      const operation = createSaveOperation("catalog");
+      const payload = buildSupabasePayload({}, operation);
+      const saveSummary = buildSaveOperationSummary(payload);
+      const data = await runSupabaseOperation(`Guardando cambios en Supabase (${saveSummary})...`, () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
+      if (data) {
+        setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
+        if (data.sync_mode === "delta") {
+          rememberSyncedPayload(payload);
+        } else {
+          applyCatalogData(data);
+          rememberSyncedPromotions(data.promociones || []);
+          rememberSyncedSettings(data);
+          rememberSyncedOperations(data);
+        }
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Estos cambios ya estaban guardados en Supabase." : "Cambios guardados en Supabase." });
+        showSuccessToast("La informacion se sincronizo correctamente en Supabase.");
       } else {
-        applyCatalogData(data);
-        rememberSyncedPromotions(data.promociones || []);
-        rememberSyncedSettings(data);
-        rememberSyncedOperations(data);
+        setSaveSupabaseStatus("error");
+        setSupabaseStatus((current) => ({ type: "error", message: `No se pudieron guardar los cambios en Supabase. ${current?.message || "Revise la conexión y vuelva a intentar."}` }));
       }
-      setSaveSupabaseStatus("success");
-      showSuccessToast("La informacion se sincronizo correctamente en Supabase.");
-    } else {
-      setSaveSupabaseStatus("error");
+    } finally {
+      saveOperationInFlightRef.current = false;
     }
   };
 
@@ -1082,7 +1138,10 @@ export default function PromoMVP() {
       confirmLabel={saveSupabaseDataLabel}
       cancelLabel="Cancelar"
       onConfirm={executePendingSaveAction}
-      onCancel={() => setPendingSaveAction(null)}
+      onCancel={() => {
+        pendingSaveConfirmRef.current = false;
+        setPendingSaveAction(null);
+      }}
     />}
   </div></AuthProvider>;
 }

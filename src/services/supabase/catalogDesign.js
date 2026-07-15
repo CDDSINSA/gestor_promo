@@ -1,5 +1,6 @@
 import { assertOk, cleanText, fetchWithTimeout, getHeaders, getSupabaseUrl } from "./config";
 import { deleteRowsByValues, patchRowById, selectAll, supabaseRequest, upsertRows } from "./http";
+import { ensureFreshAppSession } from "./session";
 
 export const CATALOG_DESIGN_WORK_BUCKET = "sns_app_promo";
 export const CATALOG_DESIGN_FINAL_BUCKET = "catalogo_final";
@@ -11,12 +12,12 @@ const PROJECT_STATES = new Set(["planificacion", "en_diseno", "en_revision", "ap
 const PAGE_STATES = new Set(["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"]);
 const COMMENT_TYPES = new Set(["comentario", "observacion", "aprobacion", "rechazo", "ajuste"]);
 
-function requireSession(connection = {}) {
+async function requireSession(connection = {}) {
   const session = connection.session || connection.appSession || connection.authSession;
   if (!session?.access_token) {
     throw new Error("No hay sesion activa para usar Supabase.");
   }
-  return session;
+  return ensureFreshAppSession(connection, session);
 }
 
 function storagePath(path) {
@@ -123,7 +124,7 @@ export async function logCatalogDesignPageStateChange(connection, page, nextStat
 }
 
 async function uploadStorageObject(connection, bucket, path, file) {
-  const session = requireSession(connection);
+  const session = await requireSession(connection);
   const response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/storage/v1/object/${bucket}/${storagePath(path)}`, {
     method: "POST",
     headers: getHeaders(connection, session.access_token, {

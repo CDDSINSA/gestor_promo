@@ -1,23 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
 import { FileSpreadsheet, Search, Upload, X } from "lucide-react";
-import { classNames, normalizeValue } from "../utils/common";
+import { normalizeValue } from "../utils/common";
 import { normalizeActividad } from "../utils/promoHelpers";
-
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
-}
+import { Button, Card, CardContent, Header } from "./ui";
 
 function parseSkuText(text) {
   const seen = new Set();

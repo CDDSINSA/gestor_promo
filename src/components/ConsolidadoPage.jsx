@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { classNames, makeId } from "../utils/common";
+import { applyComplexPromoBanding, loadStyledXlsx } from "../services/excelStyleService";
 import {
   channelMatchesFilter,
   formatDurationHours,
@@ -27,31 +28,9 @@ import { CONSOLIDADO_TABLE_HEADERS } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
 import { isComplexPromoType } from "../promoTypes/promoTypeEngine";
+import { Button, Card, CardContent, Header, Metric } from "./ui";
 
-function Header({ title, subtitle }) {
-  return (
-    <div className="header">
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>
-  );
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
-}
-
-function Metric({ title, value, icon: Icon }) {
-  return <Card><CardContent className="metric"><div><p>{title}</p><strong>{value}</strong></div><div className="metric-icon"><Icon size={20}/></div></CardContent></Card>;
-}
+const CONSOLIDADO_PAGE_SIZE = 100;
 
 export default function ConsolidadoPage({ rows, actividades = [], catalogos = [], comentarios, setComentarios, compradores, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
   const { can } = usePermissions();
@@ -69,6 +48,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   const [activityCatalogOpen, setActivityCatalogOpen] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState(null);
   const [commentDrafts, setCommentDrafts] = useState({});
+  const [currentPage, setCurrentPage] = useState(1);
 
   const activityMap = useMemo(
     () => new Map((actividades || []).map((item) => {
@@ -117,6 +97,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   }, [actividadCatalogoFiltro, activityCatalogOptions]);
 
   const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
+  const getRowId = (row) => row.id || row.row_id || row.rowId || "";
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
   const getActivityName = (row, activity = getActivity(row)) => {
     const activityId = getActivityId(row);
@@ -124,8 +105,23 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   };
   const getOfferId = (row) => row.ofertaId || row.oferta_id || "";
   const compareText = (left, right) => String(left || "").localeCompare(String(right || ""), "es", { numeric: true, sensitivity: "base" });
-  const getComentariosRow = (rowId) => comentarios.filter((c) => isLineComment(c) && (c.rowId || c.row_id) === rowId);
-  const getActivityComments = (activityId) => comentarios.filter((c) => isActivityComment(c) && (c.actividadId || c.actividad_id) === activityId);
+  const commentIndexes = useMemo(() => {
+    const byRowId = new Map();
+    const byActivityId = new Map();
+    (comentarios || []).forEach((comment) => {
+      if (isLineComment(comment)) {
+        const rowId = comment.rowId || comment.row_id || "";
+        if (rowId) byRowId.set(rowId, [...(byRowId.get(rowId) || []), comment]);
+      }
+      if (isActivityComment(comment)) {
+        const activityId = comment.actividadId || comment.actividad_id || "";
+        if (activityId) byActivityId.set(activityId, [...(byActivityId.get(activityId) || []), comment]);
+      }
+    });
+    return { byRowId, byActivityId };
+  }, [comentarios]);
+  const getComentariosRow = (rowId) => commentIndexes.byRowId.get(rowId) || [];
+  const getActivityComments = (activityId) => commentIndexes.byActivityId.get(activityId) || [];
 
   const compradoresUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador")))];
   const tiposUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.tipoPromo || "Sin tipo")))];
@@ -155,6 +151,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
       sku: skuFiltro,
       actividadCatalogo: actividadCatalogoFiltro,
     });
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
@@ -167,11 +164,12 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     setSkuFiltro("");
     setActividadCatalogoFiltro("");
     setAppliedFilters(null);
+    setCurrentPage(1);
   };
 
   const rowsFiltradas = appliedFilters ? rows.filter((row) => {
     const activity = getActivity(row);
-    const comentariosRow = getComentariosRow(row.id);
+    const comentariosRow = getComentariosRow(getRowId(row));
     const comentariosActividad = getActivityComments(getActivityId(row));
     const comentariosTotales = [...comentariosRow, ...comentariosActividad];
     const tieneAbierto = comentariosTotales.some((c) => String(c.estado).toLowerCase() === "abierto");
@@ -209,8 +207,11 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
       || compareText(left.id || left.row_id || left.rowId, right.id || right.row_id || right.rowId);
   }) : [];
 
+  const totalPages = Math.max(1, Math.ceil(rowsFiltradas.length / CONSOLIDADO_PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedRows = rowsFiltradas.slice((safeCurrentPage - 1) * CONSOLIDADO_PAGE_SIZE, safeCurrentPage * CONSOLIDADO_PAGE_SIZE);
   const visibleActivityIds = new Set(rowsFiltradas.map(getActivityId).filter(Boolean));
-  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
   const generalComments = appliedFilters
     ? comentarios.filter((comment) => isActivityComment(comment) && visibleActivityIds.has(comment.actividadId || comment.actividad_id))
     : [];
@@ -250,11 +251,11 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     ["Precio ahora", (row) => row.precioAhora || ""],
     ["Descuento", (row) => row.descuento || ""],
     ["Comentarios actividad", (row) => getActivityComments(getActivityId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
-    ["Comentarios linea", (row) => getComentariosRow(row.id).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
+    ["Comentarios linea", (row) => getComentariosRow(getRowId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
   ];
 
   const exportXlsx = async () => {
-    const XLSX = await import("xlsx");
+    const XLSX = await loadStyledXlsx();
     const sheetRows = [
       exportColumns.map(([label]) => label),
       ...rowsFiltradas.map((row) => {
@@ -265,6 +266,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    applyComplexPromoBanding(XLSX, worksheet, rowsFiltradas, exportColumns.length);
     XLSX.utils.book_append_sheet(workbook, worksheet, "Consolidado");
     XLSX.writeFile(workbook, `consolidado_promociones_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
@@ -344,11 +346,11 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
                 <tbody>
                   {!appliedFilters && <tr><td colSpan={CONSOLIDADO_TABLE_HEADERS.length}><div className="empty-state">Use Buscar para cargar el consolidado.</div></td></tr>}
                   {appliedFilters && !rowsFiltradas.length && <tr><td colSpan={CONSOLIDADO_TABLE_HEADERS.length}><div className="empty-state">No hay promociones con esos filtros.</div></td></tr>}
-                  {rowsFiltradas.map((row) => {
+                  {paginatedRows.map((row) => {
                     const activity = getActivity(row);
                     const activityId = getActivityId(row);
                     const comentariosActividad = getActivityComments(activityId);
-                    const comentariosRow = getComentariosRow(row.id);
+                    const comentariosRow = getComentariosRow(getRowId(row));
                     const comentariosTotales = [...comentariosRow, ...comentariosActividad];
                     const abiertos = comentariosTotales.filter((c) => String(c.estado).toLowerCase() === "abierto").length;
                     const segmenta = isSegmentedRow(row) ? "SI" : "NO";
@@ -403,6 +405,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
                 </tbody>
               </table>
             </div>
+            {appliedFilters && rowsFiltradas.length > CONSOLIDADO_PAGE_SIZE && <div className="pagination-bar"><Button variant="outline" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={safeCurrentPage <= 1}>Anterior</Button><span>Pagina {safeCurrentPage} de {totalPages} · {rowsFiltradas.length} filas filtradas</span><Button variant="outline" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={safeCurrentPage >= totalPages}>Siguiente</Button></div>}
           </CardContent>
         </Card>
       </div>

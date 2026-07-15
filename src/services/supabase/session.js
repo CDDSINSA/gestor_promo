@@ -59,11 +59,73 @@ export function loadStoredAppSession() {
     if (!raw) return null;
     const session = JSON.parse(raw);
     if (!session?.access_token || !session?.expires_at) return null;
-    if (Date.now() > Number(session.expires_at) - 60000) return null;
+    if (Date.now() > Number(session.expires_at) - 60000 && !session.refresh_token) return null;
     return session;
   } catch {
     return null;
   }
+}
+
+export function saveStoredAppSession(session) {
+  if (!session?.access_token) return null;
+  window.sessionStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(session));
+  return session;
+}
+
+function isSessionExpired(session) {
+  return Boolean(session?.expires_at && Date.now() > Number(session.expires_at));
+}
+
+function isSessionExpiring(session, windowMs = 120000) {
+  return Boolean(session?.expires_at && Date.now() > Number(session.expires_at) - windowMs);
+}
+
+let refreshPromise = null;
+
+export async function refreshAppSession(connection, session) {
+  if (!session?.refresh_token) {
+    if (isSessionExpired(session)) throw new Error("La sesion expiro. Inicie sesion nuevamente.");
+    return session;
+  }
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    let response;
+    try {
+      response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: getHeaders(connection, null),
+        body: JSON.stringify({ refresh_token: session.refresh_token }),
+      });
+    } catch (error) {
+      throw new Error(`No se pudo renovar la sesion. Detalle: ${error.message || error}`);
+    }
+
+    const data = await assertOk(response, "No se pudo renovar la sesion.");
+    const nextSession = {
+      ...session,
+      ...data,
+      user: data.user || session.user,
+      user_email: data.user?.email || session.user_email,
+      refresh_token: data.refresh_token || session.refresh_token,
+      expires_at: Date.now() + Number(data.expires_in || 3600) * 1000,
+    };
+    saveStoredAppSession(nextSession);
+    connection.onSessionRefresh?.(nextSession);
+    return nextSession;
+  })();
+
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+export async function ensureFreshAppSession(connection, session, windowMs = 120000) {
+  if (!session?.access_token) throw new Error("No hay una sesion activa para consultar Supabase. Inicie sesion nuevamente.");
+  if (!isSessionExpiring(session, windowMs)) return session;
+  return refreshAppSession(connection, session);
 }
 
 export async function signInAppUser(connection, email, password) {
@@ -73,7 +135,7 @@ export async function signInAppUser(connection, email, password) {
     throw new Error("Configure URL y anon key de Supabase para iniciar sesion.");
   }
   if (!cleanEmail || !cleanPassword) {
-    throw new Error("Ingrese correo y password para iniciar sesion.");
+    throw new Error("Ingrese correo y contraseña para iniciar sesion.");
   }
 
   let response;
@@ -93,8 +155,7 @@ export async function signInAppUser(connection, email, password) {
     user_email: data.user?.email || cleanEmail,
     expires_at: Date.now() + Number(data.expires_in || 3600) * 1000,
   };
-  window.sessionStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(session));
-  return session;
+  return saveStoredAppSession(session);
 }
 
 export async function requestPasswordRecovery(connection, email) {
@@ -152,8 +213,9 @@ export async function loadAuthUserFromSession(connection, session) {
   if (!session?.access_token) {
     throw new Error("No hay una sesion activa para consultar el usuario.");
   }
+  const activeSession = await ensureFreshAppSession(connection, session);
   const response = await fetchWithTimeout(`${getSupabaseUrl(connection)}/auth/v1/user`, {
-    headers: getHeaders(connection, session.access_token),
+    headers: getHeaders(connection, activeSession.access_token),
   });
   return assertOk(response, "No se pudo consultar el usuario autenticado.");
 }
@@ -172,10 +234,11 @@ export async function loadAppUserProfile(connection, session) {
   if (!session?.access_token) {
     throw new Error("No hay una sesion activa para consultar permisos.");
   }
+  const activeSession = await ensureFreshAppSession(connection, session);
 
-  const authUserId = session.user?.id || session.user_id || "";
-  const email = cleanText(session.user?.email || session.user_email);
-  const headers = getHeaders(connection, session.access_token);
+  const authUserId = activeSession.user?.id || activeSession.user_id || "";
+  const email = cleanText(activeSession.user?.email || activeSession.user_email);
+  const headers = getHeaders(connection, activeSession.access_token);
 
   const queries = [
     authUserId ? buildAppUserQuery({ auth_user_id: `eq.${authUserId}` }) : "",

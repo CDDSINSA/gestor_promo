@@ -27,6 +27,11 @@ export function usePromos({
   }));
 
   const deleteRow = (id) => setRows((prev) => prev.filter((r) => r.id !== id));
+  const deleteRows = (ids = []) => {
+    const idsToDelete = new Set(ids);
+    if (!idsToDelete.size) return;
+    setRows((prev) => prev.filter((r) => !idsToDelete.has(r.id)));
+  };
 
-  return { updateRow, deleteRow };
+  return { updateRow, deleteRow, deleteRows };
 }

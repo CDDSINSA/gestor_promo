@@ -21,7 +21,7 @@ export function emptyToNull(value) {
 export function toBoolean(value) {
   if (typeof value === "boolean") return value;
   const text = cleanText(value).toUpperCase();
-  return ["TRUE", "SI", "SÃ", "1", "ACTIVO", "ACTIVA"].includes(text);
+  return ["TRUE", "SI", "SÍ", "1", "ACTIVO", "ACTIVA"].includes(text);
 }
 
 export function toNumber(value) {

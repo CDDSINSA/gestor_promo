@@ -6,20 +6,15 @@ import {
   getHeaders,
   getSupabaseUrl,
 } from "./config";
+import { ensureFreshAppSession } from "./session";
 
-function getAuthenticatedSession(connection = {}) {
+async function getAuthenticatedSession(connection = {}) {
   const session = connection.session || connection.appSession || connection.authSession;
-  if (!session?.access_token) {
-    throw new Error("No hay sesion activa para consultar Supabase. Inicie sesion nuevamente.");
-  }
-  if (session.expires_at && Date.now() > Number(session.expires_at) - 60000) {
-    throw new Error("La sesion expiro. Inicie sesion nuevamente.");
-  }
-  return session;
+  return ensureFreshAppSession(connection, session);
 }
 
 export async function supabaseRequest(connection, path, options = {}) {
-  const session = getAuthenticatedSession(connection);
+  const session = await getAuthenticatedSession(connection);
   const response = await fetchWithTimeout(`${getSupabaseUrl(connection)}${path}`, {
     ...options,
     headers: getHeaders(connection, session.access_token, options.headers || {}),
@@ -70,6 +65,13 @@ export async function upsertRows(connection, table, rows, onConflict) {
     if (Array.isArray(result)) results.push(...result);
   }
   return results;
+}
+
+export async function callRpc(connection, functionName, params = {}) {
+  return supabaseRequest(connection, `/rest/v1/rpc/${functionName}`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
 }
 
 function toPostgrestIn(values = []) {

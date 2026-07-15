@@ -2,13 +2,13 @@
 import { Save, Plus } from "lucide-react";
 import { allPromoTypes as todosTipos } from "../promoTypes/promoTypeEngine";
 import { ALCANCE_TYPES } from "../constants";
-import { classNames } from "../utils/common";
 import {
   getSegmentosByCanal,
   normalizeActividad,
   createSpecialActivityId,
 } from "../utils/promoHelpers";
 import PromosPageView from "./PromosPage";
+import { Button, Card, CardContent, Header } from "./ui";
 
 const SPECIAL_CHANNEL_OPTIONS = ["Retail", "Comasa", "Galerón", "Ferrex"];
 const SPECIAL_REQUEST_REASONS = [
@@ -61,16 +61,6 @@ function buildReasonValue(selections, otherText) {
   }));
 }
 
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) { return <div className={classNames("card", className)}>{children}</div>; }
-function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
 function Field({ label, value, onChange, type = "text", ...props }) { return <label className="field"><span>{label}</span><input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
 
 export default function PromocionEspecialPage({

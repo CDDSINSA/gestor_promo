@@ -3,6 +3,7 @@ import { Plus, Save, Search, FileSpreadsheet, Trash2 } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
 import { SUPABASE_PROJECT_URL } from "../services/supabaseService";
 import { classNames, formatVigenciaRange, makeId } from "../utils/common";
+import { Button, Card, CardContent, Header } from "./ui";
 import {
   getCompradorCategoria,
   getCompradorId,
@@ -13,16 +14,6 @@ import {
 } from "../utils/avanceHelpers";
 import { normalizeCatalogo } from "../utils/promoHelpers";
 
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) { return <div className={classNames("card", className)}>{children}</div>; }
-function CardContent({ children, className = "" }) { return <div className={className}>{children}</div>; }
 function Field({ label, value, onChange, type = "text", ...props }) { return <label className="field"><span>{label}</span><input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
 
 function normalizeDivisionKey(value) {

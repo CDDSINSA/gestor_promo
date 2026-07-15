@@ -36,25 +36,10 @@ import {
 } from "../services/supabaseService";
 import { isCompradorJunior } from "../utils/avanceHelpers";
 import { classNames, normalizeValue } from "../utils/common";
+import { Button, Card, CardContent, Header } from "./ui";
 
 const PROJECT_STATES = ["planificacion", "en_diseno", "en_revision", "aprobado", "consolidado", "cancelado"];
 const PAGE_STATES = ["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"];
-
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
-}
 
 function Field({ label, children }) {
   return <label className="field"><span>{label}</span>{children}</label>;

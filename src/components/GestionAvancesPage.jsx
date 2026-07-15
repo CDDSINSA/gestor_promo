@@ -5,6 +5,7 @@ import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
 import { classNames } from "../utils/common";
 import { normalizeDivisionesCatalogo } from "../utils/promoHelpers";
+import { Button, Card, CardContent, Header, Metric } from "./ui";
 import {
   getCatalogoAvanceId,
   compradorReferencesSenior,
@@ -19,26 +20,6 @@ import {
   sameDivision,
   toggleAvanceTerminado,
 } from "../utils/avanceHelpers";
-
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
-}
-
-function Metric({ title, value, icon: Icon }) {
-  return <Card><CardContent className="metric"><div><p>{title}</p><strong>{value}</strong></div><div className="metric-icon"><Icon size={20}/></div></CardContent></Card>;
-}
 
 function normalizeKey(value) {
   return String(value || "")
@@ -228,7 +209,7 @@ export default function GestionAvancesPage({
   const seniorsCompletos = seniorSummaries.filter((senior) => senior.completo).length;
   const totalOfertas = seniorSummaries.reduce((total, senior) => total + senior.ofertas, 0);
   const progress = totalDivisiones ? Math.round((totalDivisionesCompletas / totalDivisiones) * 100) : 0;
-  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
 
   const toggleDivision = (divisionStatus, seniorName) => {
     const division = divisionStatus?.division;

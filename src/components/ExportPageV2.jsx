@@ -2,7 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Download, Search, X } from "lucide-react";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
-import { classNames } from "../utils/common";
+import { applyComplexPromoBanding, loadStyledXlsx } from "../services/excelStyleService";
+import { formatPromotionValidationErrors, validatePromotions } from "../services/promotionValidationService";
 import {
   channelMatchesFilter,
   isActivityComment,
@@ -12,26 +13,13 @@ import {
   normalizeCanal,
   splitChannelValues,
 } from "../utils/promoHelpers";
+import { Button, Card, CardContent, Header } from "./ui";
 
-function Header({ title, subtitle }) {
-  return (
-    <div className="header">
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>
-  );
-}
+const OPERATIONAL_EXPORT_STATUSES = new Set(["APROBADO", "APROBADA", "APROVADO", "APROVADA", "REGISTRADO", "LISTA_CONSOLIDAR"]);
 
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
+function isOperationalExportReady(row) {
+  const status = String(row.estado_registro || row.estadoRegistro || "").trim().toUpperCase();
+  return OPERATIONAL_EXPORT_STATUSES.has(status);
 }
 
 export default function ExportPageV2({ rows = [], actividades = [], comentarios = [] }) {
@@ -56,9 +44,25 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   );
 
   const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
+  const getRowId = (row) => row.id || row.row_id || row.rowId || "";
   const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
-  const getComentariosRow = (rowId) => comentarios.filter((c) => isLineComment(c) && (c.rowId || c.row_id) === rowId);
-  const getActivityComments = (activityId) => comentarios.filter((c) => isActivityComment(c) && (c.actividadId || c.actividad_id) === activityId);
+  const commentIndexes = useMemo(() => {
+    const byRowId = new Map();
+    const byActivityId = new Map();
+    (comentarios || []).forEach((comment) => {
+      if (isLineComment(comment)) {
+        const rowId = comment.rowId || comment.row_id || "";
+        if (rowId) byRowId.set(rowId, [...(byRowId.get(rowId) || []), comment]);
+      }
+      if (isActivityComment(comment)) {
+        const activityId = comment.actividadId || comment.actividad_id || "";
+        if (activityId) byActivityId.set(activityId, [...(byActivityId.get(activityId) || []), comment]);
+      }
+    });
+    return { byRowId, byActivityId };
+  }, [comentarios]);
+  const getComentariosRow = (rowId) => commentIndexes.byRowId.get(rowId) || [];
+  const getActivityComments = (activityId) => commentIndexes.byActivityId.get(activityId) || [];
 
   const compradoresUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.comprador || getActivity(row).comprador || getActivity(row).solicitante || "Sin comprador")))];
   const tiposUnicos = ["Todos", ...Array.from(new Set(rows.map((row) => row.tipoPromo || "Sin tipo")))];
@@ -104,7 +108,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
 
   const rowsFiltradas = appliedFilters ? rows.filter((row) => {
     const activity = getActivity(row);
-    const comentariosRow = getComentariosRow(row.id);
+    const comentariosRow = getComentariosRow(getRowId(row));
     const comentariosActividad = getActivityComments(getActivityId(row));
     const comentariosTotales = [...comentariosRow, ...comentariosActividad];
     const tieneAbierto = comentariosTotales.some((c) => String(c.estado).toLowerCase() === "abierto");
@@ -136,6 +140,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const makeCommon = (row) => {
     const activity = getActivity(row);
     const activityId = getActivityId(row);
+    const comentariosRow = getComentariosRow(getRowId(row));
     const segmenta = isSegmentedRow(row) ? "SI" : "NO";
     return {
       activity,
@@ -143,8 +148,8 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       segmenta,
       segmentoCliente: row.segmentoCliente || row.segmento_cliente || (segmenta === "SI" ? row.segmento : ""),
       comentariosActividad: getActivityComments(activityId).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | "),
-      comentariosLinea: getComentariosRow(row.id).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | "),
-      comentariosLineaAbiertos: getComentariosRow(row.id)
+      comentariosLinea: comentariosRow.map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | "),
+      comentariosLineaAbiertos: comentariosRow
         .filter((c) => String(c.estado).toLowerCase() === "abierto")
         .map((c) => c.texto || c.comentario)
         .join(" | "),
@@ -156,6 +161,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       title: "Pricing",
       desc: "Base operativa para configurar promociones.",
       file: "export_pricing",
+      onlyApproved: true,
       columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["tipo_sku", (row) => row.tipoSku || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["tipo_cantidad", (row) => row.tipoCantidad || ""], ["cantidad_minima", (row) => row.cantidadMinima || ""], ["precio_antes", (row) => row.precioAntes || ""], ["precio_ahora", (row) => row.precioAhora || ""], ["descuento", (row) => row.descuento || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
     },
     mercadeo: {
@@ -168,6 +174,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       title: "Planimetria",
       desc: "Base para tickets, rotulos y exhibiciones.",
       file: "export_planimetria",
+      onlyApproved: true,
       columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["comprador", (row) => row.comprador || ""], ["division", (row) => row.division || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => row.precioAntes || ""], ["precio_ahora", (row) => row.precioAhora || ""], ["descuento", (row) => row.descuento || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
     },
     consolidado: {
@@ -181,11 +188,22 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
   const downloadExport = async (key) => {
     const def = exportDefs[key];
     if (!def || !rowsFiltradas.length) return;
+    const exportRows = def.onlyApproved ? rowsFiltradas.filter(isOperationalExportReady) : rowsFiltradas;
+    if (!exportRows.length) {
+      window.alert(`No hay promociones aprobadas o registradas para exportar en ${def.title}.`);
+      return;
+    }
+    const filteredRowIds = new Set(exportRows.map((row) => row.row_id || row.id).filter(Boolean));
+    const validation = validatePromotions(rows, { actividades, scopeRowIds: filteredRowIds });
+    if (validation.errors.length) {
+      window.alert(`No se puede exportar porque hay promociones incompletas o inválidas:\n${formatPromotionValidationErrors(validation).join("\n")}`);
+      return;
+    }
 
-    const XLSX = await import("xlsx");
+    const XLSX = await loadStyledXlsx();
     const sheetRows = [
       def.columns.map(([label]) => label),
-      ...rowsFiltradas.map((row) => {
+      ...exportRows.map((row) => {
         const ctx = makeCommon(row);
         return def.columns.map(([, getter]) => getter(row, ctx));
       }),
@@ -193,6 +211,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    applyComplexPromoBanding(XLSX, worksheet, exportRows, def.columns.length);
     XLSX.utils.book_append_sheet(workbook, worksheet, def.title);
     XLSX.writeFile(workbook, `${def.file}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };

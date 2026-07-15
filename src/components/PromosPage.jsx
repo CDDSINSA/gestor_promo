@@ -36,6 +36,7 @@ import { usePromoForm } from "../hooks/usePromoForm";
 import { usePromos } from "../hooks/usePromos";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
+import { formatPromotionValidationIssue, validatePromotions } from "../services/promotionValidationService";
 import { classNames, makeId, normalizeValue } from "../utils/common";
 import {
   getSegmentosByCanal,
@@ -52,10 +53,7 @@ import {
   isAvanceTerminado,
   toggleAvanceTerminado,
 } from "../utils/avanceHelpers";
-
-function Header({ title, subtitle }) {
-  return <div className="header"><h1>{title}</h1><p>{subtitle}</p></div>;
-}
+import { Button, Card, CardContent, Header } from "./ui";
 
 function formatSkuMasterTime(value) {
   if (!value) return "";
@@ -79,18 +77,6 @@ function SkuMasterStatus({ status, total, source, onRefresh }) {
         ? `${total} SKU cargados${updatedAt ? ` · ${updatedAt}` : ""}`
         : status?.message || "Esperando carga automatica";
   return <div className={classNames("sku-master-status", statusType)}><Icon size={18}/><div className="sku-master-status-main"><div className="sku-master-status-top"><strong>{title}</strong>{onRefresh && <button type="button" className="sku-master-refresh" onClick={onRefresh} disabled={isLoading} title="Actualizar archivo ERP"><RefreshCw size={13}/> Actualizar</button>}</div><span>{detail}</span><div className="sku-master-progress" aria-hidden="true"><span style={{ width: `${progress}%` }} /></div></div></div>;
-}
-
-function Button({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
-}
-
-function Card({ children, className = "" }) {
-  return <div className={classNames("card", className)}>{children}</div>;
-}
-
-function CardContent({ children, className = "" }) {
-  return <div className={className}>{children}</div>;
 }
 
 function parseClipboardRows(text) {
@@ -485,49 +471,14 @@ function renderCell(row, col, updateRow, warning, segmentOptions = []) {
   return <input value={row[col] || ""} onChange={(e) => updateRow(row.id, col, e.target.value)} />;
 }
 
-function hasPromoValue(value) {
-  return value !== undefined && value !== null && String(value).trim() !== "";
-}
-
-function hasPriceOrDiscount(row) {
-  return hasPromoValue(row.precioAhora) || hasPromoValue(row.precio_ahora) || hasPromoValue(row.descuento);
-}
-
-function getRowPromoType(row) {
-  return row.tipoPromo || row.tipo_promo || "";
-}
-
-function getRowGroup(row) {
-  return normalizeValue(row.grupoOferta || row.grupo_oferta);
-}
-
-function isIncompleteSimpleRow(row) {
-  const promoType = getRowPromoType(row);
-  return normalizeValue(row.sku) && !isComplexPromoType(promoType) && !hasPriceOrDiscount(row);
-}
-
-function getIncompleteComboGroups(rowList = []) {
-  const groups = new Map();
-  rowList.filter((row) => getRowPromoType(row) === "Combo").forEach((row) => {
-    const group = getRowGroup(row);
-    const key = group || `Sin grupo (${row.sku || row.id || "fila"})`;
-    const current = groups.get(key) || { group: key, principals: 0, rewards: 0, blankSku: 0, rows: 0 };
-    const role = normalizeCanal(row.tipoSku || row.tipo_sku);
-    current.rows += 1;
-    if (!normalizeValue(row.sku)) current.blankSku += 1;
-    if (role === "principal") current.principals += 1;
-    if (isComboRewardRole(role)) current.rewards += 1;
-    groups.set(key, current);
-  });
-  return Array.from(groups.values()).filter((group) => !group.principals || !group.rewards || group.blankSku);
-}
-
 export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
   const { can } = usePermissions();
   const canEditPromos = can(PERMISSIONS.EDIT_PROMOS);
   const canEditAvances = can(PERMISSIONS.EDIT_AVANCES);
   const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
   const [saveWarning, setSaveWarning] = React.useState(null);
+  const [selectedPromoIds, setSelectedPromoIds] = React.useState(() => new Set());
+  const selectVisibleCheckboxRef = React.useRef(null);
   const {
     comprador,
     setComprador,
@@ -969,13 +920,57 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setSelectedSegments([]);
     setComboDraft(createEmptyComboDraft());
   };
-  const { updateRow, deleteRow } = usePromos({
+  const { updateRow, deleteRow, deleteRows } = usePromos({
     setRows,
     skuMaster,
     selectedBuyerConfig,
     getMasterDivision,
     normalizeRow: toAppRow,
   });
+  const selectableFilteredRowIds = useMemo(() => filteredRows.map((row) => row.id).filter(Boolean), [filteredRows]);
+  React.useEffect(() => {
+    const visibleIds = new Set(selectableFilteredRowIds);
+    setSelectedPromoIds((current) => {
+      const next = new Set();
+      let changed = false;
+      current.forEach((id) => {
+        if (visibleIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : current;
+    });
+  }, [selectableFilteredRowIds]);
+  const selectedFilteredRowCount = useMemo(() => selectableFilteredRowIds.filter((id) => selectedPromoIds.has(id)).length, [selectableFilteredRowIds, selectedPromoIds]);
+  const selectedPromoCount = selectedPromoIds.size;
+  const allFilteredRowsSelected = selectableFilteredRowIds.length > 0 && selectedFilteredRowCount === selectableFilteredRowIds.length;
+  React.useEffect(() => {
+    if (!selectVisibleCheckboxRef.current) return;
+    selectVisibleCheckboxRef.current.indeterminate = selectedFilteredRowCount > 0 && selectedFilteredRowCount < selectableFilteredRowIds.length;
+  }, [selectedFilteredRowCount, selectableFilteredRowIds.length]);
+  const togglePromoSelection = (id) => {
+    setSelectedPromoIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleVisiblePromoSelection = () => {
+    setSelectedPromoIds((current) => {
+      const next = new Set(current);
+      if (allFilteredRowsSelected) selectableFilteredRowIds.forEach((id) => next.delete(id));
+      else selectableFilteredRowIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+  const deleteSelectedPromos = () => {
+    const ids = Array.from(selectedPromoIds);
+    if (!ids.length) return;
+    const confirmed = window.confirm(`Se eliminarán ${ids.length} línea(s) seleccionada(s). Esta acción no se puede deshacer.`);
+    if (!confirmed) return;
+    deleteRows(ids);
+    setSelectedPromoIds(new Set());
+  };
   const isUmbralTablePaste = bulkColumn === BULK_COLUMN_UMBRAL_TABLE;
   const isComboTablePaste = bulkColumn === BULK_COLUMN_COMBO_TABLE;
   const isBuyXGetXTablePaste = bulkColumn === BULK_COLUMN_BUY_X_GET_X_TABLE;
@@ -992,13 +987,14 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     && principalCompleteCount === comboPrincipals.length
     && rewardCompleteCount === comboRewards.length;
   const validateBeforeSave = () => {
-    const incompleteSimpleRows = currentBuyerRows.filter(isIncompleteSimpleRow);
-    const incompleteComboGroups = getIncompleteComboGroups(currentBuyerRows);
-    return { incompleteSimpleRows, incompleteComboGroups };
+    return validatePromotions(currentBuyerRows, {
+      actividades: [activityContext || catalogoActivo].filter(Boolean),
+      compradores,
+    });
   };
   const handleSaveSupabase = () => {
     const validation = validateBeforeSave();
-    if (validation.incompleteSimpleRows.length || validation.incompleteComboGroups.length) {
+    if (validation.errors.length) {
       setSaveWarning(validation);
       return;
     }
@@ -1020,7 +1016,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     </div>;
   };
   const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder combo-builder-pair"><label className="field wide"><span>Oferta</span><select value={comboDraft.group || ""} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group}>{group}</option>)}</select></label><div className="combo-role-panel principal"><div className="combo-role-head"><div><strong>Principales</strong><span>SKU que compra el cliente</span></div><Button variant="outline" onClick={() => addComboDraftLine("principal")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboPrincipals.map((line, index) => renderComboLine("principal", line, index, comboPrincipals.length))}</div></div><div className="combo-role-panel reward"><div className="combo-role-head"><div><strong>Regalías</strong><span>SKU entregados como beneficio</span></div><Button variant="outline" onClick={() => addComboDraftLine("reward")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboRewards.map((line, index) => renderComboLine("reward", line, index, comboRewards.length))}</div></div><div className="combo-builder-summary"><span>{principalCompleteCount}/{comboPrincipals.length} principales completos</span><span>{rewardCompleteCount}/{comboRewards.length} regalías completas</span></div><div className="button-row combo-pair-actions"><Button onClick={addComboPair} disabled={!canAddComboPair}><Plus size={16}/> Agregar combo completo</Button></div></div></CardContent></Card> : null;
-  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Fallo" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
   const activityCommentStatus = openActivityComments.length ? `${openActivityComments.length} abierto(s)` : activityComments.length ? `${activityComments.length} registrado(s)` : "Sin comentarios";
   const buyerAvancePanel = compradorSeleccionado && canEditAvances ? <div className="avance-mini-panel"><div className="segment-panel-head"><div><strong>Estado de carga</strong><span>Marque terminado cuando complete sus ofertas por division.</span></div></div>{buyerDivisionesAvance.length ? <div className="segment-chip-list">{buyerDivisionesAvance.map((division) => { const terminado = isAvanceTerminado(avanceCatalogos, currentCatalogoAvanceId, division, comprador); return <button key={division} type="button" className={terminado ? "segment-chip selected" : "segment-chip"} onClick={() => toggleBuyerAvance(division)}>{terminado ? <CheckCircle2 size={14}/> : <CircleDashed size={14}/>} {division}</button>; })}</div> : <div className="empty-state">Este comprador no tiene divisiones configuradas en Ajustes.</div>}</div> : null;
   const activityCommentPanel = <div className="activity-comment-panel"><div className="activity-comment-head"><div><strong>Comentario general</strong><span>{activityCommentStatus}</span></div>{canEditPromos && <Button variant="outline" onClick={() => setShowActivityComment((value) => !value)} disabled={!currentActivityId || !compradorSeleccionado}><MessageSquare size={16}/> {showActivityComment ? "Ocultar" : "Agregar"}</Button>}</div>{latestActivityComment && <div className="activity-comment-latest"><span className={String(latestActivityComment.estado).toLowerCase() === "abierto" ? "pill yellow" : "pill green"}>{latestActivityComment.estado}</span><p>{latestActivityComment.texto || latestActivityComment.comentario}</p></div>}{canEditPromos && showActivityComment && <div className="activity-comment-form"><textarea value={activityCommentDraft} onChange={(e) => setActivityCommentDraft(e.target.value)} placeholder="Ej. 20% de descuento en categoria Puertas" /><div className="button-row"><Button onClick={addActivityComment} disabled={!normalizeValue(activityCommentDraft)}><Save size={16}/> Guardar comentario</Button></div></div>}</div>;
@@ -1049,9 +1045,9 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       {comboBuilder}
       <Card className="grid-card">
         <CardContent>
-        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar línea"}</Button>}{canSyncSupabase && <Button onClick={handleSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}</div></div>
+        <div className="toolbar promo-grid-toolbar"><div><h2>{esCompleja ? "Promociones complejas" : "Promociones simples"}</h2><p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p></div><div className="toolbar-actions"><div className="search"><Search size={16}/><input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} /></div>{canEditPromos && selectedPromoCount > 0 && <Button variant="outline" onClick={deleteSelectedPromos}><Trash2 size={16}/> Eliminar seleccionados ({selectedPromoCount})</Button>}{canEditPromos && <Button variant="outline" onClick={clearPromosWorkspace}><X size={16}/> Limpiar</Button>}{canEditPromos && <Button variant="outline" onClick={() => addRow()} disabled={!compradorSeleccionado || isComboActive}><Plus size={16}/> {"Agregar línea"}</Button>}{canSyncSupabase && <Button onClick={handleSaveSupabase} disabled={!supabaseReady || isSyncing}><Save size={16}/> {saveSupabaseLabel}</Button>}</div></div>
           {!esCompleja && <div className="promo-integrity-row"><p className={classNames("promo-integrity-note", missingBenefitCount ? "warning" : "ok")}>{benefitStatusText}</p></div>}
-          <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{filteredRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><button className="icon-btn" onClick={() => deleteRow(row.id)}><Trash2 size={15}/></button></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr>{canEditPromos && <th className="sticky-action-col"><input ref={selectVisibleCheckboxRef} className="promo-row-checkbox" type="checkbox" checked={allFilteredRowsSelected} onChange={toggleVisiblePromoSelection} disabled={!selectableFilteredRowIds.length} title="Seleccionar visibles" aria-label="Seleccionar promociones visibles" /></th>}{columnas.map((col) => <th key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{labels[col]}</th>)}</tr></thead><tbody>{filteredRows.map((row) => { const warning = hasDiscountWarning(row); return <tr key={row.id} className={getPromoRowClass(row)}>{canEditPromos && <td className="sticky-action-col"><div className="promo-row-actions"><input className="promo-row-checkbox" type="checkbox" checked={selectedPromoIds.has(row.id)} onChange={() => togglePromoSelection(row.id)} aria-label={`Seleccionar SKU ${row.sku || ""}`} /><button className="icon-btn" onClick={() => deleteRow(row.id)} title="Eliminar línea" aria-label="Eliminar línea"><Trash2 size={15}/></button></div></td>}{columnas.map((col) => <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions)}</td>)}</tr>; })}</tbody></table></div>
         </CardContent>
       </Card>
     </div>
@@ -1066,13 +1062,13 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
         </div>
         <div className="modal-body">
           <p className="modal-note"><AlertTriangle size={16}/> Complete las ofertas indicadas y vuelva a presionar Guardar Supabase.</p>
-          {saveWarning.incompleteSimpleRows.length > 0 && <div className="validation-list">
-            <strong>{saveWarning.incompleteSimpleRows.length} promocion(es) simple(s) sin precio ahora ni descuento</strong>
-            {saveWarning.incompleteSimpleRows.slice(0, 5).map((row) => <span key={row.id || row.row_id}>{row.sku || "SKU sin codigo"} - {getRowPromoType(row) || "Promocion simple"}</span>)}
+          {saveWarning.errors.length > 0 && <div className="validation-list">
+            <strong>{saveWarning.errors.length} error(es) bloqueante(s)</strong>
+            {saveWarning.errors.slice(0, 8).map((issue, index) => <span key={`${issue.rowId || issue.groupKey || "issue"}-${index}`}>{formatPromotionValidationIssue(issue)}</span>)}
           </div>}
-          {saveWarning.incompleteComboGroups.length > 0 && <div className="validation-list">
-            <strong>{saveWarning.incompleteComboGroups.length} combo(s) incompleto(s)</strong>
-            {saveWarning.incompleteComboGroups.slice(0, 5).map((group) => <span key={group.group}>{group.group}: {group.principals || 0} principal(es), {group.rewards || 0} regalia(s){group.blankSku ? `, ${group.blankSku} linea(s) sin SKU` : ""}</span>)}
+          {saveWarning.warnings?.length > 0 && <div className="validation-list">
+            <strong>{saveWarning.warnings.length} advertencia(s)</strong>
+            {saveWarning.warnings.slice(0, 5).map((issue, index) => <span key={`${issue.rowId || issue.groupKey || "warning"}-${index}`}>{formatPromotionValidationIssue(issue)}</span>)}
           </div>}
         </div>
         <div className="modal-actions">
