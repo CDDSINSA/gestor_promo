@@ -114,9 +114,10 @@ export function normalizeAlcanceType(value) {
 
 export function normalizeSpecialRequestStatus(value) {
   const text = normalizeCanal(value);
-  if (["aprovado", "aprovada", "aprobado", "aprobada", "asignado", "asignada"].includes(text)) return "Aprovado";
+  if (["aprovado", "aprovada", "aprobado", "aprobada", "asignado", "asignada"].includes(text)) return "Aprobado";
   if (["entrabajo", "trabajando", "enproceso", "proceso", "activo", "activa"].includes(text)) return "En trabajo";
   if (["finalizado", "finalizada", "resuelto", "resuelta", "cerrado", "cerrada"].includes(text)) return "Finalizado";
+  if (["archivado", "archivada"].includes(text)) return "Archivado";
   return "Nuevo";
 }
 

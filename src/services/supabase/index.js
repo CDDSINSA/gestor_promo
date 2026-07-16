@@ -14,8 +14,11 @@ export {
   updateRecoveredPassword,
 } from "./session";
 export {
+  loadActivityIdsByPrefixFromSupabase,
   loadCatalogFromSupabase,
   loadLogsFromSupabase,
+  loadPromotionScopeFromSupabase,
+  loadSpecialRequestsFromSupabase,
   pingSupabaseConnection,
 } from "./catalog";
 export {

@@ -6,6 +6,7 @@ import {
   getSegmentosByCanal,
   normalizeActividad,
   createSpecialActivityId,
+  formatDateKey,
 } from "../utils/promoHelpers";
 import PromosPageView from "./PromosPage";
 import { Button, Card, CardContent, Header } from "./ui";
@@ -80,6 +81,7 @@ export default function PromocionEspecialPage({
   archivoComprador,
   onSaveSupabase,
   supabaseReady,
+  onResolveSpecialActivityIds,
   saveSupabaseStatus,
   isSyncing,
   catalogos,
@@ -89,6 +91,8 @@ export default function PromocionEspecialPage({
   const buyerList = compradores.filter((c) => c.activo !== false).map((c) => c.comprador || c.nombre).filter(Boolean);
   const defaultCanal = canalOptions[0] || "Retail";
   const [currentActivity, setCurrentActivity] = useState(null);
+  const [isCreatingActivity, setIsCreatingActivity] = useState(false);
+  const [activityCreateError, setActivityCreateError] = useState("");
   const [draft, setDraft] = useState({
     comprador: "",
     nombre_actividad: "",
@@ -168,11 +172,32 @@ export default function PromocionEspecialPage({
     (!selectedReasons.includes("otros") || String(otherReasonText || "").trim())
   );
 
-  const createActivity = () => {
-    if (!requiredReady || currentActivity) return;
+  const resolveSpecialActivityId = async () => {
+    const dateKey = formatDateKey();
+    const prefix = `ESP-${dateKey}-`;
+    if (!supabaseReady || !onResolveSpecialActivityIds) return createSpecialActivityId(actividades);
+
+    const remoteIds = await onResolveSpecialActivityIds(prefix);
+    const remoteActivities = remoteIds.map((actividadId) => ({ actividad_id: actividadId }));
+    return createSpecialActivityId([...(actividades || []), ...remoteActivities]);
+  };
+
+  const createActivity = async () => {
+    if (!requiredReady || currentActivity || isCreatingActivity) return;
+    setIsCreatingActivity(true);
+    setActivityCreateError("");
+    let actividadId = "";
+    try {
+      actividadId = await resolveSpecialActivityId();
+    } catch (error) {
+      setActivityCreateError(error?.message || "No se pudo validar el ID de actividad en Supabase.");
+      setIsCreatingActivity(false);
+      return;
+    }
+
     const now = new Date().toISOString();
     const activity = normalizeActividad({
-      actividad_id: createSpecialActivityId(actividades),
+      actividad_id: actividadId,
       nombre_actividad: draft.nombre_actividad,
       tipo_actividad: "ESPECIAL",
       canal: draft.canal,
@@ -189,6 +214,7 @@ export default function PromocionEspecialPage({
     setActividades((prev) => [activity, ...prev]);
     setCurrentActivity(activity);
     setLogs((prev) => [{ fecha: new Date().toLocaleString(), usuario: draft.comprador, catalogo: activity.nombre_actividad, accion: `Creo actividad especial ${activity.actividad_id}` }, ...prev]);
+    setIsCreatingActivity(false);
   };
 
   const resetActivity = () => {
@@ -206,6 +232,7 @@ export default function PromocionEspecialPage({
       motivo_solicitud: "",
       tipo_promo: "Descuento",
     });
+    setActivityCreateError("");
   };
 
   const activityContext = currentActivity
@@ -229,10 +256,11 @@ export default function PromocionEspecialPage({
             <p>{currentActivity ? currentActivity.actividad_id : "Complete la solicitud para habilitar la grilla."}</p>
           </div>
           <div className="toolbar-actions">
-            <Button onClick={createActivity} disabled={!requiredReady || Boolean(currentActivity)}><Save size={16}/> Guardar actividad</Button>
+            <Button onClick={createActivity} disabled={!requiredReady || Boolean(currentActivity) || isCreatingActivity}><Save size={16}/> {isCreatingActivity ? "Validando ID..." : "Guardar actividad"}</Button>
             {currentActivity && <Button variant="outline" onClick={resetActivity}><Plus size={16}/> Nueva especial</Button>}
           </div>
         </div>
+        {activityCreateError && <div className="status-message error">{activityCreateError}</div>}
         <div className="form-grid">
           <label className="field">
             <span>Comprador</span>

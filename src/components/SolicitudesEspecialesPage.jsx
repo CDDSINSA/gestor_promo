@@ -1,6 +1,7 @@
 ﻿import React, { useMemo, useState } from "react";
 import {
   ArrowRight,
+  Archive,
   CircleDot,
   Clock3,
   Edit3,
@@ -12,7 +13,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { SPECIAL_REQUEST_STATUSES } from "../constants";
+import { SPECIAL_REQUEST_ARCHIVED_STATUS, SPECIAL_REQUEST_STATUSES } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
 import { classNames, formatDateTime } from "../utils/common";
@@ -30,11 +31,11 @@ import PromosPageView from "./PromosPage";
 import { Button, Card, CardContent, Header, Metric } from "./ui";
 
 function getStatusLabel(status) {
-  return status === "Aprovado" ? "Aprobado" : status;
+  return status;
 }
 
 function getStatusBoardLabel(status) {
-  if (status === "Aprovado") return "Aprobadas";
+  if (status === "Aprobado") return "Aprobadas";
   if (status === "Nuevo") return "Nuevas";
   if (status === "Finalizado") return "Finalizadas";
   return status;
@@ -52,7 +53,7 @@ function formatRequestDateTime(value) {
   return value ? formatDateTime(value) : "Pendiente";
 }
 
-export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], setRows, comentarios = [], setComentarios, compradores = [], jerarquiaCategorias = [], segmentosClientes = [], skuMaster = {}, archivoComprador = null, skuMasterStatus = null, onRefreshSkuMaster, responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing }) {
+export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], setRows, comentarios = [], setComentarios, compradores = [], jerarquiaCategorias = [], segmentosClientes = [], skuMaster = {}, archivoComprador = null, skuMasterStatus = null, onRefreshSkuMaster, responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, refreshStatus = { type: "idle", message: "" } }) {
   const { can } = usePermissions();
   const canManageRequests = can(PERMISSIONS.MANAGE_SOLICITUDES);
   const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
@@ -84,7 +85,9 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     return acc;
   }, new Map()), [rows]);
 
-  const specialRequests = useMemo(() => actividades.map(normalizeActividad).filter((item) => item.tipo_actividad === "ESPECIAL"), [actividades]);
+  const specialRequests = useMemo(() => actividades
+    .map(normalizeActividad)
+    .filter((item) => item.tipo_actividad === "ESPECIAL" && normalizeSpecialRequestStatus(item.estado) !== SPECIAL_REQUEST_ARCHIVED_STATUS), [actividades]);
   const buyerOptions = useMemo(() => {
     const values = specialRequests.map((item) => item.comprador || item.solicitante).filter(Boolean);
     return ["Todos", ...Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))];
@@ -150,13 +153,13 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     if (!activity) return;
     if (field === "responsable") {
       const currentStatus = normalizeSpecialRequestStatus(activity.estado);
-      if (value && currentStatus !== "Aprovado" && currentStatus !== "En trabajo") {
+      if (value && currentStatus !== "Aprobado" && currentStatus !== "En trabajo") {
         setAssignmentError("Primero debe aprobar la solicitud antes de asignar responsable.");
         return;
       }
       setAssignmentError("");
       const action = value !== activity.responsable ? `Asigno responsable de ${activity.actividad_id}: ${value || "Sin asignar"}` : "";
-      if (value && currentStatus === "Aprovado") {
+      if (value && currentStatus === "Aprobado") {
         performStatusChange({ ...activity, responsable: value }, "En trabajo", { responsable: value }, action || `Solicitud ${activity.actividad_id} pasa a En trabajo`);
         return;
       }
@@ -212,6 +215,11 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     performStatusChange(activity, targetStatus);
   };
 
+  const archiveRequest = (activity) => {
+    if (!activity || normalizeSpecialRequestStatus(activity.estado) !== "Finalizado") return;
+    performStatusChange(activity, SPECIAL_REQUEST_ARCHIVED_STATUS, {}, `Archivo solicitud ${activity.actividad_id}`);
+  };
+
   const confirmFinish = () => {
     if (!finishModal?.activity) return;
     const promoIds = normalizeIdList(finishModal.promoIds);
@@ -245,13 +253,14 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
 
   return <div>
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
+    {refreshStatus.message && <div className={classNames("status-message", refreshStatus.type === "error" && "error")}>{refreshStatus.message}</div>}
     <div className="special-request-tabs" role="tablist" aria-label="Vista de solicitudes especiales">
       <button type="button" className={activeTab === "seguimiento" ? "selected" : ""} onClick={() => setActiveTab("seguimiento")}><ListChecks size={16}/> Seguimiento</button>
       <button type="button" className={activeTab === "editar" ? "selected" : ""} onClick={() => setActiveTab("editar")}><Edit3 size={16}/> Editar solicitud</button>
     </div>
     {activeTab === "seguimiento" && <div className="special-request-kpis">
       <Metric title="Nuevas" value={statusTotals.Nuevo || 0} icon={CircleDot}/>
-      <Metric title="Aprobadas" value={statusTotals.Aprovado || 0} icon={UserCheck}/>
+      <Metric title="Aprobadas" value={statusTotals.Aprobado || 0} icon={UserCheck}/>
       <Metric title="En trabajo" value={statusTotals["En trabajo"] || 0} icon={Clock3}/>
       <Metric title="Finalizadas" value={statusTotals.Finalizado || 0} icon={ListChecks}/>
     </div>}
@@ -374,6 +383,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
                 <span><Clock3 size={13}/>{formatDurationHours(getTotalElapsed(item))}</span>
               </div>
               {canManageRequests && nextStatus && <Button variant="outline" onClick={(event) => { event.stopPropagation(); requestStatusChange(item, nextStatus); }}><ArrowRight size={14}/> {getStatusLabel(nextStatus)}</Button>}
+              {canManageRequests && status === "Finalizado" && <Button variant="outline" onClick={(event) => { event.stopPropagation(); archiveRequest(item); }}><Archive size={14}/> Archivar</Button>}
             </article>)}
             {!items.length && <div className="special-board-empty">Sin solicitudes</div>}
           </div>

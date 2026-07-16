@@ -29,7 +29,7 @@ import { Button, Card, CardContent, Header, Metric } from "./ui";
 export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseStatus, isSyncing }) {
   const { appUser } = useAuth();
   const { can } = usePermissions();
-  const catalogosVisibles = catalogos.filter((c) => String(c.estado).toLowerCase() !== "cerrado");
+  const catalogosVisibles = useMemo(() => (catalogos || []).filter((c) => String(c.estado).toLowerCase() !== "cerrado"), [catalogos]);
   const activos = catalogosVisibles.filter((c) => c.estado === "Activo").length;
   const supabaseReady = hasSupabaseConnection(supabaseSettings);
   const statusType = supabaseStatus?.type || (supabaseReady ? "ready" : "idle");
@@ -53,6 +53,16 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       if (row.sku) stat.skus.add(row.sku);
     });
     return stats;
+  }, [catalogosVisibles, rows]);
+  const visibleRowsCount = useMemo(() => {
+    const catalogKeys = new Set();
+    catalogosVisibles.forEach((cat) => {
+      [cat.id, cat.catalogo_id].filter(Boolean).forEach((key) => catalogKeys.add(String(key)));
+    });
+    return rows.filter((row) => {
+      const rowCatalogKey = row.actividad_id || row.actividadId || row.catalogo_id || row.catalogoId;
+      return catalogKeys.has(String(rowCatalogKey || ""));
+    }).length;
   }, [catalogosVisibles, rows]);
   const buyerOpenComments = useMemo(() => {
     if (currentRole !== ROLES.BUYER || !currentBuyerName) return 0;
@@ -125,7 +135,7 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
     </div>
     <div className="metrics">
       <Metric title="Catalogos activos" value={activos} icon={LayoutDashboard}/>
-      <Metric title="Promos registradas" value={rowsCount} icon={ListChecks}/>
+      <Metric title="Promos registradas" value={visibleRowsCount} icon={ListChecks}/>
       <Metric title="Cambios recientes" value={logsCount} icon={History}/>
       <Metric title="Conexion Supabase" value={supabaseReady ? "ON" : "OFF"} icon={Bell}/>
     </div>

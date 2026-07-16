@@ -473,7 +473,7 @@ function renderCell(row, col, updateRow, warning, segmentOptions = []) {
   return <input value={row[col] || ""} onChange={(e) => updateRow(row.id, col, e.target.value)} />;
 }
 
-export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, onSaveSupabaseDirect, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
+export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, setLogs, archivoComprador, skuMasterStatus, onRefreshSkuMaster, onSaveSupabase, onSaveSupabaseDirect, onRefreshPromotionScope, promotionScopeRefreshStatus = { type: "idle", message: "" }, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador." }) {
   const { can } = usePermissions();
   const canEditPromos = can(PERMISSIONS.EDIT_PROMOS);
   const canEditAvances = can(PERMISSIONS.EDIT_AVANCES);
@@ -931,6 +931,10 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     normalizeRow: toAppRow,
   });
   React.useEffect(() => {
+    if (!supabaseReady || !onRefreshPromotionScope || !currentActivityId || !comprador || !tipoActivo) return;
+    onRefreshPromotionScope({ actividadId: currentActivityId, comprador, tipoPromo: tipoActivo });
+  }, [supabaseReady, onRefreshPromotionScope, currentActivityId, comprador, tipoActivo]);
+  React.useEffect(() => {
     setPromoGridPage(1);
     setSelectedPromoIds(new Set());
   }, [currentActivityId, comprador, tipoActivo, search, segmentMode, segmentText]);
@@ -1052,6 +1056,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
           <label className="field"><span>{activityContext ? "Actividad" : "Catalogo activo"}</span><div className="readonly">{activityContext?.nombre_actividad || catalogoActivo?.nombre || "Seleccione catalogo"}</div></label>
           <label className="field"><span>Comprador</span><select value={comprador} onChange={(e) => setComprador(e.target.value)} disabled={lockComprador}><option value="">Seleccione comprador</option>{buyerList.map((c) => <option key={c}>{c}</option>)}</select></label>
           <label className="field"><span>{"Tipo de promoci\u00f3n"}</span><select value={tipoActivo} onChange={(e) => changeTipoActivo(e.target.value)} disabled={!compradorSeleccionado}>{todosTipos.map((t) => <option key={t}>{t}</option>)}</select></label>
+          {promotionScopeRefreshStatus.message && <div className={classNames("status-message", promotionScopeRefreshStatus.type === "error" && "error")}>{promotionScopeRefreshStatus.message}</div>}
           <input ref={promoTemplateFileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={loadPromoTemplate}/>
           {buyerAvancePanel}
           {activityCommentPanel}

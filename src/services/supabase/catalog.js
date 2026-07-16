@@ -48,6 +48,207 @@ export async function pingSupabaseConnection(connection) {
   return { role: currentRole };
 }
 
+export async function loadActivityIdsByPrefixFromSupabase(connection, prefix) {
+  const cleanPrefix = String(prefix || "").trim();
+  if (!cleanPrefix) return [];
+
+  const rows = await selectAll(connection, "campanas", {
+    select: "legacy_actividad_id",
+    legacy_actividad_id: `like.${cleanPrefix}%`,
+    order: "legacy_actividad_id.asc",
+    limit: 1000,
+  });
+
+  return Array.isArray(rows)
+    ? rows.map((item) => String(item.legacy_actividad_id || "").trim()).filter(Boolean)
+    : [];
+}
+
+function buildHierarchyByDepId(jerarquias = []) {
+  return Object.fromEntries(
+    (jerarquias || [])
+      .filter((item) => item.activo !== false && item.dep_id)
+      .map((item) => [
+        String(item.dep_id || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, ""),
+        item,
+      ])
+  );
+}
+
+export async function loadSpecialRequestsFromSupabase(connection) {
+  const [
+    compradores,
+    campanas,
+    responsables,
+    jerarquias,
+  ] = await Promise.all([
+    selectAll(connection, "compradores", { order: "comprador.asc" }),
+    selectAll(connection, "campanas", { tipo_actividad: "eq.ESPECIAL", order: "created_at.asc" }),
+    selectAll(connection, "responsables_solicitudes", { order: "nombre.asc" }),
+    selectAll(connection, "jerarquia_categorias", { order: "dep_id.asc" }),
+  ]);
+
+  const campanaIds = campanas.map((item) => item.id).filter(Boolean);
+  const promociones = campanaIds.length
+    ? await selectRowsByValues(connection, "promociones", "campana_id", campanaIds)
+    : [];
+  promociones.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+
+  const promotionIds = promociones.map((item) => item.id).filter(Boolean);
+  const [detalles, lineComments, activityComments] = await Promise.all([
+    promotionIds.length
+      ? selectRowsByValues(connection, "promociones_detalle", "promocion_id", promotionIds)
+      : [],
+    promotionIds.length
+      ? selectRowsByValues(connection, "comentarios", "promocion_id", promotionIds)
+      : [],
+    campanaIds.length
+      ? selectRowsByValues(connection, "comentarios", "campana_id", campanaIds)
+      : [],
+  ]);
+  detalles.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+
+  const comentariosById = new Map();
+  [...lineComments, ...activityComments].forEach((item) => {
+    if (item?.id) comentariosById.set(item.id, item);
+  });
+  const comentarios = Array.from(comentariosById.values())
+    .sort((left, right) => String(left.fecha || left.created_at || "").localeCompare(String(right.fecha || right.created_at || "")));
+
+  const compradorById = keyBy(compradores, "id");
+  const campanaById = keyBy(campanas, "id");
+  const promoById = keyBy(promociones, "id");
+  const hierarchyByDepId = buildHierarchyByDepId(jerarquias);
+
+  return {
+    actividades: campanas.map((item) => toActividad(item, compradorById)),
+    promociones: promociones.map((item) => toPromotionRow(item, campanaById, compradorById, hierarchyByDepId)),
+    promociones_detalle: detalles.map((item) => {
+      const promo = promoById[item.promocion_id] || {};
+      const campana = campanaById[promo.campana_id] || {};
+      return {
+        detalle_id: item.id,
+        row_id: promo.legacy_row_id || "",
+        actividad_id: campana.legacy_actividad_id || "",
+        oferta_id: promo.oferta_id || "",
+        grupo_oferta: promo.grupo_oferta || "",
+        tipo_promo: promo.tipo_promo || "",
+        campo: item.campo,
+        valor: item.valor,
+      };
+    }),
+    comentarios: comentarios.map((item) => {
+      const promo = promoById[item.promocion_id] || {};
+      const campana = campanaById[item.campana_id || promo.campana_id] || {};
+      return {
+        comentario_id: item.legacy_comentario_id || item.id,
+        actividad_id: campana.legacy_actividad_id || "",
+        row_id: item.alcance_comentario === "ACTIVIDAD" ? "" : item.legacy_row_id || promo.legacy_row_id || "",
+        alcance_comentario: item.alcance_comentario,
+        prioridad: item.prioridad,
+        usuario: item.usuario,
+        tipo_usuario: item.tipo_usuario,
+        comentario: item.comentario,
+        estado: item.estado,
+        fecha: item.fecha,
+        resuelto_por: item.resuelto_por || "",
+        fecha_resolucion: item.fecha_resolucion || "",
+      };
+    }),
+    responsables_solicitudes: responsables,
+  };
+}
+
+export async function loadPromotionScopeFromSupabase(connection, { actividadId, comprador, tipoPromo } = {}) {
+  const cleanActividadId = String(actividadId || "").trim();
+  const cleanComprador = String(comprador || "").trim();
+  const cleanTipoPromo = String(tipoPromo || "").trim();
+  if (!cleanActividadId || !cleanComprador || !cleanTipoPromo) {
+    return { promociones: [], promociones_detalle: [], comentarios: [] };
+  }
+
+  const [campanas, compradores, jerarquias] = await Promise.all([
+    selectAll(connection, "campanas", {
+      select: "id,legacy_actividad_id",
+      legacy_actividad_id: `eq.${cleanActividadId}`,
+      limit: 1,
+    }),
+    selectAll(connection, "compradores", {
+      select: "id,comprador,comprador_id,division",
+      comprador: `eq.${cleanComprador}`,
+      limit: 1,
+    }),
+    selectAll(connection, "jerarquia_categorias", { order: "dep_id.asc" }),
+  ]);
+
+  const campana = Array.isArray(campanas) ? campanas[0] : null;
+  const buyer = Array.isArray(compradores) ? compradores[0] : null;
+  if (!campana?.id || !buyer?.id) return { promociones: [], promociones_detalle: [], comentarios: [] };
+
+  const promociones = await selectAll(connection, "promociones", {
+    campana_id: `eq.${campana.id}`,
+    buyer_id: `eq.${buyer.id}`,
+    tipo_promo: `eq.${cleanTipoPromo}`,
+    order: "created_at.asc",
+  });
+  const promotionIds = promociones.map((item) => item.id).filter(Boolean);
+  const [detalles, comentarios] = await Promise.all([
+    promotionIds.length
+      ? selectRowsByValues(connection, "promociones_detalle", "promocion_id", promotionIds)
+      : [],
+    promotionIds.length
+      ? selectRowsByValues(connection, "comentarios", "promocion_id", promotionIds)
+      : [],
+  ]);
+  detalles.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+  comentarios.sort((left, right) => String(left.fecha || left.created_at || "").localeCompare(String(right.fecha || right.created_at || "")));
+
+  const compradorById = keyBy([buyer], "id");
+  const campanaById = keyBy([campana], "id");
+  const promoById = keyBy(promociones, "id");
+  const hierarchyByDepId = buildHierarchyByDepId(jerarquias);
+
+  return {
+    promociones: promociones.map((item) => toPromotionRow(item, campanaById, compradorById, hierarchyByDepId)),
+    promociones_detalle: detalles.map((item) => {
+      const promo = promoById[item.promocion_id] || {};
+      const currentCampana = campanaById[promo.campana_id] || {};
+      return {
+        detalle_id: item.id,
+        row_id: promo.legacy_row_id || "",
+        actividad_id: currentCampana.legacy_actividad_id || "",
+        oferta_id: promo.oferta_id || "",
+        grupo_oferta: promo.grupo_oferta || "",
+        tipo_promo: promo.tipo_promo || "",
+        campo: item.campo,
+        valor: item.valor,
+      };
+    }),
+    comentarios: comentarios.map((item) => {
+      const promo = promoById[item.promocion_id] || {};
+      const currentCampana = campanaById[promo.campana_id] || {};
+      return {
+        comentario_id: item.legacy_comentario_id || item.id,
+        actividad_id: currentCampana.legacy_actividad_id || "",
+        row_id: item.legacy_row_id || promo.legacy_row_id || "",
+        alcance_comentario: item.alcance_comentario,
+        prioridad: item.prioridad,
+        usuario: item.usuario,
+        tipo_usuario: item.tipo_usuario,
+        comentario: item.comentario,
+        estado: item.estado,
+        fecha: item.fecha,
+        resuelto_por: item.resuelto_por || "",
+        fecha_resolucion: item.fecha_resolucion || "",
+      };
+    }),
+  };
+}
+
 export async function loadCatalogFromSupabase(connection) {
   const [
     compradores,

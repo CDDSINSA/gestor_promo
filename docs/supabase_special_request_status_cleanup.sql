@@ -1,6 +1,5 @@
--- Permite usar el estado "Preliminar" en catalogos/campanas.
--- Ejecutar en Supabase SQL Editor solo si al guardar un catalogo con estado
--- Preliminar aparece un error de restriccion/check sobre campanas.estado.
+-- Corrige estados de solicitudes especiales y permite archivar.
+-- Ejecutar en Supabase SQL Editor antes de guardar solicitudes con estado Archivado.
 
 alter table public.campanas
   drop constraint if exists campanas_estado_operativo_check;
@@ -15,3 +14,7 @@ alter table public.campanas
     'PRELIMINAR', 'BORRADOR', 'ACTIVO', 'CERRADO', 'CANCELADO',
     'Nuevo', 'Aprobado', 'Aprovado', 'En trabajo', 'Finalizado', 'Archivado'
   ));
+
+update public.campanas
+set estado = 'Aprobado'
+where estado = 'Aprovado';

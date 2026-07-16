@@ -75,7 +75,7 @@ begin
       check (estado in (
         'Borrador', 'Activo', 'Cerrado',
         'BORRADOR', 'ACTIVO', 'CERRADO', 'CANCELADO',
-        'Nuevo', 'Aprovado', 'En trabajo', 'Finalizado'
+        'Nuevo', 'Aprobado', 'Aprovado', 'En trabajo', 'Finalizado', 'Archivado'
       ));
   end if;
 end;
