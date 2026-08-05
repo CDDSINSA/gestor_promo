@@ -2,6 +2,10 @@
 import { Save, Plus } from "lucide-react";
 import { allPromoTypes as todosTipos } from "../promoTypes/promoTypeEngine";
 import { ALCANCE_TYPES } from "../constants";
+import { ROLES, normalizeRole } from "../constants/permissions";
+import { useAuth } from "../hooks/useAuth";
+import { usePermissions } from "../hooks/usePermissions";
+import { getAuthorizedCompradorNamesForAppUser } from "../utils/avanceHelpers";
 import {
   getSegmentosByCanal,
   normalizeActividad,
@@ -75,6 +79,7 @@ export default function PromocionEspecialPage({
   jerarquiaCategorias = [],
   segmentosClientes,
   skuMaster,
+  skuMasterCount = 0,
   setLogs,
   onLoadSkuMaster,
   skuMasterFileInputRef,
@@ -86,9 +91,15 @@ export default function PromocionEspecialPage({
   isSyncing,
   catalogos,
 }) {
+  const { appUser } = useAuth();
+  const { role } = usePermissions();
   const today = new Date().toISOString().slice(0, 10);
   const canalOptions = Array.from(new Set([...(catalogos || []).map((cat) => normalizeChannelLabel(cat.canal)).filter(Boolean), ...SPECIAL_CHANNEL_OPTIONS]));
-  const buyerList = compradores.filter((c) => c.activo !== false).map((c) => c.comprador || c.nombre).filter(Boolean);
+  const restrictBuyerScope = normalizeRole(role) === ROLES.BUYER;
+  const buyerList = React.useMemo(
+    () => getAuthorizedCompradorNamesForAppUser(appUser, compradores, restrictBuyerScope),
+    [appUser, compradores, restrictBuyerScope],
+  );
   const defaultCanal = canalOptions[0] || "Retail";
   const [currentActivity, setCurrentActivity] = useState(null);
   const [isCreatingActivity, setIsCreatingActivity] = useState(false);
@@ -139,6 +150,16 @@ export default function PromocionEspecialPage({
       return next;
     });
   };
+
+  React.useEffect(() => {
+    if (draft.comprador && !buyerList.includes(draft.comprador)) {
+      updateDraft("comprador", "");
+      return;
+    }
+    if (!draft.comprador && buyerList.length === 1) {
+      updateDraft("comprador", buyerList[0]);
+    }
+  }, [buyerList, draft.comprador]);
 
   const toggleChannel = (channel) => {
     const nextChannels = selectedChannels.includes(channel)
@@ -264,7 +285,7 @@ export default function PromocionEspecialPage({
         <div className="form-grid">
           <label className="field">
             <span>Comprador</span>
-            <select value={draft.comprador} onChange={(e) => updateDraft("comprador", e.target.value)} disabled={Boolean(currentActivity)}>
+            <select value={draft.comprador} onChange={(e) => updateDraft("comprador", e.target.value)} disabled={Boolean(currentActivity) || buyerList.length <= 1}>
               <option value="">Seleccione comprador</option>
               {buyerList.map((buyer) => <option key={buyer}>{buyer}</option>)}
             </select>
@@ -338,6 +359,7 @@ export default function PromocionEspecialPage({
         jerarquiaCategorias={jerarquiaCategorias}
         segmentosClientes={segmentosClientes}
         skuMaster={skuMaster}
+        skuMasterCount={skuMasterCount}
         setLogs={setLogs}
         onLoadSkuMaster={onLoadSkuMaster}
         skuMasterFileInputRef={skuMasterFileInputRef}

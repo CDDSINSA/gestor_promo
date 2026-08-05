@@ -27,6 +27,7 @@ alter table public.usuarios_app
   check (rol in ('ADMIN', 'BUYER', 'MARK', 'OPER', 'AUD', 'DISENADOR'));
 
 drop policy if exists usuarios_select_self_or_admin on public.usuarios_app;
+drop policy if exists usuarios_select_self_admin_mark on public.usuarios_app;
 create policy usuarios_select_self_admin_mark
 on public.usuarios_app for select
 to authenticated
@@ -88,9 +89,15 @@ create table if not exists public.catalogo_pagina_comentarios (
   usuario_id uuid references public.usuarios_app(id) on delete set null,
   comentario text not null,
   tipo text not null default 'comentario',
+  estado text not null default 'abierto',
+  anotaciones jsonb not null default '[]'::jsonb,
+  resuelto_por uuid references public.usuarios_app(id) on delete set null,
+  fecha_resolucion timestamptz,
   fecha_creacion timestamptz not null default now(),
   constraint catalogo_pagina_comentarios_tipo_check
-    check (tipo in ('comentario', 'observacion', 'aprobacion', 'rechazo', 'ajuste'))
+    check (tipo in ('comentario', 'observacion', 'aprobacion', 'rechazo', 'ajuste')),
+  constraint catalogo_pagina_comentarios_estado_check
+    check (estado in ('abierto', 'resuelto'))
 );
 
 create table if not exists public.catalogo_consolidado_final (
@@ -118,6 +125,19 @@ alter table public.catalogo_proyecto_diseno
 
 alter table public.catalogo_paginas_diseno
   add column if not exists updated_at timestamptz not null default now();
+
+alter table public.catalogo_pagina_comentarios
+  add column if not exists anotaciones jsonb not null default '[]'::jsonb;
+
+alter table public.catalogo_pagina_comentarios
+  add column if not exists estado text not null default 'abierto',
+  add column if not exists resuelto_por uuid references public.usuarios_app(id) on delete set null,
+  add column if not exists fecha_resolucion timestamptz;
+
+alter table public.catalogo_pagina_comentarios
+  drop constraint if exists catalogo_pagina_comentarios_estado_check,
+  add constraint catalogo_pagina_comentarios_estado_check
+    check (estado in ('abierto', 'resuelto'));
 
 create or replace function public.set_fecha_actualizacion()
 returns trigger
@@ -187,6 +207,59 @@ drop trigger if exists catalogo_paginas_diseno_restricted_update on public.catal
 create trigger catalogo_paginas_diseno_restricted_update
 before update on public.catalogo_paginas_diseno
 for each row execute function public.catalogo_paginas_diseno_guard_restricted_update();
+
+create or replace function public.catalogo_pagina_comentarios_guard_status_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_any_role(array['ADMIN', 'MARK']) then
+    return new;
+  end if;
+
+  if new.pagina_id is distinct from old.pagina_id
+    or new.usuario_id is distinct from old.usuario_id
+    or new.comentario is distinct from old.comentario
+    or new.tipo is distinct from old.tipo
+    or new.anotaciones is distinct from old.anotaciones
+    or new.fecha_creacion is distinct from old.fecha_creacion then
+    raise exception 'Solo se permite cambiar el estado del comentario.';
+  end if;
+
+  if new.estado not in ('abierto', 'resuelto') then
+    raise exception 'Estado de comentario no permitido.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists catalogo_pagina_comentarios_status_update on public.catalogo_pagina_comentarios;
+create trigger catalogo_pagina_comentarios_status_update
+before update on public.catalogo_pagina_comentarios
+for each row execute function public.catalogo_pagina_comentarios_guard_status_update();
+
+drop trigger if exists catalogo_proyecto_diseno_audit_row_change on public.catalogo_proyecto_diseno;
+create trigger catalogo_proyecto_diseno_audit_row_change
+after insert or update or delete on public.catalogo_proyecto_diseno
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists catalogo_paginas_diseno_audit_row_change on public.catalogo_paginas_diseno;
+create trigger catalogo_paginas_diseno_audit_row_change
+after insert or update or delete on public.catalogo_paginas_diseno
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists catalogo_pagina_comentarios_audit_row_change on public.catalogo_pagina_comentarios;
+create trigger catalogo_pagina_comentarios_audit_row_change
+after insert or update or delete on public.catalogo_pagina_comentarios
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists catalogo_consolidado_final_audit_row_change on public.catalogo_consolidado_final;
+create trigger catalogo_consolidado_final_audit_row_change
+after insert or update or delete on public.catalogo_consolidado_final
+for each row execute function public.audit_business_row_change();
 
 alter table public.catalogo_proyecto_diseno enable row level security;
 alter table public.catalogo_paginas_diseno enable row level security;
@@ -269,6 +342,37 @@ to authenticated
 with check (
   usuario_id = public.current_app_user_id()
   and exists (
+    select 1
+    from public.catalogo_paginas_diseno p
+    where p.id = pagina_id
+      and (
+        public.is_any_role(array['ADMIN', 'MARK'])
+        or (public.is_role('DISENADOR') and p.disenador_id = public.current_app_user_id())
+        or (public.is_role('BUYER') and p.comprador_id = public.current_buyer_id())
+      )
+  )
+);
+
+drop policy if exists catalogo_pagina_comentarios_update_status_scoped on public.catalogo_pagina_comentarios;
+create policy catalogo_pagina_comentarios_update_status_scoped
+on public.catalogo_pagina_comentarios for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.catalogo_paginas_diseno p
+    where p.id = pagina_id
+      and (
+        public.is_any_role(array['ADMIN', 'MARK'])
+        or (public.is_role('DISENADOR') and p.disenador_id = public.current_app_user_id())
+        or (public.is_role('BUYER') and p.comprador_id = public.current_buyer_id())
+      )
+  )
+)
+with check (
+  estado in ('abierto', 'resuelto')
+  and
+  exists (
     select 1
     from public.catalogo_paginas_diseno p
     where p.id = pagina_id

@@ -66,7 +66,7 @@ function getComprador(row) {
 }
 
 function getCantidadMinima(row) {
-  return row.cantidad_minima || row.cantidadMinima;
+  return row.cantidad_minima ?? row.cantidadMinima;
 }
 
 function getVariante(row) {
@@ -124,6 +124,8 @@ function createIssue(type, row, index, message, extra = {}) {
     severity: type,
     rowId: getRowId(row),
     sku: getSku(row),
+    comprador: getComprador(row),
+    actividadId: getActividadId(row),
     rowNumber: index + 2,
     tipoPromo: getTipoPromo(row),
     grupoOferta: getGrupoOferta(row),
@@ -132,17 +134,33 @@ function createIssue(type, row, index, message, extra = {}) {
   };
 }
 
-function formatRowLabel(issue) {
+function getFieldLabel(field) {
+  const labels = {
+    actividad_id: "actividad_id",
+    sku: "SKU",
+    comprador: "comprador",
+    tipo_promo: "tipo_promo",
+    grupo_oferta: "grupo_oferta",
+    tipo_sku: "tipo_sku",
+    oferta_id: "oferta_id",
+  };
+  return labels[field] || field;
+}
+
+function formatIssueContext(issue) {
   const parts = [];
+  parts.push(`Promocion ${issue.tipoPromo || issue.grupoOferta || issue.rowId || "sin tipo"}`);
   if (issue.rowNumber) parts.push(`Fila ${issue.rowNumber}`);
-  if (issue.rowId) parts.push(issue.rowId);
+  if (issue.rowId) parts.push(`Registro ${issue.rowId}`);
   if (issue.sku) parts.push(`SKU ${issue.sku}`);
-  return parts.length ? parts.join(" / ") : "Fila sin identificador";
+  parts.push(`Comprador ${issue.comprador || "sin comprador"}`);
+  if (issue.field) parts.push(`Campo ${getFieldLabel(issue.field)}`);
+  return parts.join(" / ");
 }
 
 export function formatPromotionValidationIssue(issue) {
   if (issue.groupKey && !issue.rowNumber) return `Grupo ${issue.groupKey}: ${issue.message}`;
-  return `${formatRowLabel(issue)}: ${issue.message}`;
+  return `${formatIssueContext(issue)}: ${issue.message}`;
 }
 
 export function formatPromotionValidationErrors(result) {

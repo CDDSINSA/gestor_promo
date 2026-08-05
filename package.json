@@ -5,13 +5,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "framer-motion": "latest",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "vite": "latest",
-    "xlsx": "latest",
-    "xlsx-js-style": "^1.2.0"
+    "@supabase/supabase-js": "^2.110.8",
+    "@vitejs/plugin-react": "6.0.3",
+    "exceljs": "4.4.0",
+    "lucide-react": "1.17.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "vite": "8.1.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

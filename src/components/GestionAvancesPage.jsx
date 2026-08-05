@@ -65,6 +65,7 @@ function isBuyerName(row, names) {
 export default function GestionAvancesPage({
   catalogo,
   rows = [],
+  catalogoResumen = [],
   compradores = [],
   jerarquiaCategorias = [],
   avances = {},
@@ -97,6 +98,19 @@ export default function GestionAvancesPage({
   const scopedRows = useMemo(() => {
     return rows.filter((row) => rowMatchesCatalog(row, catalogo));
   }, [rows, catalogo]);
+  const scopedSummaryRows = useMemo(() => {
+    const catalogKeys = [
+      catalogo?.id,
+      catalogo?.catalogo_id,
+      catalogo?.actividad_id,
+      catalogo?.actividadId,
+    ].filter(Boolean).map(normalizeKey);
+    return (catalogoResumen || []).filter((item) => {
+      const activityKey = normalizeKey(item.actividad_id || item.actividadId || item.catalogo_id);
+      return activityKey && catalogKeys.includes(activityKey);
+    });
+  }, [catalogoResumen, catalogo]);
+  const hasScopedSummary = scopedSummaryRows.length > 0;
   const hierarchyByDepId = useMemo(() => new Map((jerarquiaCategorias || []).filter((item) => item.activo !== false && item.dep_id).map((item) => [normalizeKey(item.dep_id), item])), [jerarquiaCategorias]);
   const buyerDivisionMap = useMemo(() => {
     const map = new Map();
@@ -187,17 +201,24 @@ export default function GestionAvancesPage({
     const divisions = managedDivisions.map((division) => {
       const supportJuniors = getSupportJuniors(senior, division);
       const responsibleNames = [seniorName, ...supportJuniors.map(getCompradorNombre).filter(Boolean)];
-      const divisionRows = scopedRows.filter((row) => isBuyerName(row, responsibleNames) && rowMatchesDivision(row, division));
+      const summaryRows = hasScopedSummary
+        ? scopedSummaryRows.filter((row) => isBuyerName(row, responsibleNames) && sameDivision(row.division, division))
+        : [];
+      const divisionRows = hasScopedSummary
+        ? []
+        : scopedRows.filter((row) => isBuyerName(row, responsibleNames) && rowMatchesDivision(row, division));
+      const summaryPromos = summaryRows.reduce((total, row) => total + (Number(row.promociones_count || row.promocionesCount || row.promociones || 0) || 0), 0);
+      const summarySkus = summaryRows.reduce((total, row) => total + (Number(row.skus_count || row.skusCount || row.skus || 0) || 0), 0);
       const terminado = isAvanceTerminado(avances, catalogoId, division, seniorName);
       return {
         division,
         terminado,
         juniors: supportJuniors.map(getCompradorNombre).filter(Boolean),
-        tienePromos: divisionRows.length > 0,
-        ofertas: divisionRows.length,
-        ofertasEquipo: divisionRows.length,
-        skus: uniqueCount(divisionRows, "sku"),
-        skusDivision: uniqueCount(divisionRows, "sku"),
+        tienePromos: hasScopedSummary ? summaryPromos > 0 : divisionRows.length > 0,
+        ofertas: hasScopedSummary ? summaryPromos : divisionRows.length,
+        ofertasEquipo: hasScopedSummary ? summaryPromos : divisionRows.length,
+        skus: hasScopedSummary ? summarySkus : uniqueCount(divisionRows, "sku"),
+        skusDivision: hasScopedSummary ? summarySkus : uniqueCount(divisionRows, "sku"),
       };
     });
     const completas = divisions.filter((division) => division.terminado).length;
@@ -217,7 +238,7 @@ export default function GestionAvancesPage({
       ofertas: divisions.reduce((total, division) => total + division.ofertas, 0),
       skus: divisions.reduce((total, division) => total + division.skus, 0),
     };
-  }).filter((senior) => senior.divisions.length > 0), [avances, catalogoId, divisionesCatalogo, scopedRows, seniors, juniors, buyerDivisionMap, hierarchyByDepId]);
+  }).filter((senior) => senior.divisions.length > 0), [avances, catalogoId, divisionesCatalogo, scopedRows, scopedSummaryRows, hasScopedSummary, seniors, juniors, buyerDivisionMap, hierarchyByDepId]);
 
   const selectedSenior = seniorSummaries.find((senior) => senior.key === selectedSeniorKey) || seniorSummaries[0];
   const totalDivisiones = seniorSummaries.reduce((total, senior) => total + senior.divisions.length, 0);

@@ -1,35 +1,17 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { Suspense, useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
+import { clearCachedSkuMaster, loadCatalogFromExcel, loadSkuMasterFromCsvUrl, loadSkuMasterFromExcel, saveCatalogToExcel } from "./services/excelService";
 import {
-  Download,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  ArrowLeft,
-  KeyRound,
-  LogIn,
-  LogOut,
-  Mail,
-  MoreHorizontal,
-  ShieldAlert,
-  Search,
-  RefreshCw,
-  CheckCircle2,
-  AlertTriangle,
-  X,
-} from "lucide-react";
-import { loadCatalogFromExcel, loadSkuMasterFromCsvUrl, loadSkuMasterFromExcel, saveCatalogToExcel } from "./services/excelService";
-import {
+  abortActiveSupabaseRequests,
   hasSupabaseConnection,
   loadActivityIdsByPrefixFromSupabase,
   loadAppUserProfile,
   loadCatalogFromSupabase,
   loadLogsFromSupabase,
   loadPromotionScopeFromSupabase,
+  loadRecoverySessionFromUrl,
   loadSpecialRequestsFromSupabase,
   loadAuthUserFromSession,
-  loadStoredAppSession,
-  loadStoredSupabaseConnection,
   requestPasswordRecovery,
   pingSupabaseConnection,
   saveCatalogToSupabase,
@@ -40,18 +22,10 @@ import {
   updateRecoveredPassword,
 } from "./services/supabaseService";
 import {
-  catalogosIniciales,
-  comentariosIniciales,
-  compradoresIniciales,
   LEGACY_EXPORT_PAGE_CARDS,
-  MOBILE_NAV_ITEMS,
-  responsablesSolicitudesIniciales,
-  rowsIniciales,
   SIDEBAR_NAV_ITEMS,
-  segmentosClientesIniciales,
 } from "./constants";
 import {
-  classNames,
   makeId,
 } from "./utils/common";
 import {
@@ -86,435 +60,103 @@ import {
 } from "./utils/promoHelpers";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
-import ConsolidadoPage from './components/ConsolidadoPage';
-import ConsultaSkuPage from './components/ConsultaSkuPage';
-import AjustesPage from './components/AjustesPage';
-import ExportPageV2 from './components/ExportPageV2';
-import GestionAvancesPage from './components/GestionAvancesPage';
-import HomePage from './components/HomePage';
-import CatalogDesignPage from './components/CatalogDesignPage';
-import PromosPageView from './components/PromosPage';
-import PromocionEspecialPage from './components/PromocionEspecialPage';
-import SolicitudesEspecialesPageView from './components/SolicitudesEspecialesPage';
+import LogsPage from "./components/LogsPage";
+import { ConfirmModal, PromotionConflictModal, SuccessToast } from "./components/AppFeedback";
+import {
+  AuthLoadingPage,
+  DataLoadErrorScreen,
+  DataLoadingScreen,
+  ForgotPasswordPage,
+  LoginPage,
+  ResetPasswordPage,
+} from "./components/AuthScreens";
 import { Button, Card, CardContent, Header } from "./components/ui";
-import sinsaLogo from "./assets/sinsa.webp";
-import { canAccessModule, getFirstAllowedModule, MODULE_PERMISSIONS, normalizeRole, ROLE_LABELS } from "./constants/permissions";
-import { usePermissions } from "./hooks/usePermissions";
+import { AppShell, MobileNav } from "./app/shell/AppNavigation";
+import { clearAuthTokensFromUrl, getDataOwnerKey } from "./app/session/sessionHelpers";
+import { canAccessModule, getFirstAllowedModule, MODULE_PERMISSIONS, normalizeRole } from "./constants/permissions";
+import { useAuthSession } from "./hooks/useAuthSession";
+import { useCatalogData } from "./hooks/useCatalogData";
+import { useNotifications } from "./hooks/useNotifications";
+import { usePromotionsData } from "./hooks/usePromotionsData";
+import { useSkuMaster } from "./hooks/useSkuMaster";
+import { useSyncStatus } from "./hooks/useSyncStatus";
+import {
+  AVANCE_SYNC_FIELDS,
+  BUYER_SYNC_FIELDS,
+  COMMENT_SYNC_FIELDS,
+  JERARQUIA_SYNC_FIELDS,
+  LOG_SYNC_FIELDS,
+  RESPONSABLE_SYNC_FIELDS,
+  SEGMENTO_SYNC_FIELDS,
+  applyPromotionVersions,
+  buildActivitySyncOptions,
+  buildActivitySyncState,
+  buildBuyerSyncOptions,
+  buildKeyedSyncOptions,
+  buildKeyedSyncState,
+  buildNotificacionSyncOptions,
+  buildNotificacionSyncState,
+  buildPromotionSyncOptions,
+  buildPromotionSyncState,
+  expandPromotionContextIds,
+  filterRowsByIds,
+  getActivitySyncId,
+  getAvanceSyncId,
+  getBuyerSyncId,
+  getCatalogSyncId,
+  getChangedIds,
+  getCommentSyncId,
+  getDeletedIds,
+  getJerarquiaSyncId,
+  getLogSyncId,
+  getNotificacionSyncId,
+  getPromotionDetailSyncId,
+  getPromotionSyncId,
+  getPromotionSyncSignature,
+  getPromotionSyncSnapshot,
+  getPromotionSyncVersion,
+  getResponsableSyncId,
+  getSegmentoSyncId,
+  getSyncSignature,
+  getSyncedPromotionSignature,
+  getTouchedPromotionContextKeys,
+} from "./app/sync/syncOptions";
+import { getFullSyncPayload, normalizePromotionConflict } from "./app/sync/savePayload";
 
-function ModalButton({ children, className = "", variant = "default", ...props }) {
-  return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
+const ConsolidadoPage = React.lazy(() => import("./components/ConsolidadoPage"));
+const ConsultaSkuPage = React.lazy(() => import("./components/ConsultaSkuPage"));
+const AjustesPage = React.lazy(() => import("./components/AjustesPage"));
+const ExportPageV2 = React.lazy(() => import("./components/ExportPageV2"));
+const GestionAvancesPage = React.lazy(() => import("./components/GestionAvancesPage"));
+const HomePage = React.lazy(() => import("./components/HomePage"));
+const CatalogDesignPage = React.lazy(() => import("./components/CatalogDesignPage"));
+const SeguimientoGanttPage = React.lazy(() => import("./components/SeguimientoGanttPage"));
+const PromosPageView = React.lazy(() => import("./components/PromosPage"));
+const PromocionEspecialPage = React.lazy(() => import("./components/PromocionEspecialPage"));
+const SolicitudesEspecialesPageView = React.lazy(() => import("./components/SolicitudesEspecialesPage"));
+
+const SKU_MASTER_FLOW_MODULES = new Set(["promos", "especial", "solicitudes"]);
+const USE_DEMO_SEED_DATA = Boolean(import.meta.env.DEV && import.meta.env.VITE_USE_DEMO_DATA === "true");
+
+const DEFAULT_ERP_SKU_MASTER_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSK3K3H_iL0iG-LqQt96jLXDly7ru3kCRzlr4our5GcIye1kr-NjBD9alSIsp6c4A/pub?output=csv";
+const ERP_SKU_MASTER_CSV_URL = import.meta.env.VITE_SKU_MASTER_CSV_URL || DEFAULT_ERP_SKU_MASTER_CSV_URL;
+
+function LoadingScreen() {
+  return <div className="empty-state">Cargando modulo...</div>;
 }
 
-const ERP_SKU_MASTER_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSK3K3H_iL0iG-LqQt96jLXDly7ru3kCRzlr4our5GcIye1kr-NjBD9alSIsp6c4A/pub?output=csv";
-
-function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, onConfirm, onCancel }) {
-  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className="modal-note"><Icon size={16}/> {note}</p></div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton onClick={onConfirm}>{confirmLabel}</ModalButton></div></div></div>;
-}
-
-function SuccessToast({ toast, onClose }) {
-  if (!toast) return null;
-  return <div className="success-toast" role="status" aria-live="polite"><div className="success-toast-icon"><CheckCircle2 size={18}/></div><div className="success-toast-copy"><strong>{toast.title}</strong><span>{toast.message}</span></div><button type="button" className="success-toast-close" onClick={onClose} aria-label="Cerrar mensaje"><X size={16}/></button></div>;
-}
-
-function AppShell({ active, setActive, currentUser, currentRole, onLogout }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const { can } = usePermissions();
-  const ToggleIcon = collapsed ? ChevronsRight : ChevronsLeft;
-  const visibleItems = SIDEBAR_NAV_ITEMS.filter((item) => can(item.permission));
-  const roleLabel = ROLE_LABELS[currentRole] || currentRole || "Sesion activa";
-  return <aside className={classNames("sidebar", collapsed && "collapsed")}><div className="sidebar-head"><div className="brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div className="brand-copy"><div>Gestor de Promociones</div></div></div><button type="button" className="sidebar-toggle" onClick={() => setCollapsed((value) => !value)} title={collapsed ? "Expandir menu" : "Replegar menu"} aria-label={collapsed ? "Expandir menu" : "Replegar menu"}><ToggleIcon size={18}/></button></div><nav>{visibleItems.map((item) => { const Icon = item.icon; return <button key={item.id} onClick={() => setActive(item.id)} className={active === item.id ? "active" : ""} title={collapsed ? item.label : undefined}><Icon size={18}/><span className="nav-label">{item.label}</span></button>; })}</nav><div className="sidebar-session"><span title={`${currentUser} - ${roleLabel}`}>{currentUser || roleLabel}</span><button type="button" onClick={onLogout} title="Salir"><LogOut size={18}/><span className="nav-label">Salir</span></button></div></aside>;
-}
-
-function MobileNav({ active, setActive }) {
-  const [moreOpen, setMoreOpen] = useState(false);
-  const { can } = usePermissions();
-  const visibleItems = MOBILE_NAV_ITEMS.filter((item) => can(item.permission));
-  const primaryItems = visibleItems.slice(0, 4);
-  const overflowItems = visibleItems.slice(4);
-  const visibleNavItems = overflowItems.length ? primaryItems : visibleItems;
-  const activeInOverflow = overflowItems.some((item) => item.id === active);
-  const selectItem = (id) => {
-    setActive(id);
-    setMoreOpen(false);
-  };
-  return <div className="mobile-nav-wrap">{moreOpen && overflowItems.length > 0 && <div className="mobile-more-menu">{overflowItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => selectItem(item.id)} className={active === item.id ? "active" : ""}><Icon size={16}/><span>{item.label}</span></button>; })}</div>}<div className="mobile-nav">{visibleNavItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => selectItem(item.id)} className={active === item.id ? "active" : ""}><Icon size={18}/><span>{item.label}</span></button>; })}{overflowItems.length > 0 && <button type="button" onClick={() => setMoreOpen((value) => !value)} className={activeInOverflow || moreOpen ? "active" : ""}><MoreHorizontal size={18}/><span>Más</span></button>}</div></div>;
-}
-
-function parseRecoverySessionFromLocation() {
-  if (typeof window === "undefined") return null;
-  const fragments = [];
-  if (window.location.hash) fragments.push(window.location.hash.replace(/^#/, ""));
-  if (window.location.search) fragments.push(window.location.search.replace(/^\?/, ""));
-  const params = new URLSearchParams(fragments.join("&"));
-  const type = String(params.get("type") || "").trim().toLowerCase();
-  const accessToken = String(params.get("access_token") || "").trim();
-  if (type !== "recovery" || !accessToken) return null;
-  const expiresAtRaw = String(params.get("expires_at") || "").trim();
-  const expiresInRaw = String(params.get("expires_in") || "").trim();
-  const expiresAt = expiresAtRaw
-    ? (Number(expiresAtRaw) > 1e12 ? Number(expiresAtRaw) : Number(expiresAtRaw) * 1000)
-    : Date.now() + Number(expiresInRaw || 3600) * 1000;
-  return {
-    access_token: accessToken,
-    refresh_token: String(params.get("refresh_token") || "").trim(),
-    expires_at: Number.isNaN(expiresAt) ? Date.now() + 3600 * 1000 : expiresAt,
-    token_type: String(params.get("token_type") || "bearer").trim(),
-    type: "recovery",
-    user_email: String(params.get("email") || "").trim(),
-  };
-}
-
-function clearAuthTokensFromUrl() {
-  if (typeof window === "undefined" || !window.history?.replaceState) return;
-  const nextUrl = `${window.location.pathname}${window.location.search}`;
-  window.history.replaceState({}, document.title, nextUrl);
-}
-
-function AuthBrand({ message }) {
-  return <div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor de Promociones</h1><p>{message}</p></div></div>;
-}
-
-function LoginPage({ onLogin, onForgotPassword, loginStatus, connectionStatus }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const isLoading = loginStatus.type === "loading";
-  const submit = (event) => {
-    event.preventDefault();
-    onLogin(email, password);
-  };
-
-  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Ingrese con su usuario autorizado." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><label className="field"><span>Contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{loginStatus.message && <p className={classNames("login-status", loginStatus.type === "error" && "error")}>{loginStatus.message}</p>}<div className="button-row"><Button type="submit" disabled={isLoading}><LogIn size={16}/> {isLoading ? "Ingresando..." : "Ingresar"}</Button><Button type="button" variant="outline" onClick={onForgotPassword} disabled={isLoading}><KeyRound size={16}/> Olvide mi contraseña</Button></div></form></CardContent></Card></div>;
-}
-
-function ForgotPasswordPage({ onSubmit, onBack, recoveryStatus, connectionStatus }) {
-  const [email, setEmail] = useState("");
-  const isLoading = recoveryStatus.type === "loading";
-  const submit = (event) => {
-    event.preventDefault();
-    onSubmit(email);
-  };
-
-  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Recupere el acceso con su correo corporativo." /><form className="login-form" onSubmit={submit}><label className="field"><span>Correo</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label><p className="login-status"><Mail size={14}/> Se enviara un enlace para crear una nueva contraseña.</p>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{recoveryStatus.message && <p className={classNames("login-status", recoveryStatus.type === "error" && "error", recoveryStatus.type === "success" && "success")}>{recoveryStatus.message}</p>}<div className="button-row"><Button type="button" variant="outline" onClick={onBack} disabled={isLoading}><ArrowLeft size={16}/> Volver</Button><Button type="submit" disabled={isLoading}><RefreshCw size={16}/> {isLoading ? "Enviando..." : "Enviar enlace"}</Button></div></form></CardContent></Card></div>;
-}
-
-function ResetPasswordPage({ recoverySession, recoveryUser, onSubmit, onBack, recoveryStatus, connectionStatus }) {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const isLoading = recoveryStatus.type === "loading";
-  const email = recoveryUser?.email || recoverySession?.user_email || "";
-  const submit = (event) => {
-    event.preventDefault();
-    onSubmit(password, confirmPassword);
-  };
-
-  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message="Defina una nueva contraseña para continuar." /><form className="login-form" onSubmit={submit}><div className="recovery-info"><ShieldAlert size={16}/> {email ? `Restableciendo acceso para ${email}` : "Restableciendo acceso con enlace de recuperacion."}</div><label className="field"><span>Nueva contraseña</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label><label className="field"><span>Confirmar contraseña</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>{connectionStatus && <p className="login-status">{connectionStatus}</p>}{recoveryStatus.message && <p className={classNames("login-status", recoveryStatus.type === "error" && "error", recoveryStatus.type === "success" && "success")}>{recoveryStatus.message}</p>}<div className="button-row"><Button type="button" variant="outline" onClick={onBack} disabled={isLoading}><ArrowLeft size={16}/> Volver</Button><Button type="submit" disabled={isLoading}><KeyRound size={16}/> {isLoading ? "Guardando..." : "Actualizar contraseña"}</Button></div></form></CardContent></Card></div>;
-}
-
-function AuthLoadingPage({ message = "Cargando permisos..." }) {
-  return <div className="login-shell"><Card className="login-card"><CardContent><AuthBrand message={message} /></CardContent></Card></div>;
-}
-
-function LogsPage({ logs, page, pageSize, hasNextPage, status, supabaseReady, onConsult, onPrevious, onNext, onPageSizeChange }) {
-  const isLoading = status.type === "loading";
-  return <div><Header title="Logs de cambios" subtitle="Trazabilidad de modificaciones relevantes por catalogo, comprador y accion."/><Card className="grid-card logs-card"><CardContent><div className="toolbar"><div><h2>Consulta bajo demanda</h2><p>Los logs se descargan solo al presionar consultar.</p></div><div className="toolbar-actions"><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} disabled={isLoading}><option value={25}>25 filas</option><option value={50}>50 filas</option><option value={100}>100 filas</option></select><Button onClick={() => onConsult(1)} disabled={!supabaseReady || isLoading}><Search size={16}/> {isLoading ? "Consultando..." : "Consultar"}</Button></div></div>{status.message && <div className={classNames("logs-status", status.type === "error" && "error")}>{status.message}</div>}<div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Catalogo</th><th>Accion</th><th>SKU/Fila</th></tr></thead><tbody>{logs.map((log) => <tr key={log.log_id || `${log.fecha}-${log.accion}`}><td>{log.fecha}</td><td>{log.usuario}</td><td>{log.catalogo}</td><td>{log.accion}</td><td>{log.row_id}</td></tr>)}{!logs.length && <tr><td colSpan={5}><div className="empty-state">Presione consultar para cargar los logs.</div></td></tr>}</tbody></table></div><div className="pagination-bar"><Button variant="outline" onClick={onPrevious} disabled={page <= 1 || isLoading}><ChevronLeft size={16}/> Anterior</Button><span>Pagina {page}</span><Button variant="outline" onClick={onNext} disabled={!hasNextPage || isLoading}>Siguiente <ChevronRight size={16}/></Button></div></CardContent></Card></div>;
-}
 function ExportPage() { return <div><Header title="Exportaciones" subtitle="Salidas preparadas para Pricing, Mercadeo, Planimetria y futura consolidacion."/><div className="export-grid">{LEGACY_EXPORT_PAGE_CARDS.map(([title, desc]) => <Card key={title}><CardContent><Download size={22}/><h3>{title}</h3><p>{desc}</p><Button>Generar</Button></CardContent></Card>)}</div></div>; }
-
-const PROMOTION_SYNC_FIELDS = [
-  "row_id",
-  "actividad_id",
-  "oferta_id",
-  "comprador",
-  "division",
-  "tipo_promo",
-  "grupo_oferta",
-  "tipo_sku",
-  "variante",
-  "dep_id",
-  "sku",
-  "num_parte",
-  "descripcion",
-  "tipo_cantidad",
-  "cantidad_minima",
-  "precio_antes",
-  "precio_ahora",
-  "descuento",
-  "comentario_comprador",
-  "aplica_segmento",
-  "segmento_cliente",
-  "alcance_tipo",
-  "alcance_valor",
-  "estado_registro",
-  "ultima_modificacion_por",
-];
-
-const BUYER_SYNC_FIELDS = [
-  "comprador_id",
-  "categoria_comprador",
-  "comprador",
-  "division",
-  "correo",
-  "senior_id",
-  "activo",
-];
-
-const ACTIVITY_SYNC_FIELDS = [
-  "actividad_id",
-  "nombre_actividad",
-  "tipo_actividad",
-  "canal",
-  "fecha_inicio",
-  "fecha_fin",
-  "comprador",
-  "solicitante",
-  "estado",
-  "motivo_solicitud",
-  "responsable",
-  "recursos_ocupados",
-  "promo_ids",
-  "oferta_ids",
-];
-
-const CATALOG_SYNC_FIELDS = [
-  "catalogo_id",
-  "nombre",
-  "canal",
-  "vigencia_inicio",
-  "vigencia_fin",
-  "estado",
-  "color",
-  "doc_id",
-  "token_conexion",
-  "notificaciones",
-  "correos",
-  "divisiones",
-];
-
-const COMMENT_SYNC_FIELDS = [
-  "comentario_id",
-  "actividad_id",
-  "row_id",
-  "alcance_comentario",
-  "prioridad",
-  "usuario",
-  "tipo_usuario",
-  "comentario",
-  "estado",
-  "fecha",
-  "resuelto_por",
-  "fecha_resolucion",
-];
-
-const LOG_SYNC_FIELDS = [
-  "log_id",
-  "fecha",
-  "usuario",
-  "catalogo",
-  "accion",
-  "row_id",
-  "campo",
-  "valor_anterior",
-  "valor_nuevo",
-  "fecha_cierre",
-];
-
-const AVANCE_SYNC_FIELDS = [
-  "avance_id",
-  "catalogo_id",
-  "catalogo",
-  "comprador_id",
-  "comprador",
-  "division",
-  "estado",
-  "fecha_estado",
-  "usuario",
-];
-
-const RESPONSABLE_SYNC_FIELDS = [
-  "responsable_id",
-  "nombre",
-  "area",
-  "correo",
-  "activo",
-];
-
-const JERARQUIA_SYNC_FIELDS = [
-  "dep_id",
-  "dep_desc",
-  "division",
-  "activo",
-];
-
-const SEGMENTO_SYNC_FIELDS = [
-  "segmento_id",
-  "nombre_segmento",
-  "canal",
-  "activo",
-  "orden",
-];
-
-const NOTIFICACION_SYNC_FIELDS = [
-  "actividad_id",
-  "catalogo_id",
-  "correo",
-  "activo",
-];
-
-function getPromotionSyncId(row) {
-  return String(row?.row_id || row?.id || "").trim();
-}
-
-function getCommentSyncId(row) {
-  return String(row?.comentario_id || row?.id || "").trim();
-}
-
-function getLogSyncId(row) {
-  return String(row?.log_id || row?.id || "").trim();
-}
-
-function getAvanceSyncId(row) {
-  return String(row?.avance_id || row?.id || "").trim();
-}
-
-function getResponsableSyncId(row) {
-  return String(row?.responsable_id || row?.id || "").trim();
-}
-
-function getJerarquiaSyncId(row) {
-  return String(row?.dep_id || row?.id || "").trim();
-}
-
-function getSegmentoSyncId(row) {
-  return String(row?.segmento_id || row?.id || "").trim();
-}
-
-function getNotificacionSyncId(row) {
-  return String(row?.notificacion_id || row?.id || `${row?.actividad_id || row?.catalogo_id || ""}__${row?.correo || ""}`).trim();
-}
-
-function ensureLogIds(rows = []) {
-  return (rows || []).map((row) => {
-    if (row?.log_id || row?.id) return row;
-    return { ...row, log_id: makeId("LOG") };
-  });
-}
-
-function getSyncSignature(row, fields) {
-  return JSON.stringify(fields.map((field) => [field, String(row?.[field] ?? "").trim()]));
-}
-
-function getPromotionSyncSignature(row) {
-  return getSyncSignature(row, PROMOTION_SYNC_FIELDS);
-}
-
-function buildPromotionSyncState(promotions = []) {
-  const state = new Map();
-  promotions.forEach((row) => {
-    const normalized = toExcelRow(row);
-    const rowId = getPromotionSyncId(normalized);
-    if (rowId) state.set(rowId, getPromotionSyncSignature(normalized));
-  });
-  return state;
-}
-
-function buildPromotionSyncOptions(promotions = [], previousState = new Map()) {
-  const currentState = buildPromotionSyncState(promotions);
-  const changed_row_ids = [];
-  const deleted_row_ids = [];
-
-  currentState.forEach((signature, rowId) => {
-    if (previousState.get(rowId) !== signature) changed_row_ids.push(rowId);
-  });
-  previousState.forEach((_, rowId) => {
-    if (!currentState.has(rowId)) deleted_row_ids.push(rowId);
-  });
-
-  return { changed_row_ids, deleted_row_ids };
-}
-
-function buildKeyedSyncState(rows = [], getKey, fields) {
-  const state = new Map();
-  rows.forEach((row) => {
-    const key = String(getKey(row) || "").trim();
-    if (key) state.set(key, getSyncSignature(row, fields));
-  });
-  return state;
-}
-
-function buildKeyedSyncOptions(rows = [], previousState = new Map(), getKey, fields) {
-  const currentState = buildKeyedSyncState(rows, getKey, fields);
-  const changed_ids = [];
-  const deleted_ids = [];
-
-  currentState.forEach((signature, key) => {
-    if (previousState.get(key) !== signature) changed_ids.push(key);
-  });
-  previousState.forEach((_, key) => {
-    if (!currentState.has(key)) deleted_ids.push(key);
-  });
-
-  return { changed_ids, deleted_ids };
-}
-
-function buildActivitySyncState(activities = [], catalogos = []) {
-  const catalogById = new Map(catalogos.map((catalogo) => [String(catalogo.catalogo_id || catalogo.id || "").trim(), catalogo]));
-  const rows = activities.map((activity) => ({
-    ...activity,
-    ...(catalogById.get(String(activity.actividad_id || "").trim()) || {}),
-  }));
-  return buildKeyedSyncState(rows, (row) => row.actividad_id, [...ACTIVITY_SYNC_FIELDS, ...CATALOG_SYNC_FIELDS]);
-}
-
-function buildActivitySyncOptions(activities = [], catalogos = [], previousState = new Map()) {
-  const catalogById = new Map(catalogos.map((catalogo) => [String(catalogo.catalogo_id || catalogo.id || "").trim(), catalogo]));
-  const rows = activities.map((activity) => ({
-    ...activity,
-    ...(catalogById.get(String(activity.actividad_id || "").trim()) || {}),
-  }));
-  return buildKeyedSyncOptions(rows, previousState, (row) => row.actividad_id, [...ACTIVITY_SYNC_FIELDS, ...CATALOG_SYNC_FIELDS]);
-}
 
 export default function PromoMVP() {
   const [active, setActive] = useState("home");
-  const [catalogos, setCatalogos] = useState(catalogosIniciales);
-  const [catalogoActivo, setCatalogoActivo] = useState(catalogosIniciales[0]);
-  const [catalogoAvanceActivo, setCatalogoAvanceActivo] = useState(catalogosIniciales[0]);
-  const [actividades, setActividades] = useState(() => mergeCatalogActivities(catalogosIniciales, []));
-  const [rows, setRows] = useState(() => rowsIniciales.map(toAppRow));
-  const [avanceCatalogos, setAvanceCatalogos] = useState({});
-  const [promocionesDetalle, setPromocionesDetalle] = useState([]);
-  const [compradores, setCompradores] = useState(() => compradoresIniciales.map(normalizeCompradorData));
-  const [responsablesSolicitudes, setResponsablesSolicitudes] = useState(() => responsablesSolicitudesIniciales.map(normalizeResponsableSolicitud));
-  const [jerarquiaCategorias, setJerarquiaCategorias] = useState([]);
-  const [segmentosClientes, setSegmentosClientes] = useState(segmentosClientesIniciales);
-  const [config, setConfig] = useState([]);
-  const [notificaciones, setNotificaciones] = useState([]);
-  const [skuMaster, setSkuMaster] = useState({});
-  const [archivoComprador, setArchivoComprador] = useState(null);
-  const [skuMasterStatus, setSkuMasterStatus] = useState({ type: "idle", message: "Pendiente de cargar ERP." });
-  const [comentarios, setComentarios] = useState(comentariosIniciales);
-  const [logs, setLogsState] = useState([]);
-  const [consultedLogs, setConsultedLogs] = useState([]);
-  const [logsPage, setLogsPage] = useState(1);
-  const [logsPageSize, setLogsPageSize] = useState(25);
-  const [logsHasNextPage, setLogsHasNextPage] = useState(false);
-  const [logsStatus, setLogsStatus] = useState({ type: "idle", message: "Presione consultar para cargar logs." });
-  const [supabaseSettings, setSupabaseSettings] = useState(loadStoredSupabaseConnection);
-  const [supabaseStatus, setSupabaseStatus] = useState({ type: "idle", message: "Configure Supabase para sincronizar datos." });
-  const [saveSupabaseStatus, setSaveSupabaseStatus] = useState("idle");
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [appSession, setAppSession] = useState(loadStoredAppSession);
-  const [appUser, setAppUser] = useState(null);
-  const [authStatus, setAuthStatus] = useState({ type: "idle", message: "" });
-  const [loginStatus, setLoginStatus] = useState({ type: "idle", message: "" });
-  const [recoveryStatus, setRecoveryStatus] = useState({ type: "idle", message: "" });
-  const [authScreen, setAuthScreen] = useState("login");
-  const [recoverySession, setRecoverySession] = useState(null);
-  const [recoveryUser, setRecoveryUser] = useState(null);
-  const [pendingSaveAction, setPendingSaveAction] = useState(null);
-  const [successToast, setSuccessToast] = useState(null);
-  const [specialRequestsRefreshStatus, setSpecialRequestsRefreshStatus] = useState({ type: "idle", message: "" });
-  const [promotionScopeRefreshStatus, setPromotionScopeRefreshStatus] = useState({ type: "idle", message: "" });
+  const [dataState, setDataState] = useState({ status: "idle", error: null });
+  const { catalogos, setCatalogos, catalogoActivo, setCatalogoActivo, catalogoAvanceActivo, setCatalogoAvanceActivo, actividades, setActividades, compradores, setCompradores, responsablesSolicitudes, setResponsablesSolicitudes, jerarquiaCategorias, setJerarquiaCategorias, segmentosClientes, setSegmentosClientes, catalogoResumen, setCatalogoResumen, config, setConfig, notificaciones, setNotificaciones, resetCatalogData } = useCatalogData({ useDemoData: USE_DEMO_SEED_DATA });
+  const { rows, setRows, avanceCatalogos, setAvanceCatalogos, promocionesDetalle, setPromocionesDetalle, comentarios, setComentarios, logs, setLogs, consultedLogs, setConsultedLogs, logsPage, setLogsPage, logsPageSize, setLogsPageSize, logsHasNextPage, setLogsHasNextPage, logsStatus, setLogsStatus, resetPromotionsData } = usePromotionsData({ useDemoData: USE_DEMO_SEED_DATA });
+  const { skuMaster, setSkuMaster, skuMasterCount, setSkuMasterCount, archivoComprador, setArchivoComprador, skuMasterStatus, setSkuMasterStatus, resetSkuMaster } = useSkuMaster();
+  const { supabaseSettings, setSupabaseSettings, supabaseStatus, setSupabaseStatus, saveSupabaseStatus, setSaveSupabaseStatus, isSyncing, setIsSyncing, specialRequestsRefreshStatus, setSpecialRequestsRefreshStatus, promotionScopeRefreshStatus, setPromotionScopeRefreshStatus } = useSyncStatus();
+  const { appSession, setAppSession, appUser, setAppUser, authStatus, setAuthStatus, loginStatus, setLoginStatus, recoveryStatus, setRecoveryStatus, authScreen, setAuthScreen, recoverySession, setRecoverySession, recoveryUser, setRecoveryUser } = useAuthSession();
+  const { pendingSaveAction, setPendingSaveAction, successToast, setSuccessToast } = useNotifications();
+  const [promotionConflict, setPromotionConflict] = useState(null);
   const initialLoadSessionRef = React.useRef("");
   const specialRequestsRefreshRef = React.useRef(false);
   const promotionScopeRefreshRef = React.useRef("");
@@ -528,17 +170,61 @@ export default function PromoMVP() {
   const syncedJerarquiaStateRef = React.useRef(new Map());
   const syncedSegmentoStateRef = React.useRef(new Map());
   const syncedNotificacionStateRef = React.useRef(new Map());
-  const skuMasterRemoteLoadRef = React.useRef("");
+  const skuMasterDeferredLoadRef = React.useRef(false);
+  const skuMasterAbortRef = React.useRef(null);
   const saveOperationInFlightRef = React.useRef(false);
   const pendingSaveConfirmRef = React.useRef(false);
   const fileInputRef = React.useRef(null);
   const skuMasterFileInputRef = React.useRef(null);
-  const setLogs = React.useCallback((updater) => {
-    setLogsState((currentLogs) => ensureLogIds(typeof updater === "function" ? updater(currentLogs) : updater));
-  }, []);
+  const dataOwnerRef = React.useRef("");
   const rowsRef = React.useRef(rows);
   const comentariosRef = React.useRef(comentarios);
   const promocionesDetalleRef = React.useRef(promocionesDetalle);
+
+  function resetSyncedState() {
+    syncedPromotionStateRef.current = new Map();
+    syncedBuyerStateRef.current = new Map();
+    syncedActivityStateRef.current = new Map();
+    syncedCommentStateRef.current = new Map();
+    syncedLogStateRef.current = new Map();
+    syncedAvanceStateRef.current = new Map();
+    syncedResponsableStateRef.current = new Map();
+    syncedJerarquiaStateRef.current = new Map();
+    syncedSegmentoStateRef.current = new Map();
+    syncedNotificacionStateRef.current = new Map();
+  }
+
+  const resetDomainState = React.useCallback(() => {
+    resetCatalogData();
+    resetPromotionsData();
+    resetSkuMaster();
+    resetSyncedState();
+    setActive("home");
+    setDataState({ status: "idle", error: null });
+    setSaveSupabaseStatus("idle");
+    setSpecialRequestsRefreshStatus({ type: "idle", message: "" });
+    setPromotionScopeRefreshStatus({ type: "idle", message: "" });
+    setPendingSaveAction(null);
+    setSuccessToast(null);
+    setPromotionConflict(null);
+    initialLoadSessionRef.current = "";
+    specialRequestsRefreshRef.current = false;
+    promotionScopeRefreshRef.current = "";
+    skuMasterDeferredLoadRef.current = false;
+    skuMasterAbortRef.current?.abort();
+    skuMasterAbortRef.current = null;
+    saveOperationInFlightRef.current = false;
+    pendingSaveConfirmRef.current = false;
+  }, [
+    resetCatalogData,
+    resetPromotionsData,
+    resetSkuMaster,
+    setSaveSupabaseStatus,
+    setSpecialRequestsRefreshStatus,
+    setPromotionScopeRefreshStatus,
+    setPendingSaveAction,
+    setSuccessToast,
+  ]);
   const handleSessionRefresh = React.useCallback((nextSession) => {
     setAppSession(nextSession);
   }, []);
@@ -555,6 +241,10 @@ export default function PromoMVP() {
   }, [supabaseConnection]);
 
   const requestSupabaseSaveConfirmation = (payload) => {
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar." });
+      return;
+    }
     if (isSyncing || saveOperationInFlightRef.current || pendingSaveConfirmRef.current) return;
     pendingSaveConfirmRef.current = true;
     setPendingSaveAction(payload);
@@ -565,22 +255,43 @@ export default function PromoMVP() {
   };
 
   const loadSkuMasterFromRemote = React.useCallback(async () => {
+    skuMasterAbortRef.current?.abort();
+    const controller = new AbortController();
+    skuMasterAbortRef.current = controller;
     setSkuMasterStatus({ type: "loading", message: "Actualizando archivo ERP...", progress: 5 });
     try {
       const data = await loadSkuMasterFromCsvUrl(ERP_SKU_MASTER_CSV_URL, (progress) => {
         setSkuMasterStatus({ type: "loading", message: "Actualizando archivo ERP...", progress });
-      });
+      }, { signal: controller.signal });
       setSkuMaster(data.skuMaster);
+      setSkuMasterCount(data.skuMasterCount);
       setArchivoComprador({
         nombre: "ERP publicado",
-        total: data.items.length,
+        total: data.skuMasterCount,
         hoja: data.sheetName,
-        fecha: new Date().toISOString(),
+        fecha: data.cachedAt || new Date().toISOString(),
+        etag: data.etag,
+        lastModified: data.lastModified,
       });
-      setSkuMasterStatus({ type: "ready", message: `${data.items.length} SKU cargados desde ERP.`, progress: 100 });
+      const cacheMessage = data.fromCache
+        ? data.cacheReason
+          ? " desde cache local; el origen no se actualizo."
+          : " desde cache"
+        : "";
+      setSkuMasterStatus({ type: "ready", message: `${data.skuMasterCount} SKU cargados desde ERP${cacheMessage}.`, progress: 100 });
     } catch (error) {
+      if (error?.name === "AbortError") {
+        setSkuMasterStatus({ type: "idle", message: "Actualizacion del ERP cancelada.", progress: 0 });
+        return;
+      }
       setSkuMasterStatus({ type: "error", message: error.message || "No se pudo cargar el archivo ERP.", progress: 0 });
+    } finally {
+      if (skuMasterAbortRef.current === controller) skuMasterAbortRef.current = null;
     }
+  }, []);
+
+  const cancelSkuMasterLoad = React.useCallback(() => {
+    skuMasterAbortRef.current?.abort();
   }, []);
 
   const executePendingSaveAction = async () => {
@@ -596,23 +307,28 @@ export default function PromoMVP() {
   };
 
   useEffect(() => {
-    const nextRecoverySession = parseRecoverySessionFromLocation();
-    if (!nextRecoverySession) return;
-    clearAuthTokensFromUrl();
-    setAuthScreen("reset");
-    setRecoverySession(nextRecoverySession);
-    setRecoveryUser(null);
-    setLoginStatus({ type: "idle", message: "" });
-    setRecoveryStatus({ type: "loading", message: "Validando enlace de recuperacion..." });
     let cancelled = false;
-    loadAuthUserFromSession(supabaseSettings, nextRecoverySession)
+    loadRecoverySessionFromUrl(supabaseSettings)
+      .then((nextRecoverySession) => {
+        if (cancelled || !nextRecoverySession) return null;
+        clearAuthTokensFromUrl();
+        setAuthScreen("reset");
+        setRecoverySession(nextRecoverySession);
+        setRecoveryUser(null);
+        setLoginStatus({ type: "idle", message: "" });
+        setRecoveryStatus({ type: "loading", message: "Validando enlace de recuperacion..." });
+        return loadAuthUserFromSession(supabaseSettings, nextRecoverySession);
+      })
       .then((user) => {
+        if (!user) return;
         if (cancelled) return;
         setRecoveryUser(user);
         setRecoveryStatus({ type: "idle", message: "" });
       })
       .catch((error) => {
         if (cancelled) return;
+        clearAuthTokensFromUrl();
+        setAuthScreen("reset");
         setRecoveryStatus({ type: "error", message: error.message || "No se pudo validar el enlace de recuperacion." });
       });
     return () => {
@@ -642,7 +358,8 @@ export default function PromoMVP() {
     if (!appSession?.access_token) {
       setAppUser(null);
       setAuthStatus({ type: "idle", message: "" });
-      initialLoadSessionRef.current = "";
+      dataOwnerRef.current = "";
+      resetDomainState();
       return;
     }
     let cancelled = false;
@@ -655,7 +372,7 @@ export default function PromoMVP() {
       })
       .catch((error) => {
         if (cancelled) return;
-        signOutAppUser();
+        void signOutAppUser(supabaseSettings, appSession).catch(() => null);
         setAppSession(null);
         setAppUser(null);
         setAuthStatus({ type: "error", message: error.message || "No se pudieron cargar los permisos." });
@@ -664,29 +381,20 @@ export default function PromoMVP() {
     return () => {
       cancelled = true;
     };
-  }, [appSession, supabaseSettings, handleSessionRefresh]);
+  }, [appSession, supabaseSettings, handleSessionRefresh, resetDomainState]);
 
   useEffect(() => {
     if (!appSession?.access_token || !appUser?.activo) return;
-    if (!hasSupabaseConnection(supabaseConnection)) {
-      setSupabaseStatus({ type: "error", message: "Faltan variables de entorno de Supabase para cargar los datos automaticamente." });
-      return;
-    }
-    if (initialLoadSessionRef.current === appSession.access_token) return;
-    initialLoadSessionRef.current = appSession.access_token;
-    void onLoadSupabase().then((data) => {
-      if (!data && initialLoadSessionRef.current === appSession.access_token) {
-        initialLoadSessionRef.current = "";
-      }
-    });
+    void bootstrapData();
   }, [appSession, appUser, supabaseConnection]);
 
   useEffect(() => {
     if (!appSession?.access_token || !appUser?.activo) return;
-    if (skuMasterRemoteLoadRef.current === appSession.access_token) return;
-    skuMasterRemoteLoadRef.current = appSession.access_token;
+    if (!SKU_MASTER_FLOW_MODULES.has(active)) return;
+    if (skuMasterCount > 0 || skuMasterStatus.type === "loading" || skuMasterDeferredLoadRef.current) return;
+    skuMasterDeferredLoadRef.current = true;
     void loadSkuMasterFromRemote();
-  }, [appSession, appUser, loadSkuMasterFromRemote]);
+  }, [active, appSession, appUser, skuMasterCount, skuMasterStatus.type, loadSkuMasterFromRemote]);
 
   const applyCatalogData = (data, { fallbackActivities = [] } = {}) => {
     const nextConfig = data.config || [];
@@ -709,10 +417,11 @@ export default function PromoMVP() {
     setCompradores((data.compradores || []).map(normalizeCompradorData));
     setResponsablesSolicitudes(readResponsablesSolicitudesFromData(data));
     setJerarquiaCategorias(readJerarquiaCategoriasFromData(data));
-    setRows((data.promociones || []).map(toAppRow));
-    setPromocionesDetalle(data.promociones_detalle || []);
-    setComentarios((data.comentarios || []).map(toAppComment));
-    setLogs((data.logs || []).map(toAppLog));
+    setCatalogoResumen(data.catalogo_resumen || data.catalogoResumen || []);
+    if (Array.isArray(data.promociones)) setRows(data.promociones.map(toAppRow));
+    if (Array.isArray(data.promociones_detalle)) setPromocionesDetalle(data.promociones_detalle);
+    if (Array.isArray(data.comentarios)) setComentarios(data.comentarios.map(toAppComment));
+    if (Array.isArray(data.logs)) setLogs(data.logs.map(toAppLog));
     setNotificaciones(data.notificaciones || []);
     const nextAvances = {};
     (data.avances_catalogo || data.avancesCatalogo || []).map(toAppAvanceCatalogo).filter((avance) => avance.terminado).forEach((avance) => {
@@ -787,7 +496,7 @@ export default function PromoMVP() {
     const normalized = toExcelRow(row);
     const rowId = getPromotionSyncId(normalized);
     if (!rowId) return true;
-    return syncedPromotionStateRef.current.get(rowId) !== getPromotionSyncSignature(normalized);
+    return getSyncedPromotionSignature(syncedPromotionStateRef.current.get(rowId)) !== getPromotionSyncSignature(normalized);
   });
 
   const applyPromotionScopeData = (scope = {}, data = {}) => {
@@ -831,7 +540,7 @@ export default function PromoMVP() {
     nextRows.forEach((row) => {
       const normalized = toExcelRow(row);
       const rowId = getPromotionSyncId(normalized);
-      if (rowId) syncedPromotionStateRef.current.set(rowId, getPromotionSyncSignature(normalized));
+      if (rowId) syncedPromotionStateRef.current.set(rowId, getPromotionSyncSnapshot(row));
     });
 
     const nextCommentSync = new Map(syncedCommentStateRef.current);
@@ -863,7 +572,11 @@ export default function PromoMVP() {
     const nextSegmentosClientes = overrides.segmentos_clientes || segmentosClientes;
     const nextNotificaciones = overrides.notificaciones || buildNotificacionesFromCatalogos(nextCatalogos);
     const sourceRows = overrides.rows || rows;
-    const normalizedRows = sourceRows.map(toExcelRow);
+    const normalizedRows = sourceRows.map((row) => {
+      const normalized = toExcelRow(row);
+      const version = getPromotionSyncVersion(row);
+      return version ? { ...normalized, version } : normalized;
+    });
     const rowsById = new Map(normalizedRows.map((row) => [row.row_id, row]));
     return {
       config: nextConfig,
@@ -890,12 +603,12 @@ export default function PromoMVP() {
   const rememberSyncedSettings = (data = {}) => {
     const nextCatalogos = readCatalogosFromData(data, catalogos).map(toSheetCatalogo);
     const nextActividades = mergeCatalogActivities(nextCatalogos.map(normalizeCatalogo), data.actividades || []).map(toExcelActividad);
-    syncedBuyerStateRef.current = buildKeyedSyncState((data.compradores || []).map(toExcelComprador), (row) => row.comprador, BUYER_SYNC_FIELDS);
+    syncedBuyerStateRef.current = buildKeyedSyncState((data.compradores || []).map(toExcelComprador), getBuyerSyncId, BUYER_SYNC_FIELDS);
     syncedActivityStateRef.current = buildActivitySyncState(nextActividades, nextCatalogos);
     syncedResponsableStateRef.current = buildKeyedSyncState((data.responsables_solicitudes || []).map(toSheetResponsableSolicitud), getResponsableSyncId, RESPONSABLE_SYNC_FIELDS);
     syncedJerarquiaStateRef.current = buildKeyedSyncState((data.jerarquia_categorias || []).map(toSheetJerarquiaCategoria), getJerarquiaSyncId, JERARQUIA_SYNC_FIELDS);
     syncedSegmentoStateRef.current = buildKeyedSyncState((data.segmentos_clientes || []).map(toSheetSegmentoCliente), getSegmentoSyncId, SEGMENTO_SYNC_FIELDS);
-    syncedNotificacionStateRef.current = buildKeyedSyncState(data.notificaciones || [], getNotificacionSyncId, NOTIFICACION_SYNC_FIELDS);
+    syncedNotificacionStateRef.current = buildNotificacionSyncState(data.notificaciones || []);
   };
 
   const rememberSyncedOperations = (data = {}) => {
@@ -911,41 +624,53 @@ export default function PromoMVP() {
     rememberSyncedOperations(payload);
   };
 
-  const resetSyncedState = () => {
-    syncedPromotionStateRef.current = new Map();
-    syncedBuyerStateRef.current = new Map();
-    syncedActivityStateRef.current = new Map();
-    syncedCommentStateRef.current = new Map();
-    syncedLogStateRef.current = new Map();
-    syncedAvanceStateRef.current = new Map();
-    syncedResponsableStateRef.current = new Map();
-    syncedJerarquiaStateRef.current = new Map();
-    syncedSegmentoStateRef.current = new Map();
-    syncedNotificacionStateRef.current = new Map();
+  const rememberSyncedOperationalRows = (data = {}) => {
+    (data.promociones || []).forEach((row) => {
+      const normalized = toExcelRow(row);
+      const rowId = getPromotionSyncId(normalized);
+      if (rowId) syncedPromotionStateRef.current.set(rowId, getPromotionSyncSnapshot(row));
+    });
+
+    const rowsById = new Map((data.promociones || []).map((row) => {
+      const normalized = toExcelRow(row);
+      return [normalized.row_id || normalized.id, normalized];
+    }));
+    (data.comentarios || []).forEach((comment) => {
+      const normalized = toExcelComment(comment, rowsById);
+      const commentId = getCommentSyncId(normalized);
+      if (commentId) syncedCommentStateRef.current.set(commentId, getSyncSignature(normalized, COMMENT_SYNC_FIELDS));
+    });
   };
 
   const buildSupabasePayload = (overrides = {}, operation = {}) => {
-    const payload = buildCatalogPayload(overrides);
+    const fullPayload = buildCatalogPayload(overrides);
     const operationId = operation.operationId || "";
-    return {
-      ...payload,
+    const payload = {
+      ...fullPayload,
+      logs: [],
       operation_id: operationId,
       operation_type: operation.operationType || "",
       client_started_at: operation.startedAt || "",
       sync_options: {
         return_mode: "delta",
-        promociones: buildPromotionSyncOptions(payload.promociones, syncedPromotionStateRef.current),
-        compradores: buildKeyedSyncOptions(payload.compradores, syncedBuyerStateRef.current, (row) => row.comprador, BUYER_SYNC_FIELDS),
-        actividades: buildActivitySyncOptions(payload.actividades, payload.catalogos, syncedActivityStateRef.current),
-        comentarios: buildKeyedSyncOptions(payload.comentarios, syncedCommentStateRef.current, getCommentSyncId, COMMENT_SYNC_FIELDS),
-        logs: buildKeyedSyncOptions(payload.logs, syncedLogStateRef.current, getLogSyncId, LOG_SYNC_FIELDS),
-        avances_catalogo: buildKeyedSyncOptions(payload.avances_catalogo, syncedAvanceStateRef.current, getAvanceSyncId, AVANCE_SYNC_FIELDS),
-        responsables_solicitudes: buildKeyedSyncOptions(payload.responsables_solicitudes, syncedResponsableStateRef.current, getResponsableSyncId, RESPONSABLE_SYNC_FIELDS),
-        jerarquia_categorias: buildKeyedSyncOptions(payload.jerarquia_categorias, syncedJerarquiaStateRef.current, getJerarquiaSyncId, JERARQUIA_SYNC_FIELDS),
-        segmentos_clientes: buildKeyedSyncOptions(payload.segmentos_clientes, syncedSegmentoStateRef.current, getSegmentoSyncId, SEGMENTO_SYNC_FIELDS),
-        notificaciones: buildKeyedSyncOptions(payload.notificaciones, syncedNotificacionStateRef.current, getNotificacionSyncId, NOTIFICACION_SYNC_FIELDS),
+        promociones: buildPromotionSyncOptions(fullPayload.promociones, syncedPromotionStateRef.current),
+        compradores: buildBuyerSyncOptions(fullPayload.compradores, syncedBuyerStateRef.current),
+        actividades: buildActivitySyncOptions(fullPayload.actividades, fullPayload.catalogos, syncedActivityStateRef.current),
+        comentarios: buildKeyedSyncOptions(fullPayload.comentarios, syncedCommentStateRef.current, getCommentSyncId, COMMENT_SYNC_FIELDS),
+        avances_catalogo: buildKeyedSyncOptions(fullPayload.avances_catalogo, syncedAvanceStateRef.current, getAvanceSyncId, AVANCE_SYNC_FIELDS),
+        responsables_solicitudes: buildKeyedSyncOptions(fullPayload.responsables_solicitudes, syncedResponsableStateRef.current, getResponsableSyncId, RESPONSABLE_SYNC_FIELDS),
+        jerarquia_categorias: buildKeyedSyncOptions(fullPayload.jerarquia_categorias, syncedJerarquiaStateRef.current, getJerarquiaSyncId, JERARQUIA_SYNC_FIELDS),
+        segmentos_clientes: buildKeyedSyncOptions(fullPayload.segmentos_clientes, syncedSegmentoStateRef.current, getSegmentoSyncId, SEGMENTO_SYNC_FIELDS),
+        notificaciones: buildNotificacionSyncOptions(fullPayload.notificaciones, syncedNotificacionStateRef.current),
       },
     };
+
+    const compactPayload = compactSupabasePayload(payload);
+    Object.defineProperty(compactPayload, "__full_sync_payload", {
+      value: payload,
+      enumerable: false,
+    });
+    return compactPayload;
   };
 
   const runSupabaseOperation = async (loadingMessage, operation, successMessage) => {
@@ -956,6 +681,9 @@ export default function PromoMVP() {
       setSupabaseStatus({ type: "ready", message: successMessage });
       return result;
     } catch (error) {
+      if (error?.code === "PROMOTION_VERSION_CONFLICT") {
+        setPromotionConflict(normalizePromotionConflict(error.conflict));
+      }
       setSupabaseStatus({ type: "error", message: error.message || "No se pudo completar la operacion." });
       return null;
     } finally {
@@ -963,9 +691,81 @@ export default function PromoMVP() {
     }
   };
 
+  const compactSupabasePayload = (payload = {}) => {
+    const syncOptions = payload.sync_options || {};
+    const changedPromos = getChangedIds(syncOptions.promociones, "changed_row_ids", "changedRowIds");
+    const deletedPromos = getDeletedIds(syncOptions.promociones, "deleted_row_ids", "deletedRowIds");
+    const touchedPromotionContextKeys = getTouchedPromotionContextKeys(syncOptions.promociones);
+    const promotionContextIds = expandPromotionContextIds(payload.promociones, changedPromos, touchedPromotionContextKeys);
+    const changedActivities = getChangedIds(syncOptions.actividades);
+    const changedCatalogos = changedActivities;
+
+    return {
+      ...payload,
+      catalogos: filterRowsByIds(payload.catalogos, changedCatalogos, getCatalogSyncId),
+      actividades: filterRowsByIds(payload.actividades, changedActivities, getActivitySyncId),
+      compradores: filterRowsByIds(payload.compradores, getChangedIds(syncOptions.compradores), getBuyerSyncId),
+      responsables_solicitudes: filterRowsByIds(payload.responsables_solicitudes, getChangedIds(syncOptions.responsables_solicitudes), getResponsableSyncId),
+      jerarquia_categorias: filterRowsByIds(payload.jerarquia_categorias, getChangedIds(syncOptions.jerarquia_categorias), getJerarquiaSyncId),
+      segmentos_clientes: filterRowsByIds(payload.segmentos_clientes, getChangedIds(syncOptions.segmentos_clientes), getSegmentoSyncId),
+      notificaciones: filterRowsByIds(payload.notificaciones, getChangedIds(syncOptions.notificaciones), getNotificacionSyncId),
+      promociones: filterRowsByIds(payload.promociones, promotionContextIds, getPromotionSyncId),
+      promociones_detalle: filterRowsByIds(payload.promociones_detalle, changedPromos, getPromotionDetailSyncId),
+      comentarios: filterRowsByIds(payload.comentarios, getChangedIds(syncOptions.comentarios), getCommentSyncId),
+      logs: [],
+      avances_catalogo: filterRowsByIds(payload.avances_catalogo, getChangedIds(syncOptions.avances_catalogo), getAvanceSyncId),
+      sync_options: {
+        ...syncOptions,
+        promociones: {
+          ...(syncOptions.promociones || {}),
+          deleted_row_ids: Array.from(deletedPromos),
+          validation_row_ids: Array.from(promotionContextIds),
+          touched_context_keys: Array.from(touchedPromotionContextKeys),
+        },
+      },
+    };
+  };
+
+  const getDeltaCounts = (payload = {}) => {
+    const syncOptions = payload.sync_options || {};
+    const changedPromos = getChangedIds(syncOptions.promociones, "changed_row_ids", "changedRowIds").size;
+    const deletedPromos = getDeletedIds(syncOptions.promociones, "deleted_row_ids", "deletedRowIds").size;
+    return {
+      promociones: changedPromos,
+      promocionesEliminadas: deletedPromos,
+      comentarios: getChangedIds(syncOptions.comentarios).size,
+      avances: getChangedIds(syncOptions.avances_catalogo).size,
+      actividades: getChangedIds(syncOptions.actividades).size,
+      compradores: Array.isArray(payload.compradores) ? payload.compradores.length : getChangedIds(syncOptions.compradores).size,
+      responsables: getChangedIds(syncOptions.responsables_solicitudes).size,
+      jerarquia: getChangedIds(syncOptions.jerarquia_categorias).size,
+      segmentos: getChangedIds(syncOptions.segmentos_clientes).size,
+      notificaciones: getChangedIds(syncOptions.notificaciones).size,
+    };
+  };
+
+  const hasSupabaseDeltaChanges = (payload = {}) => {
+    const counts = getDeltaCounts(payload);
+    return Object.values(counts).some((count) => count > 0);
+  };
+
   const buildSaveOperationSummary = (payload = {}) => {
+    const counts = getDeltaCounts(payload);
+    const parts = [
+      counts.promociones ? `${counts.promociones} promociones` : "",
+      counts.promocionesEliminadas ? `${counts.promocionesEliminadas} eliminadas` : "",
+      counts.comentarios ? `${counts.comentarios} comentarios` : "",
+      counts.avances ? `${counts.avances} avances` : "",
+      counts.actividades ? `${counts.actividades} actividades/catalogos` : "",
+      counts.compradores ? `${counts.compradores} compradores` : "",
+      counts.responsables ? `${counts.responsables} responsables` : "",
+      counts.jerarquia ? `${counts.jerarquia} jerarquias` : "",
+      counts.segmentos ? `${counts.segmentos} segmentos` : "",
+      counts.notificaciones ? `${counts.notificaciones} notificaciones` : "",
+    ].filter(Boolean);
+    if (parts.length) return `delta: ${parts.join(", ")}`;
     const count = (items) => Array.isArray(items) ? items.length : 0;
-    return `${count(payload.promociones)} promociones, ${count(payload.comentarios)} comentarios, ${count(payload.avances_catalogo)} avances, ${count(payload.catalogos)} catalogos y ${count(payload.compradores)} compradores`;
+    return `sin cambios detectados; ${count(getFullSyncPayload(payload).promociones)} promociones en memoria`;
   };
 
   const createSaveOperation = (operationType) => {
@@ -976,6 +776,30 @@ export default function PromoMVP() {
       startedAt: new Date().toISOString(),
     };
   };
+
+  async function bootstrapData({ force = false } = {}) {
+    const ownerKey = getDataOwnerKey(appSession, appUser);
+    if (!appSession?.access_token || !appUser?.activo || !ownerKey) return null;
+    if (dataOwnerRef.current !== ownerKey) {
+      dataOwnerRef.current = ownerKey;
+      resetDomainState();
+    }
+    if (!hasSupabaseConnection(supabaseConnection)) {
+      const message = "Faltan variables de entorno de Supabase para cargar los datos automaticamente.";
+      setSupabaseStatus({ type: "error", message });
+      setDataState({ status: "error", error: message });
+      return null;
+    }
+
+    const loadKey = `${ownerKey}:${supabaseSettings.url || ""}`;
+    if (!force && initialLoadSessionRef.current === loadKey) return null;
+    initialLoadSessionRef.current = loadKey;
+    const data = await onLoadSupabase({ blocking: true });
+    if (!data && initialLoadSessionRef.current === loadKey) {
+      initialLoadSessionRef.current = "";
+    }
+    return data;
+  }
 
   const onLogin = async (email, password) => {
     setLoginStatus({ type: "loading", message: "Validando usuario..." });
@@ -1015,7 +839,7 @@ export default function PromoMVP() {
       const savedConnection = saveStoredSupabaseConnection(supabaseSettings);
       setSupabaseSettings(savedConnection);
       await updateRecoveredPassword(savedConnection, recoverySession, password);
-      signOutAppUser();
+      await signOutAppUser(savedConnection, recoverySession).catch(() => null);
       setAppSession(null);
       setAppUser(null);
       setRecoverySession(null);
@@ -1027,17 +851,28 @@ export default function PromoMVP() {
     }
   };
 
-  const onLogout = () => {
-    signOutAppUser();
+  const onLogout = async () => {
+    let signOutError = null;
+    setAuthStatus({ type: "loading", message: "Cerrando sesion..." });
+    try {
+      await signOutAppUser(supabaseSettings, appSession, { scope: "global" });
+    } catch (error) {
+      signOutError = error;
+    }
+    abortActiveSupabaseRequests();
+    await clearCachedSkuMaster().catch(() => null);
     setAppSession(null);
     setAppUser(null);
     setAuthStatus({ type: "idle", message: "" });
-    setLoginStatus({ type: "idle", message: "" });
+    setLoginStatus(signOutError
+      ? { type: "error", message: `Sesion local cerrada. Supabase reporto: ${signOutError.message || signOutError}` }
+      : { type: "idle", message: "" });
     setRecoveryStatus({ type: "idle", message: "" });
     setRecoverySession(null);
     setRecoveryUser(null);
     setAuthScreen("login");
-    initialLoadSessionRef.current = "";
+    dataOwnerRef.current = "";
+    resetDomainState();
   };
 
   const onConsultLogs = async (page = logsPage, pageSize = logsPageSize) => {
@@ -1086,6 +921,10 @@ export default function PromoMVP() {
   };
 
   const onSaveCatalogSettings = async (settings = {}) => {
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar ajustes." });
+      return;
+    }
     const nextConfig = stripCatalogosConfig(config);
     const nextCatalogos = (settings.catalogos || catalogos).map(normalizeCatalogo);
     const nextCompradores = (settings.compradores || compradores).map(normalizeCompradorData);
@@ -1107,14 +946,23 @@ export default function PromoMVP() {
       const operation = createSaveOperation("settings");
       const payload = buildSupabasePayload({ config: nextConfig, catalogos: nextCatalogos, compradores: nextCompradores }, operation);
       const saveSummary = buildSaveOperationSummary(payload);
+      if (!hasSupabaseDeltaChanges(payload)) {
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: "No hay ajustes pendientes para sincronizar." });
+        showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
+        return;
+      }
       const data = await runSupabaseOperation(`Guardando ajustes en Supabase (${saveSummary})...`, () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
       if (data) {
+        const fullPayload = getFullSyncPayload(payload);
         setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
         if (data.sync_mode === "delta") {
-          applySavedActivities(payload);
-          rememberSyncedPayload(payload);
+          applySavedActivities(fullPayload);
+          const syncedPayload = { ...fullPayload, promociones: applyPromotionVersions(fullPayload.promociones, data.promociones || []) };
+          setRows((currentRows) => applyPromotionVersions(currentRows, data.promociones || []));
+          rememberSyncedPayload(syncedPayload);
         } else {
-          applyCatalogData(data, { fallbackActivities: payload.actividades });
+          applyCatalogData(data, { fallbackActivities: fullPayload.actividades });
           rememberSyncedPromotions(data.promociones || []);
           rememberSyncedSettings(data);
           rememberSyncedOperations(data);
@@ -1146,15 +994,58 @@ export default function PromoMVP() {
     setActive("avances");
   };
 
-  const onLoadSupabase = async () => {
+  const onLoadSupabase = async ({ blocking = false } = {}) => {
+    if (!hasSupabaseConnection(supabaseConnection)) {
+      const message = "Faltan variables de entorno de Supabase para cargar los datos.";
+      setSupabaseStatus({ type: "error", message });
+      if (blocking) setDataState({ status: "error", error: message });
+      return null;
+    }
+    if (blocking) setDataState({ status: "loading", error: null });
     const data = await runSupabaseOperation("Cargando catalogo desde Supabase...", () => loadCatalogFromSupabase(supabaseConnection), "Catalogo cargado desde Supabase.");
     if (data) {
       applyCatalogData(data);
-      rememberSyncedPromotions(data.promociones || []);
+      if (Array.isArray(data.promociones)) rememberSyncedPromotions(data.promociones);
       rememberSyncedSettings(data);
       rememberSyncedOperations(data);
+      setDataState({ status: "ready", error: null });
+    } else if (blocking) {
+      setDataState((current) => ({
+        status: "error",
+        error: current.error || supabaseStatus.message || "No se pudieron cargar los datos operativos desde Supabase.",
+      }));
     }
     return data;
+  };
+
+  const reloadAfterPromotionConflict = async () => {
+    const data = await onLoadSupabase({ blocking: false });
+    if (data) {
+      setPromotionConflict(null);
+      setSupabaseStatus({ type: "ready", message: "Datos recargados desde Supabase." });
+    }
+  };
+
+  const keepLocalPromotionConflict = () => {
+    setPromotionConflict(null);
+    setSupabaseStatus({
+      type: "error",
+      message: "Se conservaron los cambios locales. Compare con la version actual antes de intentar guardar nuevamente.",
+    });
+  };
+
+  const discardLocalPromotionConflict = () => {
+    const currentRow = promotionConflict?.current_row;
+    const rowId = promotionConflict?.row_id;
+    if (!currentRow || !rowId) {
+      void reloadAfterPromotionConflict();
+      return;
+    }
+    const appRow = toAppRow(currentRow);
+    setRows((currentRows) => currentRows.map((row) => getPromotionSyncId(row) === rowId ? appRow : row));
+    syncedPromotionStateRef.current.set(rowId, getPromotionSyncSnapshot(currentRow));
+    setPromotionConflict(null);
+    setSupabaseStatus({ type: "ready", message: "Cambio local descartado para la promocion en conflicto." });
   };
 
   const refreshSpecialRequestsFromSupabase = React.useCallback(async () => {
@@ -1164,6 +1055,7 @@ export default function PromoMVP() {
     try {
       const data = await loadSpecialRequestsFromSupabase(supabaseConnection);
       const result = applySpecialRequestsData(data);
+      rememberSyncedOperationalRows(data);
       setSpecialRequestsRefreshStatus({
         type: "ready",
         message: result.count ? "Solicitudes especiales actualizadas." : "No hay solicitudes especiales en Supabase.",
@@ -1209,6 +1101,10 @@ export default function PromoMVP() {
   }, [supabaseConnection]);
 
   const onSaveSupabase = async (overrides = {}) => {
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar." });
+      return;
+    }
     if (saveOperationInFlightRef.current) {
       setSupabaseStatus({ type: "loading", message: "Ya hay un guardado en curso. Espere a que finalice antes de intentar nuevamente." });
       return;
@@ -1219,14 +1115,23 @@ export default function PromoMVP() {
       const operation = createSaveOperation("catalog");
       const payload = buildSupabasePayload(overrides, operation);
       const saveSummary = buildSaveOperationSummary(payload);
+      if (!hasSupabaseDeltaChanges(payload)) {
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: "No hay cambios pendientes para sincronizar." });
+        showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
+        return;
+      }
       const data = await runSupabaseOperation(`Guardando cambios en Supabase (${saveSummary})...`, () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
       if (data) {
+        const fullPayload = getFullSyncPayload(payload);
         setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
         if (data.sync_mode === "delta") {
-          applySavedActivities(payload);
-          rememberSyncedPayload(payload);
+          applySavedActivities(fullPayload);
+          const syncedPayload = { ...fullPayload, promociones: applyPromotionVersions(fullPayload.promociones, data.promociones || []) };
+          setRows((currentRows) => applyPromotionVersions(currentRows, data.promociones || []));
+          rememberSyncedPayload(syncedPayload);
         } else {
-          applyCatalogData(data, { fallbackActivities: payload.actividades });
+          applyCatalogData(data, { fallbackActivities: fullPayload.actividades });
           rememberSyncedPromotions(data.promociones || []);
           rememberSyncedSettings(data);
           rememberSyncedOperations(data);
@@ -1289,8 +1194,9 @@ export default function PromoMVP() {
     try {
       const data = await loadSkuMasterFromExcel(file);
       setSkuMaster(data.skuMaster);
-      setArchivoComprador({ nombre:file.name, total:data.items.length, hoja:data.sheetName, fecha: new Date().toISOString() });
-      setSkuMasterStatus({ type: "ready", message: `${data.items.length} SKU cargados desde ${file.name}.` });
+      setSkuMasterCount(data.skuMasterCount);
+      setArchivoComprador({ nombre:file.name, total:data.skuMasterCount, hoja:data.sheetName, fecha: new Date().toISOString() });
+      setSkuMasterStatus({ type: "ready", message: `${data.skuMasterCount} SKU cargados desde ${file.name}.` });
     } catch (error) {
       setSkuMasterStatus({ type: "error", message: error.message || "No se pudo cargar el archivo ERP." });
     } finally {
@@ -1335,8 +1241,28 @@ export default function PromoMVP() {
     return <AuthLoadingPage message={authStatus.message || "Cargando permisos..."}/>;
   }
 
+  if (dataState.status === "loading") {
+    return <DataLoadingScreen message="Cargando datos operativos..."/>;
+  }
+
+  if (dataState.status === "error") {
+    return <DataLoadErrorScreen
+      message={dataState.error}
+      onRetry={() => void bootstrapData({ force: true })}
+      onLogout={onLogout}
+      isRetrying={false}
+    />;
+  }
+
+  if (dataState.status !== "ready") {
+    return <DataLoadingScreen message="Preparando datos operativos..."/>;
+  }
+
   const currentUser = appSession.user_email || appSession.user?.email || "";
   const saveSupabaseDataLabel = pendingSaveAction?.confirmLabel || "Guardar";
+  const supabaseDataReady = dataState.status === "ready";
+  const supabaseSettingsReady = supabaseDataReady && hasSupabaseConnection(supabaseSettings);
+  const supabaseConnectionReady = supabaseDataReady && hasSupabaseConnection(supabaseConnection);
   const navigate = (nextActive) => {
     setActive(nextActive);
     if (nextActive === "solicitudes") void refreshSpecialRequestsFromSupabase();
@@ -1345,20 +1271,29 @@ export default function PromoMVP() {
   return <AuthProvider value={authValue}><div className="app">
     <AppShell active={active} setActive={navigate} currentUser={currentUser} currentRole={currentRole} onLogout={onLogout}/>
     <main>
-      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} actividades={actividades} comentarios={comentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadSupabase={onLoadSupabase} supabaseSettings={supabaseSettings} supabaseStatus={supabaseStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
-      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
-      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} supabaseSettings={supabaseSettings} setSupabaseSettings={setSupabaseSettings} onSaveSupabaseSettings={onRequestSaveSupabaseSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestSupabaseConnection={onTestSupabaseConnection} onValidateSupabaseSession={onValidateSupabaseSession} supabaseStatus={supabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} onSaveSupabase={onRequestSaveSupabase} onSaveSupabaseDirect={onSaveSupabase} onRefreshPromotionScope={refreshPromotionScopeFromSupabase} promotionScopeRefreshStatus={promotionScopeRefreshStatus} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
+      <Suspense fallback={<LoadingScreen />}>
+      {active === "home" && <ProtectedRoute permission={MODULE_PERMISSIONS.home}><HomePage catalogos={catalogos} rows={rows} actividades={actividades} comentarios={comentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} catalogoResumen={catalogoResumen} rowsCount={rows.length} logsCount={consultedLogs.length} setActive={setActive} setCatalogoActivo={setCatalogoActivo} onOpenAvances={openAvances} onLoadExcel={onLoadExcel} onSaveExcel={onSaveExcel} onLoadSupabase={onLoadSupabase} supabaseSettings={supabaseSettings} supabaseReady={supabaseSettingsReady} supabaseStatus={supabaseStatus} isSyncing={isSyncing} fileInputRef={fileInputRef}/></ProtectedRoute>}
+      {active === "avances" && <ProtectedRoute permission={MODULE_PERMISSIONS.avances}><GestionAvancesPage catalogo={catalogoAvanceActivo} rows={rows} catalogoResumen={catalogoResumen} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} avances={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos} setLogs={setLogs} onSaveSupabase={onRequestSaveSupabase} supabaseReady={supabaseSettingsReady} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} onBack={() => setActive("home")} onOpenCatalogo={(catalogo) => { setCatalogoActivo(catalogo); setActive("promos"); }}/></ProtectedRoute>}
+      {active === "ajustes" && <ProtectedRoute permission={MODULE_PERMISSIONS.ajustes}><AjustesPage catalogos={catalogos} setCatalogos={setCatalogos} compradores={compradores} setCompradores={setCompradores} rows={rows} actividades={actividades} supabaseSettings={supabaseSettings} setSupabaseSettings={setSupabaseSettings} onSaveSupabaseSettings={onRequestSaveSupabaseSettings} onSaveCatalogSettings={onRequestSaveCatalogSettings} onDeleteCatalogo={onDeleteCatalogo} onTestSupabaseConnection={onTestSupabaseConnection} onValidateSupabaseSession={onValidateSupabaseSession} supabaseStatus={supabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "promos" && <ProtectedRoute permission={MODULE_PERMISSIONS.promos}><PromosPageView catalogoActivo={catalogoActivo} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} skuMasterCount={skuMasterCount} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} onCancelSkuMaster={cancelSkuMasterLoad} onSaveSupabase={onRequestSaveSupabase} onSaveSupabaseDirect={onSaveSupabase} onRefreshPromotionScope={refreshPromotionScopeFromSupabase} promotionScopeRefreshStatus={promotionScopeRefreshStatus} supabaseReady={supabaseSettingsReady} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} avanceCatalogos={avanceCatalogos} setAvanceCatalogos={setAvanceCatalogos}/></ProtectedRoute>}
       {active === "consulta" && <ProtectedRoute permission={MODULE_PERMISSIONS.consulta}><ConsultaSkuPage rows={rows} actividades={actividades}/></ProtectedRoute>}
-      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} onResolveSpecialActivityIds={resolveSpecialActivityIds} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
-      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} refreshStatus={specialRequestsRefreshStatus}/></ProtectedRoute>}
-      {active === "catalogDesign" && <ProtectedRoute permission={MODULE_PERMISSIONS.catalogDesign}><CatalogDesignPage catalogos={catalogos} rows={rows} supabaseConnection={supabaseConnection} supabaseReady={hasSupabaseConnection(supabaseConnection)}/></ProtectedRoute>}
-      {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} supabaseReady={hasSupabaseConnection(supabaseSettings)} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
-      {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} catalogos={catalogos} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} onSaveSupabase={onRequestSaveSupabase} supabaseReady={hasSupabaseConnection(supabaseSettings)} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
-      {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios} supabaseConnection={supabaseConnection} supabaseReady={hasSupabaseConnection(supabaseConnection)}/></ProtectedRoute>}
+      {active === "especial" && <ProtectedRoute permission={MODULE_PERMISSIONS.especial}><PromocionEspecialPage actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} skuMasterCount={skuMasterCount} setLogs={setLogs} onLoadSkuMaster={onLoadSkuMaster} skuMasterFileInputRef={skuMasterFileInputRef} archivoComprador={archivoComprador} onSaveSupabase={onRequestSaveSupabase} supabaseReady={supabaseSettingsReady} onResolveSpecialActivityIds={resolveSpecialActivityIds} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} catalogos={catalogos}/></ProtectedRoute>}
+      {active === "solicitudes" && <ProtectedRoute permission={MODULE_PERMISSIONS.solicitudes}><SolicitudesEspecialesPageView actividades={actividades} setActividades={setActividades} rows={rows} setRows={setRows} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} jerarquiaCategorias={jerarquiaCategorias} segmentosClientes={segmentosClientes} skuMaster={skuMaster} skuMasterCount={skuMasterCount} archivoComprador={archivoComprador} skuMasterStatus={skuMasterStatus} onRefreshSkuMaster={loadSkuMasterFromRemote} onCancelSkuMaster={cancelSkuMasterLoad} responsablesSolicitudes={responsablesSolicitudes} setLogs={setLogs} setActive={setActive} onSaveSupabase={onRequestSaveSupabase} supabaseReady={supabaseSettingsReady} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing} refreshStatus={specialRequestsRefreshStatus}/></ProtectedRoute>}
+      {active === "seguimiento" && <ProtectedRoute permission={MODULE_PERMISSIONS.seguimiento}><SeguimientoGanttPage actividades={actividades} rows={rows} catalogos={catalogos}/></ProtectedRoute>}
+      {active === "catalogDesign" && <ProtectedRoute permission={MODULE_PERMISSIONS.catalogDesign}><CatalogDesignPage catalogos={catalogos} rows={rows} supabaseConnection={supabaseConnection} supabaseReady={supabaseConnectionReady}/></ProtectedRoute>}
+      {active === "logs" && <ProtectedRoute permission={MODULE_PERMISSIONS.logs}><LogsPage logs={consultedLogs} page={logsPage} pageSize={logsPageSize} hasNextPage={logsHasNextPage} status={logsStatus} supabaseReady={supabaseSettingsReady} onConsult={onConsultLogs} onPrevious={() => onConsultLogs(Math.max(1, logsPage - 1))} onNext={() => onConsultLogs(logsPage + 1)} onPageSizeChange={onLogsPageSizeChange}/></ProtectedRoute>}
+      {active === "consolidado" && <ProtectedRoute permission={MODULE_PERMISSIONS.consolidado}><ConsolidadoPage rows={rows} actividades={actividades} catalogos={catalogos} comentarios={comentarios} setComentarios={setComentarios} compradores={compradores} onSaveSupabase={onRequestSaveSupabase} supabaseReady={supabaseSettingsReady} saveSupabaseStatus={saveSupabaseStatus} isSyncing={isSyncing}/></ProtectedRoute>}
+      {active === "export" && <ProtectedRoute permission={MODULE_PERMISSIONS.export}><ExportPageV2 rows={rows} actividades={actividades} comentarios={comentarios} supabaseConnection={supabaseConnection} supabaseReady={supabaseConnectionReady}/></ProtectedRoute>}
+      </Suspense>
     </main>
     <MobileNav active={active} setActive={navigate}/>
     <SuccessToast toast={successToast} onClose={() => setSuccessToast(null)}/>
+    <PromotionConflictModal
+      conflict={promotionConflict}
+      onReload={reloadAfterPromotionConflict}
+      onMerge={keepLocalPromotionConflict}
+      onDiscard={discardLocalPromotionConflict}
+    />
     {pendingSaveAction && <ConfirmModal
       title={pendingSaveAction.title || "Confirmar guardado"}
       description={pendingSaveAction.description || "Vas a guardar cambios en Supabase."}

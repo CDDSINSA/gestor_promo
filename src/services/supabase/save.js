@@ -11,6 +11,11 @@ function getChangedPromotionIds(syncOptions) {
   return new Set((syncOptions?.changed_row_ids || syncOptions?.changedRowIds || []).map(cleanText).filter(Boolean));
 }
 
+function getPromotionValidationScopeIds(syncOptions) {
+  const validationIds = new Set((syncOptions?.validation_row_ids || syncOptions?.validationRowIds || []).map(cleanText).filter(Boolean));
+  return validationIds.size ? validationIds : getChangedPromotionIds(syncOptions);
+}
+
 function assertCanSave(connection = {}) {
   const role = normalizeRole(connection.appUser?.rol || connection.role);
   const canWrite = [ROLES.ADMIN, ROLES.BUYER, ROLES.MARK].includes(role);
@@ -19,11 +24,11 @@ function assertCanSave(connection = {}) {
 
 function assertValidPromotions(data = {}) {
   const promotionSyncOptions = getPromotionSyncOptions(data);
-  const changedPromotionIds = getChangedPromotionIds(promotionSyncOptions);
+  const validationScopeIds = getPromotionValidationScopeIds(promotionSyncOptions);
   const validation = validatePromotions(data.promociones || [], {
     actividades: data.actividades || [],
     compradores: data.compradores || [],
-    scopeRowIds: promotionSyncOptions ? changedPromotionIds : null,
+    scopeRowIds: promotionSyncOptions ? validationScopeIds : null,
   });
   if (validation.errors.length) {
     throw new Error(`No se guardo en Supabase porque hay promociones incompletas o invalidas:\n${formatPromotionValidationErrors(validation).join("\n")}`);
@@ -64,6 +69,29 @@ function isMissingDigestFunction(error) {
   return message.includes("function digest") && message.includes("does not exist");
 }
 
+function parseConflictDetails(error) {
+  const rawDetail = error?.supabaseError?.details || error?.supabaseError?.detail || "";
+  if (!rawDetail || typeof rawDetail !== "string") return null;
+  try {
+    return JSON.parse(rawDetail);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeConcurrencyConflict(error) {
+  const message = error?.message || "";
+  const details = parseConflictDetails(error);
+  if (!message.includes("PROMOTION_VERSION_CONFLICT") && details?.type !== "PROMOTION_VERSION_CONFLICT") {
+    return error;
+  }
+  const conflictError = new Error("La promocion cambio en Supabase desde que fue abierta. Revise el conflicto antes de guardar nuevamente.");
+  conflictError.code = "PROMOTION_VERSION_CONFLICT";
+  conflictError.conflict = details;
+  conflictError.cause = error;
+  return conflictError;
+}
+
 export async function saveCatalogToSupabase(connection, data = {}) {
   assertCanSave(connection);
   assertValidPromotions(data);
@@ -79,7 +107,7 @@ export async function saveCatalogToSupabase(connection, data = {}) {
     if (message.includes("save_catalog_transactional") || message.includes("PGRST202") || message.includes("Could not find the function")) {
       throw new Error("No se encontro la funcion RPC transaccional save_catalog_transactional en Supabase. Ejecute docs/supabase_transactional_save_rpc.sql antes de guardar.");
     }
-    throw error;
+    throw normalizeConcurrencyConflict(error);
   }
 }
 

@@ -11,6 +11,8 @@ const PAGE_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
 const PROJECT_STATES = new Set(["planificacion", "en_diseno", "en_revision", "aprobado", "consolidado", "cancelado"]);
 const PAGE_STATES = new Set(["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"]);
 const COMMENT_TYPES = new Set(["comentario", "observacion", "aprobacion", "rechazo", "ajuste"]);
+const COMMENT_STATES = new Set(["abierto", "resuelto"]);
+const ANNOTATION_TYPES = new Set(["rect", "circle", "freehand"]);
 
 async function requireSession(connection = {}) {
   const session = connection.session || connection.appSession || connection.authSession;
@@ -75,6 +77,36 @@ function validateFinalPdf(file) {
   }
 }
 
+function clampRatio(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(1, Math.max(0, number));
+}
+
+function normalizeAnnotations(annotations = []) {
+  if (!Array.isArray(annotations)) return [];
+  return annotations
+    .map((annotation) => {
+      const type = cleanText(annotation?.type).toLowerCase();
+      if (!ANNOTATION_TYPES.has(type)) return null;
+      const color = cleanText(annotation?.color) || "#E53935";
+      if (type === "freehand") {
+        const points = Array.isArray(annotation.points)
+          ? annotation.points.map((point) => ({ x: clampRatio(point?.x), y: clampRatio(point?.y) }))
+          : [];
+        if (points.length < 2) return null;
+        return { type, color, points };
+      }
+      const x = clampRatio(annotation?.x);
+      const y = clampRatio(annotation?.y);
+      const width = clampRatio(annotation?.width);
+      const height = clampRatio(annotation?.height);
+      if (!width || !height) return null;
+      return { type, color, x, y, width, height };
+    })
+    .filter(Boolean);
+}
+
 async function insertRow(connection, table, row) {
   const result = await supabaseRequest(connection, `/rest/v1/${table}`, {
     method: "POST",
@@ -82,45 +114,6 @@ async function insertRow(connection, table, row) {
     body: JSON.stringify(row),
   });
   return Array.isArray(result) ? result[0] : result;
-}
-
-function getCurrentAppUser(connection = {}, fallbackUserId = "") {
-  return {
-    id: fallbackUserId || connection.appUser?.id || null,
-    name: cleanText(connection.appUser?.nombre || connection.appUser?.email || connection.session?.user_email || "Usuario"),
-  };
-}
-
-function buildRequestId(prefix = "LOG") {
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `${prefix}-${Date.now()}-${random}`;
-}
-
-export async function logCatalogDesignPageStateChange(connection, page, nextStatus, options = {}) {
-  const previousStatus = cleanText(options.previousStatus ?? page?.estado);
-  const newStatus = cleanText(nextStatus);
-  if (!page?.id || !newStatus || previousStatus === newStatus) return null;
-
-  const currentUser = getCurrentAppUser(connection, options.currentUserId);
-  const action = cleanText(options.action) || "Cambio de estado de pagina de catalogo";
-
-  try {
-    return insertRow(connection, "logs", {
-      usuario_id: currentUser.id,
-      usuario: currentUser.name,
-      entidad: "CATALOGO_DISENO_PAGINA",
-      entidad_id: page.id,
-      accion: action,
-      campo: "estado",
-      valor_anterior: previousStatus,
-      valor_nuevo: newStatus,
-      request_id: buildRequestId("CATDIS"),
-      created_at: new Date().toISOString(),
-      fecha_cierre: ["aprobada", "rechazada", "ajustes"].includes(newStatus) ? new Date().toISOString() : null,
-    });
-  } catch {
-    return null;
-  }
 }
 
 async function uploadStorageObject(connection, bucket, path, file) {
@@ -230,28 +223,37 @@ export async function uploadCatalogDesignPageImage(connection, page, project, fi
     actualizado_por: currentUserId || null,
     estado: "en_revision",
   });
-  await logCatalogDesignPageStateChange(connection, page, "en_revision", {
-    currentUserId,
-    action: "Imagen de pagina actualizada",
-    detail: path,
-  });
   return updatedPage;
 }
 
-export async function addCatalogDesignPageComment(connection, pageId, comment, type, currentUserId) {
+export async function addCatalogDesignPageComment(connection, pageId, comment, type, currentUserId, annotations = []) {
+  const normalizedAnnotations = normalizeAnnotations(annotations);
   const row = {
     pagina_id: pageId,
     usuario_id: currentUserId || null,
     comentario: cleanText(comment),
     tipo: normalizeState(type, COMMENT_TYPES, "comentario"),
+    estado: normalizeState(type, COMMENT_TYPES, "comentario") === "aprobacion" ? "resuelto" : "abierto",
   };
+  if (normalizedAnnotations.length) {
+    row.anotaciones = normalizedAnnotations;
+  }
   if (!row.pagina_id || !row.comentario) {
     throw new Error("Ingrese un comentario antes de guardar.");
   }
   return insertRow(connection, "catalogo_pagina_comentarios", row);
 }
 
-export async function reviewCatalogDesignPage(connection, page, status, comment, type, currentUserId) {
+export async function updateCatalogDesignPageCommentStatus(connection, commentId, status, currentUserId) {
+  const nextStatus = normalizeState(status, COMMENT_STATES, "abierto");
+  return patchRowById(connection, "catalogo_pagina_comentarios", commentId, {
+    estado: nextStatus,
+    fecha_resolucion: nextStatus === "resuelto" ? new Date().toISOString() : null,
+    resuelto_por: nextStatus === "resuelto" ? currentUserId || null : null,
+  });
+}
+
+export async function reviewCatalogDesignPage(connection, page, status, comment, type, currentUserId, annotations = []) {
   const nextStatus = normalizeState(status, PAGE_STATES, "en_revision");
   const [updatedPage] = await Promise.all([
     updateCatalogDesignPage(connection, page.id, {
@@ -259,13 +261,8 @@ export async function reviewCatalogDesignPage(connection, page, status, comment,
       observacion_actual: cleanText(comment) || page.observacion_actual || null,
       actualizado_por: currentUserId || null,
     }),
-    addCatalogDesignPageComment(connection, page.id, comment || (nextStatus === "aprobada" ? "Pagina aprobada." : "Pagina requiere ajustes."), type, currentUserId),
+    addCatalogDesignPageComment(connection, page.id, comment || (nextStatus === "aprobada" ? "Pagina aprobada." : "Pagina requiere ajustes."), type, currentUserId, annotations),
   ]);
-  await logCatalogDesignPageStateChange(connection, page, nextStatus, {
-    currentUserId,
-    action: nextStatus === "aprobada" ? "Pagina aprobada por comprador" : "Pagina rechazada por comprador",
-    detail: comment,
-  });
   return updatedPage;
 }
 

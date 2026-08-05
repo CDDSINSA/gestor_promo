@@ -80,6 +80,8 @@ const HEADERS = {
     "estado_registro",
     "fecha_creacion",
     "fecha_modificacion",
+    "usuario_crea",
+    "usuario_edita",
     "ultima_modificacion_por",
   ],
   PROMOCIONES_DETALLE: ["detalle_id", "row_id", "actividad_id", "oferta_id", "grupo_oferta", "tipo_promo", "campo", "valor"],
@@ -139,6 +141,8 @@ const HEADERS = {
     "total_comentarios",
     "comentarios_actividad",
     "comentarios_actividad_abiertos",
+    "usuario_crea",
+    "usuario_edita",
     "fecha_modificacion",
     "ultima_modificacion_por",
   ],
@@ -772,6 +776,8 @@ function normalizePromocion_(row) {
     estado_registro: getByAliases_(row, ["estado_registro"]) || "BORRADOR",
     fecha_creacion: getByAliases_(row, ["fecha_creacion"]) || now_(),
     fecha_modificacion: getByAliases_(row, ["fecha_modificacion"]) || "",
+    usuario_crea: getByAliases_(row, ["usuario_crea", "usuarioCrea"]) || "",
+    usuario_edita: getByAliases_(row, ["usuario_edita", "usuarioEdita", "ultima_modificacion_por"]) || "",
     ultima_modificacion_por: getByAliases_(row, ["ultima_modificacion_por"]) || "",
   };
 }
@@ -1075,6 +1081,8 @@ function buildConsolidado_(promociones, comentarios, actividades) {
       comentarios_actividad_abiertos: comentariosActividad.filter(function (item) {
         return String(item.estado).toUpperCase() === "ABIERTO";
       }).length,
+      usuario_crea: promo.usuario_crea,
+      usuario_edita: promo.usuario_edita,
       fecha_modificacion: promo.fecha_modificacion,
       ultima_modificacion_por: promo.ultima_modificacion_por,
     };

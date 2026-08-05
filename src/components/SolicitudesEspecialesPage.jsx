@@ -53,7 +53,7 @@ function formatRequestDateTime(value) {
   return value ? formatDateTime(value) : "Pendiente";
 }
 
-export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], setRows, comentarios = [], setComentarios, compradores = [], jerarquiaCategorias = [], segmentosClientes = [], skuMaster = {}, archivoComprador = null, skuMasterStatus = null, onRefreshSkuMaster, responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, refreshStatus = { type: "idle", message: "" } }) {
+export default function SolicitudesEspecialesPage({ actividades = [], setActividades, rows = [], setRows, comentarios = [], setComentarios, compradores = [], jerarquiaCategorias = [], segmentosClientes = [], skuMaster = {}, skuMasterCount = 0, archivoComprador = null, skuMasterStatus = null, onRefreshSkuMaster, onCancelSkuMaster, responsablesSolicitudes = [], setLogs, setActive, onSaveSupabase, supabaseReady, saveSupabaseStatus, isSyncing, refreshStatus = { type: "idle", message: "" } }) {
   const { can } = usePermissions();
   const canManageRequests = can(PERMISSIONS.MANAGE_SOLICITUDES);
   const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
@@ -349,10 +349,12 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
         jerarquiaCategorias={jerarquiaCategorias}
         segmentosClientes={segmentosClientes}
         skuMaster={skuMaster}
+        skuMasterCount={skuMasterCount}
         setLogs={setLogs}
         archivoComprador={archivoComprador}
         skuMasterStatus={skuMasterStatus}
         onRefreshSkuMaster={onRefreshSkuMaster}
+        onCancelSkuMaster={onCancelSkuMaster}
         onSaveSupabase={onSaveSupabase}
         supabaseReady={supabaseReady}
         saveSupabaseStatus={saveSupabaseStatus}

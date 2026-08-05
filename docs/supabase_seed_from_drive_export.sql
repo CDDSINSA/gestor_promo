@@ -496,8 +496,8 @@ values
   ('ROW-1782163755339-67419', 'cat-1781562933785-96129', 'Edwin Cervantes', 'OFE-cat178156293378596129-preciofijo-row178216375533967419', 'Precio fijo', 'Precio fijo', 'simple', '', '100399274', '5302286', 'PASADOR DE PIE 6 ZINC ACE', 'Exacta', 1.0, 869.0, 100.0, '', '', 'NO', '', 'CANAL', 'Retail', 'REGISTRADO', '2026-06-22T21:29:16.850000+00:00', '2026-06-22T21:29:16.850000+00:00', '25', ''),
   ('ROW-1782163755340-89137', 'cat-1781562933785-96129', 'Edwin Cervantes', 'OFE-cat178156293378596129-preciofijo-row178216375534089137', 'Precio fijo', 'Precio fijo', 'simple', '', '100399320', '490925', 'GANCHO S 0.120X1 4PZAS HILLMAN 490925', 'Exacta', 1.0, 136.85, 100.0, '', '', 'NO', '', 'CANAL', 'Retail', 'REGISTRADO', '2026-06-22T21:29:16.850000+00:00', '2026-06-22T21:29:16.850000+00:00', '28', '')
 )
-insert into public.promociones (legacy_row_id, campana_id, buyer_id, oferta_id, tipo_promo, grupo_oferta, tipo_sku, variante, sku, num_parte, descripcion, tipo_cantidad, cantidad_minima, precio_antes, precio_ahora, descuento, comentario_comprador, aplica_segmento, segmento_cliente, alcance_tipo, alcance_valor, estado_registro, created_at, updated_at, dep_id, ultima_modificacion_por)
-select src.legacy_row_id, c.id, b.id, src.oferta_id, src.tipo_promo, src.grupo_oferta, src.tipo_sku, src.variante, src.sku, src.num_parte, src.descripcion, src.tipo_cantidad, src.cantidad_minima, src.precio_antes, src.precio_ahora, src.descuento, src.comentario_comprador, src.aplica_segmento, src.segmento_cliente, src.alcance_tipo, src.alcance_valor, src.estado_registro, coalesce(src.created_at::timestamptz, now()), coalesce(src.updated_at::timestamptz, now()), src.dep_id, src.ultima_modificacion_por
+insert into public.promociones (legacy_row_id, campana_id, buyer_id, oferta_id, tipo_promo, grupo_oferta, tipo_sku, variante, sku, num_parte, descripcion, tipo_cantidad, cantidad_minima, precio_antes, precio_ahora, descuento, comentario_comprador, aplica_segmento, segmento_cliente, alcance_tipo, alcance_valor, estado_registro, created_at, updated_at, dep_id, usuario_crea, usuario_edita, ultima_modificacion_por)
+select src.legacy_row_id, c.id, b.id, src.oferta_id, src.tipo_promo, src.grupo_oferta, src.tipo_sku, src.variante, src.sku, src.num_parte, src.descripcion, src.tipo_cantidad, src.cantidad_minima, src.precio_antes, src.precio_ahora, src.descuento, src.comentario_comprador, src.aplica_segmento, src.segmento_cliente, src.alcance_tipo, src.alcance_valor, src.estado_registro, coalesce(src.created_at::timestamptz, now()), coalesce(src.updated_at::timestamptz, now()), src.dep_id, '', coalesce(src.ultima_modificacion_por, ''), src.ultima_modificacion_por
 from src
 join public.campanas c on c.legacy_actividad_id = src.actividad_id
 join public.compradores b on b.comprador = src.comprador
@@ -509,7 +509,10 @@ on conflict (legacy_row_id) do update set
   precio_ahora = excluded.precio_ahora, descuento = excluded.descuento, comentario_comprador = excluded.comentario_comprador,
   aplica_segmento = excluded.aplica_segmento, segmento_cliente = excluded.segmento_cliente, alcance_tipo = excluded.alcance_tipo,
   alcance_valor = excluded.alcance_valor, estado_registro = excluded.estado_registro, updated_at = excluded.updated_at,
-  dep_id = excluded.dep_id, ultima_modificacion_por = excluded.ultima_modificacion_por;
+  dep_id = excluded.dep_id,
+  usuario_crea = coalesce(nullif(excluded.usuario_crea, ''), public.promociones.usuario_crea),
+  usuario_edita = excluded.usuario_edita,
+  ultima_modificacion_por = excluded.ultima_modificacion_por;
 
 with src (legacy_comentario_id, actividad_id, row_id, alcance_comentario, prioridad, usuario, tipo_usuario, comentario, estado, fecha, fecha_resolucion) as (
 values

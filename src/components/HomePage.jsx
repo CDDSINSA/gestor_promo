@@ -1,5 +1,4 @@
 ﻿import React, { useMemo } from "react";
-import { motion } from "framer-motion";
 import {
   Bell,
   BellOff,
@@ -18,31 +17,35 @@ import { useAuth } from "../hooks/useAuth";
 import { usePermissions } from "../hooks/usePermissions";
 import { classNames } from "../utils/common";
 import {
-  getCompradorDivisiones,
-  getCompradorId,
+  getAuthorizedCompradoresForAppUser,
   getCompradorNombre,
-  sameDivision,
 } from "../utils/avanceHelpers";
 import { isActivityComment, isLineComment, normalizeActividad, normalizeCanal } from "../utils/promoHelpers";
 import { Button, Card, CardContent, Header, Metric } from "./ui";
 
-export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseStatus, isSyncing }) {
+export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], catalogoResumen = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseReady: domainSupabaseReady, supabaseStatus, isSyncing }) {
   const { appUser } = useAuth();
   const { can } = usePermissions();
   const catalogosVisibles = useMemo(() => (catalogos || []).filter((c) => String(c.estado).toLowerCase() !== "cerrado"), [catalogos]);
   const activos = catalogosVisibles.filter((c) => c.estado === "Activo").length;
-  const supabaseReady = hasSupabaseConnection(supabaseSettings);
+  const supabaseReady = domainSupabaseReady ?? hasSupabaseConnection(supabaseSettings);
   const statusType = supabaseStatus?.type || (supabaseReady ? "ready" : "idle");
   const statusMessage = supabaseStatus?.message || (supabaseReady ? "Conexión lista para actualizarse." : "Configure Supabase en Ajustes.");
   const currentRole = normalizeRole(appUser?.rol || appUser?.role);
   const buyerProfile = Array.isArray(appUser?.compradores) ? appUser.compradores[0] : appUser?.compradores;
   const currentBuyerName = buyerProfile?.comprador || appUser?.comprador || appUser?.nombre || "";
-  const currentBuyerId = String(appUser?.buyer_id || buyerProfile?.comprador_id || buyerProfile?.id || "").trim();
-  const currentBuyerEmail = normalizeCanal(appUser?.email || buyerProfile?.correo || "");
   const catalogStats = useMemo(() => {
-    const stats = new Map(catalogosVisibles.map((cat) => [cat.id, { compradores: new Set(), divisiones: new Set(), skus: new Set() }]));
+    const stats = new Map(catalogosVisibles.map((cat) => [cat.id, { compradores: new Set(), divisiones: new Set(), skus: new Set(), skusCount: null }]));
     const byKey = new Map();
     catalogosVisibles.forEach((cat) => [cat.id, cat.catalogo_id].filter(Boolean).forEach((key) => byKey.set(String(key), cat.id)));
+    (catalogoResumen || []).forEach((item) => {
+      const catalogId = byKey.get(String(item.actividad_id || item.actividadId || item.catalogo_id || ""));
+      if (!catalogId || !stats.has(catalogId)) return;
+      const stat = stats.get(catalogId);
+      if (item.comprador) stat.compradores.add(item.comprador);
+      if (item.division) stat.divisiones.add(item.division);
+      stat.skusCount = (stat.skusCount || 0) + (Number(item.skus_count || item.skusCount || item.skus || 0) || 0);
+    });
     rows.forEach((row) => {
       const rowCatalogKey = row.actividad_id || row.actividadId || row.catalogo_id || row.catalogoId;
       const catalogId = byKey.get(String(rowCatalogKey || ""));
@@ -53,8 +56,11 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       if (row.sku) stat.skus.add(row.sku);
     });
     return stats;
-  }, [catalogosVisibles, rows]);
+  }, [catalogosVisibles, catalogoResumen, rows]);
   const visibleRowsCount = useMemo(() => {
+    if ((catalogoResumen || []).length) {
+      return catalogoResumen.reduce((total, item) => total + (Number(item.promociones_count || item.promocionesCount || item.promociones || 0) || 0), 0);
+    }
     const catalogKeys = new Set();
     catalogosVisibles.forEach((cat) => {
       [cat.id, cat.catalogo_id].filter(Boolean).forEach((key) => catalogKeys.add(String(key)));
@@ -63,28 +69,19 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       const rowCatalogKey = row.actividad_id || row.actividadId || row.catalogo_id || row.catalogoId;
       return catalogKeys.has(String(rowCatalogKey || ""));
     }).length;
-  }, [catalogosVisibles, rows]);
+  }, [catalogosVisibles, catalogoResumen, rows]);
   const buyerOpenComments = useMemo(() => {
     if (currentRole !== ROLES.BUYER || !currentBuyerName) return 0;
-    const buyerKey = normalizeCanal(currentBuyerName);
-    const buyerConfig = (compradores || []).find((buyer) => {
-      const id = String(getCompradorId(buyer)).trim();
-      const name = normalizeCanal(getCompradorNombre(buyer));
-      const email = normalizeCanal(buyer.correo);
-      return (currentBuyerId && id === currentBuyerId)
-        || (buyerKey && name === buyerKey)
-        || (currentBuyerEmail && email === currentBuyerEmail);
-    }) || buyerProfile || {};
-    const buyerDivisions = getCompradorDivisiones(buyerConfig);
-    const hierarchyByDepId = new Map((jerarquiaCategorias || [])
-      .filter((item) => item?.activo !== false && (item.dep_id || item.depId || item.dept))
-      .map((item) => [normalizeCanal(item.dep_id || item.depId || item.dept), item.division || ""]));
-    const rowDivision = (row) => row.division || hierarchyByDepId.get(normalizeCanal(row.dep_id || row.depId || row.dept)) || "";
+    const authorizedBuyerNames = new Set(
+      getAuthorizedCompradoresForAppUser(appUser, compradores, true)
+        .map(getCompradorNombre)
+        .map(normalizeCanal)
+        .filter(Boolean)
+    );
+    if (!authorizedBuyerNames.size) authorizedBuyerNames.add(normalizeCanal(currentBuyerName));
     const rowBelongsToBuyer = (row, activity = {}) => {
-      const division = rowDivision(row);
-      if (buyerDivisions.length && division) return buyerDivisions.some((buyerDivision) => sameDivision(buyerDivision, division));
       const rowBuyer = row.comprador || activity.comprador || activity.solicitante || "";
-      return normalizeCanal(rowBuyer) === buyerKey;
+      return authorizedBuyerNames.has(normalizeCanal(rowBuyer));
     };
     const activityById = new Map((actividades || []).map((item) => {
       const activity = normalizeActividad(item);
@@ -109,7 +106,7 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       if (isActivityComment(comment)) return buyerActivityIds.has(activityId);
       return buyerRowIds.has(rowId) || buyerActivityIds.has(activityId);
     }).length;
-  }, [actividades, comentarios, compradores, currentBuyerEmail, currentBuyerId, currentBuyerName, currentRole, jerarquiaCategorias, rows]);
+  }, [actividades, appUser, comentarios, compradores, currentBuyerName, currentRole, rows]);
   const showBuyerCommentAlert = currentRole === ROLES.BUYER;
   const buyerCommentAlertCopy = buyerOpenComments
     ? `Tienes ${buyerOpenComments} comentario${buyerOpenComments === 1 ? "" : "s"} abierto${buyerOpenComments === 1 ? "" : "s"} de Mercadeo por revisar.`
@@ -160,14 +157,13 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
     <div className="catalog-grid">
       {catalogosVisibles.map((cat) => {
         const stats = catalogStats.get(cat.id) || { compradores: new Set(), divisiones: new Set(), skus: new Set() };
-        return <motion.div key={cat.id} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}>
-          <Card className="catalog-card">
+        return <Card key={cat.id} className="catalog-card">
             <div className={classNames("color-strip", cat.color)}></div>
             <CardContent>
               <div className="catalog-head">
                 <div>
                   <h3>{cat.nombre}</h3>
-                  <p className="catalog-note">{stats.compradores.size} compradores - {stats.divisiones.size} divisiones - {stats.skus.size} SKU</p>
+                  <p className="catalog-note">{stats.compradores.size} compradores - {stats.divisiones.size} divisiones - {stats.skusCount ?? stats.skus.size} SKU</p>
                   <p className="catalog-meta-row"><span>{cat.canal}</span><span><CalendarDays size={14}/>{cat.vigencia}</span></p>
                 </div>
                 <div className="catalog-status">
@@ -182,8 +178,7 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                 {can(PERMISSIONS.VIEW_AVANCES) && <Button className="full btn-avances" variant="outline" onClick={() => onOpenAvances?.(cat)}><ListChecks size={16}/> Avances</Button>}
               </div>
             </CardContent>
-          </Card>
-        </motion.div>;
+          </Card>;
       })}
     </div>
   </div>;

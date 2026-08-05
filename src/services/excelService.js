@@ -11,6 +11,33 @@
 import { formatPromotionValidationErrors, validatePromotions } from "./promotionValidationService";
 
 let xlsxModule;
+let skuMasterWorker;
+
+const DEFAULT_SKU_MASTER_IMPORT_LIMITS = {
+  maxBytes: 50 * 1024 * 1024,
+  maxRows: 170000,
+  maxColumns: 50,
+  fetchTimeoutMs: 30000,
+  workerTimeoutMs: 30000,
+};
+
+function getPositiveEnvNumber(name, fallback) {
+  const value = Number(import.meta.env?.[name] || 0);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+export const SKU_MASTER_IMPORT_LIMITS = {
+  maxBytes: getPositiveEnvNumber("VITE_SKU_MASTER_MAX_BYTES", DEFAULT_SKU_MASTER_IMPORT_LIMITS.maxBytes),
+  maxRows: getPositiveEnvNumber("VITE_SKU_MASTER_MAX_ROWS", DEFAULT_SKU_MASTER_IMPORT_LIMITS.maxRows),
+  maxColumns: getPositiveEnvNumber("VITE_SKU_MASTER_MAX_COLUMNS", DEFAULT_SKU_MASTER_IMPORT_LIMITS.maxColumns),
+  fetchTimeoutMs: getPositiveEnvNumber("VITE_SKU_MASTER_FETCH_TIMEOUT_MS", DEFAULT_SKU_MASTER_IMPORT_LIMITS.fetchTimeoutMs),
+  workerTimeoutMs: getPositiveEnvNumber("VITE_SKU_MASTER_WORKER_TIMEOUT_MS", DEFAULT_SKU_MASTER_IMPORT_LIMITS.workerTimeoutMs),
+};
+
+const SKU_MASTER_DB_NAME = "promo-sku-master";
+const SKU_MASTER_DB_VERSION = 1;
+const SKU_MASTER_STORE = "files";
+const SKU_MASTER_CACHE_KEY = "erp-publicado";
 
 async function loadXlsx() {
   if (!xlsxModule) xlsxModule = await import("xlsx");
@@ -74,6 +101,10 @@ function normalizeNumber(value) {
   const clean = String(value).replace(",", ".").replace("%", "").trim();
   const number = Number(clean);
   return Number.isNaN(number) ? value : number;
+}
+
+function valueOrDefault(value, fallback) {
+  return value === "" || value === null || value === undefined ? fallback : value;
 }
 
 function normalizeHeader(value) {
@@ -174,6 +205,206 @@ function normalizeSkuMasterRow(row) {
   };
 }
 
+function buildSkuMasterIndex(items = []) {
+  return items.reduce((acc, item) => {
+    acc[item.sku] = item;
+    return acc;
+  }, {});
+}
+
+function openSkuMasterDb() {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SKU_MASTER_DB_NAME, SKU_MASTER_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SKU_MASTER_STORE)) db.createObjectStore(SKU_MASTER_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readCachedSkuMaster() {
+  const db = await openSkuMasterDb();
+  if (!db) return null;
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(SKU_MASTER_STORE, "readonly");
+    const store = transaction.objectStore(SKU_MASTER_STORE);
+    const request = store.get(SKU_MASTER_CACHE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+}
+
+async function writeCachedSkuMaster(data) {
+  const db = await openSkuMasterDb();
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(SKU_MASTER_STORE, "readwrite");
+    const store = transaction.objectStore(SKU_MASTER_STORE);
+    store.put({ ...data, cachedAt: new Date().toISOString() }, SKU_MASTER_CACHE_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+}
+
+export async function clearCachedSkuMaster() {
+  const db = await openSkuMasterDb();
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(SKU_MASTER_STORE, "readwrite");
+    const store = transaction.objectStore(SKU_MASTER_STORE);
+    store.delete(SKU_MASTER_CACHE_KEY);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      reject(transaction.error);
+    };
+  });
+}
+
+function getSkuMasterWorker() {
+  if (!skuMasterWorker) {
+    skuMasterWorker = new Worker(new URL("../workers/skuMasterCsvWorker.js", import.meta.url), { type: "module" });
+  }
+  return skuMasterWorker;
+}
+
+function createAbortError(message = "Carga ERP cancelada.") {
+  try {
+    return new DOMException(message, "AbortError");
+  } catch {
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function assertNotAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+function parseSkuMasterCsvInWorker(buffer, { limits = SKU_MASTER_IMPORT_LIMITS, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    assertNotAborted(signal);
+    const worker = getSkuMasterWorker();
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let timeoutId;
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      worker.removeEventListener("message", onMessage);
+      worker.removeEventListener("error", onError);
+    };
+    const onMessage = (event) => {
+      if (event.data?.id !== id) return;
+      cleanup();
+      if (event.data.error) reject(new Error(event.data.error));
+      else resolve(event.data.result);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => {
+      cleanup();
+      worker.terminate();
+      skuMasterWorker = null;
+      reject(createAbortError());
+    };
+    timeoutId = window.setTimeout(() => {
+      cleanup();
+      worker.terminate();
+      skuMasterWorker = null;
+      reject(new Error("El archivo ERP excedio el tiempo maximo de procesamiento."));
+    }, limits.workerTimeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError);
+    worker.postMessage({ id, buffer, limits }, [buffer]);
+  });
+}
+
+async function readResponseBuffer(response, onProgress, { limits = SKU_MASTER_IMPORT_LIMITS, signal } = {}) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (contentLength > limits.maxBytes) throw new Error(`El archivo ERP supera el limite permitido (${Math.round(limits.maxBytes / 1024 / 1024)} MB).`);
+  if (!response.body) {
+    assertNotAborted(signal);
+    onProgress?.(70);
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > limits.maxBytes) throw new Error(`El archivo ERP supera el limite permitido (${Math.round(limits.maxBytes / 1024 / 1024)} MB).`);
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  let done = false;
+  while (!done) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => undefined);
+      throw createAbortError();
+    }
+    const result = await reader.read();
+    done = result.done;
+    if (result.value) {
+      chunks.push(result.value);
+      received += result.value.length;
+      if (received > limits.maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(`El archivo ERP supera el limite permitido (${Math.round(limits.maxBytes / 1024 / 1024)} MB).`);
+      }
+      if (contentLength > 0) onProgress?.(Math.min(70, 25 + Math.round((received / contentLength) * 45)));
+    }
+  }
+  if (contentLength <= 0) onProgress?.(70);
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return bytes.buffer;
+}
+
+function getRemoteSkuMasterHeaders(cached) {
+  const headers = {};
+  if (cached?.etag) headers["If-None-Match"] = cached.etag;
+  if (cached?.lastModified) headers["If-Modified-Since"] = cached.lastModified;
+  return headers;
+}
+
+function toCachedSkuMasterResult(cached, cacheReason = "") {
+  return {
+    skuMaster: cached.skuMaster || {},
+    skuMasterCount: cached.skuMasterCount || 0,
+    sheetName: cached.sheetName || "CSV",
+    etag: cached.etag || "",
+    lastModified: cached.lastModified || "",
+    cachedAt: cached.cachedAt || "",
+    cacheReason,
+    fromCache: true,
+  };
+}
+
 function createId(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
@@ -269,10 +500,10 @@ function normalizePromocion(row) {
     num_parte: row.num_parte || "",
     descripcion: row.descripcion || "",
     tipo_cantidad: row.tipo_cantidad || "Exacta",
-    cantidad_minima: normalizeNumber(row.cantidad_minima || 1),
+    cantidad_minima: normalizeNumber(valueOrDefault(row.cantidad_minima, 1)),
     precio_antes: normalizeNumber(row.precio_antes),
     precio_ahora: normalizeNumber(row.precio_ahora),
-    descuento: row.descuento || "",
+    descuento: valueOrDefault(row.descuento, ""),
     comentario_comprador: row.comentario_comprador || "",
     aplica_segmento: aplicaSegmento,
     segmento: aplicaSegmento === "SI" ? segmentoCliente || "" : "Todos",
@@ -282,7 +513,9 @@ function normalizePromocion(row) {
     estado_registro: row.estado_registro || "BORRADOR",
     fecha_creacion: row.fecha_creacion || new Date().toISOString(),
     fecha_modificacion: row.fecha_modificacion || "",
-    ultima_modificacion_por: row.ultima_modificacion_por || "",
+    usuario_crea: row.usuario_crea || row.usuarioCrea || "",
+    usuario_edita: row.usuario_edita || row.usuarioEdita || row.ultima_modificacion_por || "",
+    ultima_modificacion_por: row.ultima_modificacion_por || row.usuario_edita || row.usuarioEdita || "",
   };
 }
 
@@ -446,52 +679,73 @@ export async function loadSkuMasterFromExcel(file) {
   if (!firstSheetName) throw new Error("El archivo comprador no contiene hojas.");
   const items = sheetToJson(workbook, firstSheetName).map(normalizeSkuMasterRow).filter(Boolean);
   if (!items.length) throw new Error("No se encontraron SKU en el archivo comprador.");
-  const skuMaster = items.reduce((acc, item) => {
-    acc[item.sku] = item;
-    return acc;
-  }, {});
-  return { items, skuMaster, sheetName: firstSheetName };
+  const skuMaster = buildSkuMasterIndex(items);
+  return { skuMaster, skuMasterCount: items.length, sheetName: firstSheetName };
 }
 
-export async function loadSkuMasterFromCsvUrl(url, onProgress) {
-  const XLSX = await loadXlsx();
-  onProgress?.(10);
-  const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`No se pudo descargar el archivo ERP (${response.status}).`);
-  onProgress?.(25);
-  let csvText = "";
-  const contentLength = Number(response.headers.get("content-length") || 0);
-  if (response.body && contentLength > 0) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let received = 0;
-    let done = false;
-    while (!done) {
-      const result = await reader.read();
-      done = result.done;
-      if (result.value) {
-        received += result.value.length;
-        csvText += decoder.decode(result.value, { stream: !done });
-        onProgress?.(Math.min(70, 25 + Math.round((received / contentLength) * 45)));
+export async function loadSkuMasterFromCsvUrl(url, onProgress, { signal, limits = SKU_MASTER_IMPORT_LIMITS } = {}) {
+  const cached = await readCachedSkuMaster().catch(() => null);
+  const headers = getRemoteSkuMasterHeaders(cached);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, limits.fetchTimeoutMs);
+  const abortCurrentRequest = () => controller.abort();
+  signal?.addEventListener("abort", abortCurrentRequest, { once: true });
+  const requestOptions = { cache: "no-cache", headers, signal: controller.signal };
+  try {
+    onProgress?.(10);
+    let response;
+    try {
+      assertNotAborted(signal);
+      response = await fetch(url, requestOptions);
+    } catch (error) {
+      if (signal?.aborted) throw createAbortError();
+      if (timedOut && cached?.skuMaster) return toCachedSkuMasterResult(cached);
+      if (!Object.keys(headers).length) {
+        if (cached?.skuMaster) return toCachedSkuMasterResult(cached);
+        throw timedOut ? new Error("La descarga del archivo ERP excedio el tiempo maximo permitido.") : error;
       }
+      response = await fetch(url, { cache: "no-cache", signal: controller.signal }).catch((retryError) => {
+        if (signal?.aborted) throw createAbortError();
+        if (cached?.skuMaster) return null;
+        throw retryError;
+      });
+      if (!response) return toCachedSkuMasterResult(cached);
     }
-    csvText += decoder.decode();
-  } else {
-    csvText = await response.text();
-    onProgress?.(70);
+    if (response.status === 304 && cached?.skuMaster) {
+      onProgress?.(100);
+      return toCachedSkuMasterResult(cached);
+    }
+    if (!response.ok) {
+      if (cached?.skuMaster) return toCachedSkuMasterResult(cached);
+      throw new Error(`No se pudo descargar el archivo ERP (${response.status}).`);
+    }
+    onProgress?.(25);
+    const buffer = await readResponseBuffer(response, onProgress, { limits, signal: controller.signal });
+    onProgress?.(85);
+    const parsed = await parseSkuMasterCsvInWorker(buffer, { limits, signal: controller.signal });
+    if (!parsed.skuMasterCount) throw new Error("No se encontraron SKU en el archivo ERP.");
+    const data = {
+      ...parsed,
+      etag: response.headers.get("etag") || "",
+      lastModified: response.headers.get("last-modified") || "",
+    };
+    await writeCachedSkuMaster(data).catch(() => undefined);
+    onProgress?.(100);
+    return data;
+  } catch (error) {
+    if (signal?.aborted) throw createAbortError();
+    if (timedOut && cached?.skuMaster) return toCachedSkuMasterResult(cached, "La descarga excedio el tiempo maximo permitido.");
+    if (isAbortError(error) && cached?.skuMaster) return toCachedSkuMasterResult(cached, error.message || "La descarga fue interrumpida.");
+    if (cached?.skuMaster) return toCachedSkuMasterResult(cached, error.message || "No se pudo validar el origen ERP.");
+    throw timedOut ? new Error("La descarga del archivo ERP excedio el tiempo maximo permitido.") : error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", abortCurrentRequest);
   }
-  onProgress?.(85);
-  const workbook = XLSX.read(csvText, { type: "string", raw: false });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) throw new Error("El archivo ERP no contiene datos.");
-  const items = sheetToJson(workbook, firstSheetName).map(normalizeSkuMasterRow).filter(Boolean);
-  if (!items.length) throw new Error("No se encontraron SKU en el archivo ERP.");
-  const skuMaster = items.reduce((acc, item) => {
-    acc[item.sku] = item;
-    return acc;
-  }, {});
-  onProgress?.(100);
-  return { items, skuMaster, sheetName: firstSheetName };
 }
 
 export function buildConsolidado(promociones, comentarios = [], actividades = []) {
@@ -530,6 +784,8 @@ export function buildConsolidado(promociones, comentarios = [], actividades = []
       total_comentarios: comentariosRow.length,
       comentarios_actividad: formatComments(comentariosActividad),
       comentarios_actividad_abiertos: comentariosActividad.filter((item) => String(item.estado).toUpperCase() === "ABIERTO").length,
+      usuario_crea: promo.usuario_crea,
+      usuario_edita: promo.usuario_edita,
       fecha_modificacion: promo.fecha_modificacion,
       ultima_modificacion_por: promo.ultima_modificacion_por,
     };

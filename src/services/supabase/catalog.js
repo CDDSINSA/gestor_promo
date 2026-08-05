@@ -6,8 +6,18 @@ import {
   toPromotionRow,
 } from "./mappers";
 
-const OPERATIONAL_PROMOTION_WINDOW_DAYS = 60;
-const CLOSED_ACTIVITY_STATUSES = new Set(["cerrado", "cerrada", "cancelado", "cancelada"]);
+const CLOSED_ACTIVITY_STATUSES = new Set([
+  "archivado",
+  "archivada",
+  "cancelado",
+  "cancelada",
+  "cerrado",
+  "cerrada",
+  "finalizado",
+  "finalizada",
+  "resuelto",
+  "resuelta",
+]);
 
 function normalizeStatus(value) {
   return String(value || "")
@@ -17,26 +27,29 @@ function normalizeStatus(value) {
     .toLowerCase();
 }
 
-function parseDateOnly(value) {
-  if (!value) return null;
-  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
+function isOpenActivity(campana = {}) {
+  return !CLOSED_ACTIVITY_STATUSES.has(normalizeStatus(campana.estado));
 }
 
-function getOperationalPromotionCampanaIds(campanas = []) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - OPERATIONAL_PROMOTION_WINDOW_DAYS);
-  cutoff.setHours(0, 0, 0, 0);
+async function loadCatalogSummary(connection) {
+  try {
+    return await selectAll(connection, "v_catalogo_resumen", {
+      order: "actividad_id.asc",
+    });
+  } catch {
+    return [];
+  }
+}
 
-  return campanas
-    .filter((campana) => {
-      const status = normalizeStatus(campana.estado);
-      const endDate = parseDateOnly(campana.fecha_fin);
-      if (!CLOSED_ACTIVITY_STATUSES.has(status)) return true;
-      return endDate ? endDate >= cutoff : false;
-    })
-    .map((campana) => campana.id)
-    .filter(Boolean);
+async function loadOpenCampanas(connection) {
+  try {
+    return await selectAll(connection, "v_catalogos_operativos", {
+      order: "created_at.asc",
+    });
+  } catch {
+    const rows = await selectAll(connection, "campanas", { order: "created_at.asc" });
+    return (rows || []).filter(isOpenActivity);
+  }
 }
 
 export async function pingSupabaseConnection(connection) {
@@ -252,28 +265,39 @@ export async function loadPromotionScopeFromSupabase(connection, { actividadId, 
 export async function loadCatalogFromSupabase(connection) {
   const [
     compradores,
-    campanas,
+    allCampanas,
     segmentos,
     responsables,
     jerarquias,
-    avances,
-    notificaciones,
     config,
   ] = await Promise.all([
     selectAll(connection, "compradores", { order: "comprador.asc" }),
-    selectAll(connection, "campanas", { order: "created_at.asc" }),
+    loadOpenCampanas(connection),
     selectAll(connection, "segmentos_clientes", { order: "orden.asc" }),
     selectAll(connection, "responsables_solicitudes", { order: "nombre.asc" }),
     selectAll(connection, "jerarquia_categorias", { order: "dep_id.asc" }),
-    selectAll(connection, "avances_catalogo", { order: "fecha_estado.asc" }),
-    selectAll(connection, "notificaciones", { order: "created_at.asc" }),
     selectAll(connection, "configuracion"),
   ]);
 
-  const operationalCampanaIds = getOperationalPromotionCampanaIds(campanas);
-  const promociones = operationalCampanaIds.length
-    ? await selectRowsByValues(connection, "promociones", "campana_id", operationalCampanaIds)
-    : [];
+  const campanas = allCampanas || [];
+  const campanaIds = campanas.map((item) => item.id).filter(Boolean);
+  const [
+    avances,
+    notificaciones,
+    catalogoResumen,
+    promociones,
+  ] = await Promise.all([
+    campanaIds.length
+      ? selectRowsByValues(connection, "avances_catalogo", "campana_id", campanaIds)
+      : [],
+    campanaIds.length
+      ? selectRowsByValues(connection, "notificaciones", "campana_id", campanaIds)
+      : [],
+    loadCatalogSummary(connection),
+    campanaIds.length
+      ? selectRowsByValues(connection, "promociones", "campana_id", campanaIds)
+      : [],
+  ]);
   promociones.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
 
   const promotionIds = promociones.map((item) => item.id).filter(Boolean);
@@ -284,11 +308,12 @@ export async function loadCatalogFromSupabase(connection) {
     promotionIds.length
       ? selectRowsByValues(connection, "comentarios", "promocion_id", promotionIds)
       : [],
-    operationalCampanaIds.length
-      ? selectRowsByValues(connection, "comentarios", "campana_id", operationalCampanaIds)
+    campanaIds.length
+      ? selectRowsByValues(connection, "comentarios", "campana_id", campanaIds)
       : [],
   ]);
   detalles.sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
+
   const comentariosById = new Map();
   [...lineComments, ...activityComments].forEach((item) => {
     if (item?.id) comentariosById.set(item.id, item);
@@ -299,18 +324,7 @@ export async function loadCatalogFromSupabase(connection) {
   const compradorById = keyBy(compradores, "id");
   const campanaById = keyBy(campanas, "id");
   const promoById = keyBy(promociones, "id");
-  const hierarchyByDepId = Object.fromEntries(
-    (jerarquias || [])
-      .filter((item) => item.activo !== false && item.dep_id)
-      .map((item) => [
-        String(item.dep_id || "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, ""),
-        item,
-      ])
-  );
+  const hierarchyByDepId = buildHierarchyByDepId(jerarquias);
 
   return {
     config: config.map((item) => ({ clave: item.clave, valor: JSON.stringify(item.valor || {}), descripcion: item.descripcion })),
@@ -323,20 +337,10 @@ export async function loadCatalogFromSupabase(connection) {
       activo: item.activo,
       orden: item.orden,
     })),
+    catalogo_resumen: catalogoResumen,
     compradores,
     responsables_solicitudes: responsables,
     jerarquia_categorias: jerarquias,
-    avances_catalogo: avances.map((item) => ({
-      avance_id: item.avance_id,
-      catalogo_id: item.catalogo_id,
-      catalogo: item.catalogo,
-      comprador_id: item.comprador_id,
-      comprador: item.comprador,
-      division: item.division,
-      estado: item.estado,
-      fecha_estado: item.fecha_estado,
-      usuario: item.usuario,
-    })),
     promociones: promociones.map((item) => toPromotionRow(item, campanaById, compradorById, hierarchyByDepId)),
     promociones_detalle: detalles.map((item) => {
       const promo = promoById[item.promocion_id] || {};
@@ -370,7 +374,17 @@ export async function loadCatalogFromSupabase(connection) {
         fecha_resolucion: item.fecha_resolucion || "",
       };
     }),
-    logs: [],
+    avances_catalogo: avances.map((item) => ({
+      avance_id: item.avance_id,
+      catalogo_id: item.catalogo_id,
+      catalogo: item.catalogo,
+      comprador_id: item.comprador_id,
+      comprador: item.comprador,
+      division: item.division,
+      estado: item.estado,
+      fecha_estado: item.fecha_estado,
+      usuario: item.usuario,
+    })),
     notificaciones: notificaciones.map((item) => ({
       actividad_id: campanaById[item.campana_id]?.legacy_actividad_id || "",
       correo: item.correo,
@@ -384,7 +398,7 @@ export async function loadLogsFromSupabase(connection, options = {}) {
   const page = Math.max(1, Number(options.page || 1));
   const offset = (page - 1) * pageSize;
   const logs = await selectAll(connection, "logs", {
-    select: "id,created_at,usuario,campana_id,promocion_id,accion,campo,valor_anterior,valor_nuevo,request_id,fecha_cierre",
+    select: "id,created_at,usuario,rol,entidad,entidad_id,registro,campana_id,promocion_id,accion,campo,valor_anterior,valor_nuevo,request_id,operation_id,origen,contexto,fecha_cierre",
     order: "created_at.desc",
     limit: pageSize + 1,
     offset,
@@ -416,12 +430,19 @@ export async function loadLogsFromSupabase(connection, options = {}) {
         log_id: item.request_id || item.id,
         fecha: item.created_at,
         usuario: item.usuario,
+        rol: item.rol || "",
+        entidad: item.entidad || "",
+        entidad_id: item.entidad_id || "",
+        registro: item.registro || "",
         catalogo: campana.legacy_actividad_id || "",
         accion: item.accion,
         row_id: promo.legacy_row_id || "",
         campo: item.campo,
         valor_anterior: item.valor_anterior,
         valor_nuevo: item.valor_nuevo,
+        operation_id: item.operation_id || "",
+        origen: item.origen || "",
+        contexto: item.contexto || {},
         fecha_cierre: item.fecha_cierre || "",
       };
     }),

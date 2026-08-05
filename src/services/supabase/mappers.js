@@ -106,7 +106,10 @@ export function toPromotionRow(row, campanaById = {}, compradorById = {}, hierar
     estado_registro: row.estado_registro,
     fecha_creacion: row.created_at,
     fecha_modificacion: row.updated_at,
+    usuario_crea: row.usuario_crea,
+    usuario_edita: row.usuario_edita || row.ultima_modificacion_por,
     ultima_modificacion_por: row.ultima_modificacion_por,
+    version: row.version,
   };
 }
 
@@ -180,7 +183,7 @@ export function toDbPromocion(row, campanaByLegacy = {}, compradorByName = {}) {
     num_parte: cleanText(row.num_parte),
     descripcion: cleanText(row.descripcion),
     tipo_cantidad: cleanText(row.tipo_cantidad) || "Exacta",
-    cantidad_minima: toNumber(row.cantidad_minima) || 1,
+    cantidad_minima: toNumber(row.cantidad_minima) ?? 1,
     precio_antes: toNumber(row.precio_antes),
     precio_ahora: toNumber(row.precio_ahora),
     descuento: cleanText(row.descuento),
@@ -191,6 +194,8 @@ export function toDbPromocion(row, campanaByLegacy = {}, compradorByName = {}) {
     alcance_valor: cleanText(row.alcance_valor),
     estado_registro: cleanText(row.estado_registro) || "BORRADOR",
     dep_id: cleanText(row.dep_id),
+    usuario_crea: cleanText(row.usuario_crea),
+    usuario_edita: cleanText(row.usuario_edita || row.ultima_modificacion_por),
     ultima_modificacion_por: cleanText(row.ultima_modificacion_por),
   };
 }

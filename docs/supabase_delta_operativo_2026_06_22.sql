@@ -87,7 +87,27 @@ $$;
 
 alter table public.promociones
   add column if not exists dep_id text not null default '',
-  add column if not exists ultima_modificacion_por text not null default '';
+  add column if not exists usuario_crea text not null default '',
+  add column if not exists usuario_edita text not null default '',
+  add column if not exists ultima_modificacion_por text not null default '',
+  add column if not exists version bigint not null default 1;
+
+alter table public.promociones
+  drop constraint if exists promociones_version_positive_check;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'promociones_version_positive_check'
+      and conrelid = 'public.promociones'::regclass
+  ) then
+    alter table public.promociones
+      add constraint promociones_version_positive_check
+      check (version > 0);
+  end if;
+end;
+$$;
 
 alter table public.promociones
   drop constraint if exists promociones_estado_registro_check;
@@ -222,6 +242,11 @@ create trigger avances_catalogo_set_updated_at
 before update on public.avances_catalogo
 for each row execute function public.set_updated_at();
 
+drop trigger if exists avances_catalogo_audit_row_change on public.avances_catalogo;
+create trigger avances_catalogo_audit_row_change
+after insert or update or delete on public.avances_catalogo
+for each row execute function public.audit_business_row_change();
+
 create index if not exists idx_responsables_solicitudes_activo on public.responsables_solicitudes(activo);
 create index if not exists idx_jerarquia_categorias_division on public.jerarquia_categorias(division);
 create index if not exists idx_avances_catalogo_campana on public.avances_catalogo(campana_id);
@@ -279,6 +304,8 @@ select
   count(cm.id) as total_comentarios,
   coalesce(ca.comentarios_actividad, '') as comentarios_actividad,
   coalesce(ca.comentarios_actividad_abiertos, 0) as comentarios_actividad_abiertos,
+  p.usuario_crea,
+  p.usuario_edita,
   p.updated_at as fecha_modificacion,
   p.ultima_modificacion_por
 from public.promociones p
@@ -293,7 +320,7 @@ group by c.legacy_actividad_id, p.oferta_id, c.tipo_actividad, c.canal, p.alcanc
   p.variante, p.sku, p.num_parte, p.descripcion, p.tipo_cantidad, p.cantidad_minima,
   p.precio_antes, p.precio_ahora, p.descuento, p.comentario_comprador, p.aplica_segmento,
   p.segmento_cliente, p.estado_registro, ca.comentarios_actividad,
-  ca.comentarios_actividad_abiertos, p.updated_at, p.ultima_modificacion_por;
+  ca.comentarios_actividad_abiertos, p.usuario_crea, p.usuario_edita, p.updated_at, p.ultima_modificacion_por;
 
 create or replace view public.export_pricing
 with (security_invoker = true) as

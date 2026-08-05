@@ -1,10 +1,15 @@
 export {
+  abortActiveSupabaseRequests,
+  SUPABASE_CONNECTION_OVERRIDES_ENABLED,
+} from "./config";
+export {
   SUPABASE_PROJECT_URL,
   getAuthRedirectUrl,
   getDefaultSupabaseConnection,
   hasSupabaseConnection,
   loadAuthUserFromSession,
   loadAppUserProfile,
+  loadRecoverySessionFromUrl,
   loadStoredAppSession,
   loadStoredSupabaseConnection,
   requestPasswordRecovery,

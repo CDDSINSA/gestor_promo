@@ -1,7 +1,7 @@
 ﻿import React, { useState } from "react";
 import { Plus, Save, Search, FileSpreadsheet, Trash2 } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
-import { SUPABASE_PROJECT_URL } from "../services/supabaseService";
+import { SUPABASE_CONNECTION_OVERRIDES_ENABLED, SUPABASE_PROJECT_URL } from "../services/supabaseService";
 import { classNames, formatVigenciaRange, makeId } from "../utils/common";
 import { Button, Card, CardContent, Header } from "./ui";
 import {
@@ -31,6 +31,8 @@ export default function AjustesPage({
   setCatalogos,
   compradores,
   setCompradores,
+  rows = [],
+  actividades = [],
   supabaseSettings,
   setSupabaseSettings,
   onSaveSupabaseSettings,
@@ -50,6 +52,7 @@ export default function AjustesPage({
   const selectedBuyer = compradores[activeBuyerIndex];
   const selectedBuyerActive = selectedBuyer?.activo !== false;
   const selectedBuyerCategoria = getCompradorCategoria(selectedBuyer) || "Senior";
+  const canEditSupabaseConnection = SUPABASE_CONNECTION_OVERRIDES_ENABLED;
   const seniorOptions = compradores
     .filter((buyer, index) => index !== activeBuyerIndex && buyer.activo !== false && !isCompradorJunior(buyer))
     .map((buyer) => ({ id: getCompradorId(buyer), nombre: getCompradorNombre(buyer) }))
@@ -123,6 +126,16 @@ export default function AjustesPage({
 
   const updateSupabase = (field, value) => setSupabaseSettings((prev) => ({ ...prev, [field]: value }));
 
+  const getBuyerImpact = (buyer) => {
+    const buyerId = getCompradorId(buyer);
+    const buyerName = getCompradorNombre(buyer);
+    const buyerKeys = new Set([buyerId, buyerName].map((value) => String(value || "").trim()).filter(Boolean));
+    const hasBuyerKey = (item, fields) => fields.some((field) => buyerKeys.has(String(item?.[field] || "").trim()));
+    const promociones = rows.filter((row) => hasBuyerKey(row, ["comprador_id", "compradorId", "comprador"])).length;
+    const solicitudes = actividades.filter((activity) => hasBuyerKey(activity, ["comprador_id", "compradorId", "comprador", "solicitante"])).length;
+    return { promociones, solicitudes };
+  };
+
   const addComprador = () => {
     const nombre = `Nuevo comprador ${compradores.length + 1}`;
     setCompradores((prev) => [...prev, { comprador_id: nextCompradorId(), categoria_comprador: "Senior", comprador: nombre, nombre, division: "", correo: "", senior_id: "", activo: true }]);
@@ -142,12 +155,14 @@ export default function AjustesPage({
     }));
   };
 
-  const toggleComprador = () => updateComprador("activo", !selectedBuyerActive);
-  const deleteComprador = () => {
+  const toggleComprador = () => {
     if (!selectedBuyer) return;
-    const remaining = compradores.filter((_, index) => index !== activeBuyerIndex);
-    setCompradores(remaining);
-    setSelectedBuyerIndex(Math.max(0, Math.min(activeBuyerIndex, remaining.length - 1)));
+    if (selectedBuyerActive) {
+      const impact = getBuyerImpact(selectedBuyer);
+      const confirmed = window.confirm(`Va a inactivar este comprador.\n\nPromociones afectadas: ${impact.promociones}\nSolicitudes asociadas: ${impact.solicitudes}\n\nLas referencias historicas se conservaran y el comprador podra reactivarse.`);
+      if (!confirmed) return;
+    }
+    updateComprador("activo", !selectedBuyerActive);
   };
 
   return <div className="settings-page">
@@ -163,7 +178,7 @@ export default function AjustesPage({
         <div className="toolbar">
           <h2>Configuracion general</h2>
           <div className="toolbar-actions">
-            <Button className="settings-btn-save" onClick={onSaveSupabaseSettings} disabled={isSyncing}><Save size={16}/> Guardar conexion</Button>
+            <Button className="settings-btn-save" onClick={onSaveSupabaseSettings} disabled={isSyncing || !canEditSupabaseConnection}><Save size={16}/> {canEditSupabaseConnection ? "Guardar conexion" : "Conexion fija"}</Button>
             <Button className="settings-btn-test" variant="outline" onClick={onTestSupabaseConnection} disabled={isSyncing}><Search size={16}/> Probar</Button>
             <Button className="settings-btn-validate" variant="outline" onClick={onValidateSupabaseSession} disabled={isSyncing}><FileSpreadsheet size={16}/> Validar sesion</Button>
           </div>
@@ -172,16 +187,27 @@ export default function AjustesPage({
           <div>
             <strong>Conexion Supabase</strong>
             <span>{SUPABASE_PROJECT_URL}</span>
-            <p>{supabaseStatus?.message || "Configure Supabase para operar con la sesion del usuario actual."}</p>
+            <p>{supabaseStatus?.message || (canEditSupabaseConnection ? "Configure Supabase para operar con la sesion del usuario actual." : "La conexion se toma de las variables de entorno del despliegue.")}</p>
           </div>
-          <label className="field wide">
-            <span>URL Supabase</span>
-            <input value={supabaseSettings.url || ""} onChange={(e) => updateSupabase("url", e.target.value)} placeholder="https://hanvbbezofcengyorooc.supabase.co" />
-          </label>
-          <label className="field">
-            <span>Anon key</span>
-            <input type="password" value={supabaseSettings.anonKey || ""} onChange={(e) => updateSupabase("anonKey", e.target.value)} placeholder="sb_publishable_..." />
-          </label>
+          {canEditSupabaseConnection ? <>
+            <label className="field wide">
+              <span>URL Supabase</span>
+              <input value={supabaseSettings.url || ""} onChange={(e) => updateSupabase("url", e.target.value)} placeholder="https://hanvbbezofcengyorooc.supabase.co" />
+            </label>
+            <label className="field">
+              <span>Anon key</span>
+              <input type="password" value={supabaseSettings.anonKey || ""} onChange={(e) => updateSupabase("anonKey", e.target.value)} placeholder="sb_publishable_..." />
+            </label>
+          </> : <>
+            <label className="field wide">
+              <span>URL Supabase</span>
+              <input value={SUPABASE_PROJECT_URL} readOnly />
+            </label>
+            <label className="field">
+              <span>Anon key</span>
+              <input type="password" value={supabaseSettings.anonKey ? "********" : ""} readOnly />
+            </label>
+          </>}
         </div>
       </CardContent>
     </Card>}
@@ -226,7 +252,7 @@ export default function AjustesPage({
             </label>}
             <div className="button-row">
               <Button className={selectedBuyerActive ? "settings-btn-warning" : "settings-btn-save"} variant="outline" onClick={toggleComprador}>{selectedBuyerActive ? "Inactivar" : "Activar"}</Button>
-              <Button className="settings-btn-danger" variant="outline" onClick={deleteComprador}><Trash2 size={16}/> Quitar</Button>
+              <Button className="settings-btn-danger" variant="outline" disabled title="La eliminacion fisica esta deshabilitada; inactive el comprador para conservar referencias."><Trash2 size={16}/> Quitar</Button>
             </div>
           </div> : <div className="empty-state">Agregue compradores para habilitar la seleccion.</div>}
         </div>
@@ -251,7 +277,7 @@ export default function AjustesPage({
             <h2>Configuracion del catalogo</h2>
             <div className="toolbar-actions">
               <Button className="settings-btn-save" onClick={() => onSaveCatalogSettings({ catalogos })} disabled={isSyncing || !selected}><Save size={16}/> Guardar catalogos</Button>
-              <Button className="settings-btn-danger" variant="outline" onClick={deleteSelected} disabled={isSyncing || !selected || catalogos.length <= 1}><Trash2 size={16}/> Borrar</Button>
+              <Button className="settings-btn-danger" variant="outline" onClick={deleteSelected} disabled title="La eliminacion fisica de catalogos esta deshabilitada hasta que el RPC soporte archivado explicito."><Trash2 size={16}/> Borrar</Button>
             </div>
           </div>
           <div className="form-grid">

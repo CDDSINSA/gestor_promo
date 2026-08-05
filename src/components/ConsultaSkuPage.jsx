@@ -213,7 +213,7 @@ export default function ConsultaSkuPage({ rows = [], actividades = [] }) {
                 <td>{getRowValue(row, "grupoOferta", "grupo_oferta") || getRowValue(row, "ofertaId", "oferta_id")}</td>
                 <td>{getRowValue(row, "tipoPromo", "tipo_promo")}</td>
                 <td>{getRowValue(row, "precioAhora", "precio_ahora")}</td>
-                <td>{row.descuento || ""}</td>
+                <td>{row.descuento ?? ""}</td>
                 <td>{getRowValue(row, "tipoSku", "tipo_sku")}</td>
                 <td>{row.descripcion || ""}</td>
               </tr>)}

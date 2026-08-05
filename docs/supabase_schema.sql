@@ -59,7 +59,7 @@ create table if not exists public.configuracion (
 
 create table if not exists public.campanas (
   id uuid primary key default gen_random_uuid(),
-  legacy_actividad_id text unique,
+  legacy_actividad_id text not null unique check (length(trim(legacy_actividad_id)) > 0),
   tipo_actividad text not null default 'CATALOGO' check (tipo_actividad in ('CATALOGO', 'ESPECIAL')),
   nombre_actividad text not null,
   canal text not null default '',
@@ -133,7 +133,10 @@ create table if not exists public.promociones (
   segmento_cliente text not null default '',
   alcance_tipo text not null default '' check (alcance_tipo in ('', 'CANAL', 'SEGMENTO', 'TIENDA', 'MULTI_TIENDA')),
   alcance_valor text not null default '',
-  estado_registro text not null default 'BORRADOR' check (estado_registro in ('BORRADOR', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'CERRADO')),
+  estado_registro text not null default 'BORRADOR' check (estado_registro in ('BORRADOR', 'REGISTRADO', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'CERRADO', 'ANULADO')),
+  usuario_crea text not null default '',
+  usuario_edita text not null default '',
+  version bigint not null default 1 check (version > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   updated_by uuid references public.usuarios_app(id),
@@ -181,9 +184,12 @@ create table if not exists public.comentarios (
 create table if not exists public.logs (
   id uuid primary key default gen_random_uuid(),
   usuario_id uuid references public.usuarios_app(id),
+  actor_auth_user_id uuid,
   usuario text not null default '',
+  rol text not null default '',
   entidad text not null default 'PROMOCIONES',
   entidad_id uuid,
+  registro text not null default '',
   campana_id uuid references public.campanas(id) on delete set null,
   promocion_id uuid references public.promociones(id) on delete set null,
   accion text not null,
@@ -191,6 +197,9 @@ create table if not exists public.logs (
   valor_anterior text not null default '',
   valor_nuevo text not null default '',
   request_id text not null default '',
+  operation_id text not null default '',
+  origen text not null default 'db',
+  contexto jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   fecha_cierre timestamptz
 );
@@ -259,6 +268,154 @@ as $$
 $$;
 
 -- =========================================================
+-- Auditoria confiable
+-- =========================================================
+
+create or replace function public.insert_audit_log(
+  p_entidad text,
+  p_accion text,
+  p_entidad_id uuid default null,
+  p_registro text default '',
+  p_campo text default '',
+  p_valor_anterior text default '',
+  p_valor_nuevo text default '',
+  p_campana_id uuid default null,
+  p_promocion_id uuid default null,
+  p_request_id text default '',
+  p_operation_id text default '',
+  p_origen text default 'db',
+  p_contexto jsonb default '{}'::jsonb,
+  p_fecha_cierre timestamptz default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_log_id uuid;
+  v_usuario_id uuid;
+  v_usuario text := '';
+  v_rol text := '';
+begin
+  select id, coalesce(nullif(nombre, ''), nullif(email, ''), ''), rol
+  into v_usuario_id, v_usuario, v_rol
+  from public.usuarios_app
+  where auth_user_id = auth.uid()
+    and activo = true
+  limit 1;
+
+  if v_usuario_id is null or nullif(v_rol, '') is null then
+    raise exception 'No hay usuario activo autorizado para registrar auditoria.'
+      using errcode = '42501';
+  end if;
+
+  if nullif(p_entidad, '') is null or nullif(p_accion, '') is null then
+    raise exception 'La auditoria requiere entidad y accion.';
+  end if;
+
+  insert into public.logs (
+    usuario_id, actor_auth_user_id, usuario, rol, entidad, entidad_id, registro,
+    campana_id, promocion_id, accion, campo, valor_anterior, valor_nuevo,
+    request_id, operation_id, origen, contexto, created_at, fecha_cierre
+  )
+  values (
+    v_usuario_id, auth.uid(), v_usuario, v_rol, p_entidad, p_entidad_id, coalesce(p_registro, ''),
+    p_campana_id, p_promocion_id, p_accion, coalesce(p_campo, ''), coalesce(p_valor_anterior, ''),
+    coalesce(p_valor_nuevo, ''), coalesce(nullif(p_request_id, ''), gen_random_uuid()::text),
+    coalesce(p_operation_id, ''), coalesce(nullif(p_origen, ''), 'db'), coalesce(p_contexto, '{}'::jsonb),
+    clock_timestamp(), p_fecha_cierre
+  )
+  returning id into v_log_id;
+
+  return v_log_id;
+end;
+$$;
+
+revoke execute on function public.insert_audit_log(text, text, uuid, text, text, text, text, uuid, uuid, text, text, text, jsonb, timestamptz) from public, authenticated, anon;
+
+create or replace function public.logs_prevent_mutation()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'Los logs de auditoria son append-only y no pueden modificarse ni eliminarse.'
+    using errcode = '42501';
+end;
+$$;
+
+create or replace function public.audit_business_row_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_old jsonb := case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) else null end;
+  v_new jsonb := case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else null end;
+  v_row jsonb := coalesce(v_new, v_old);
+  v_entidad text := upper(tg_table_name);
+  v_entidad_id uuid := nullif(v_row ->> 'id', '')::uuid;
+  v_registro text := coalesce(nullif(v_row ->> 'legacy_row_id', ''), nullif(v_row ->> 'legacy_actividad_id', ''), nullif(v_row ->> 'avance_id', ''), nullif(v_row ->> 'catalogo_id', ''), nullif(v_row ->> 'campo', ''), v_entidad_id::text, '');
+  v_campana_id uuid;
+  v_promocion_id uuid;
+begin
+  if auth.uid() is null then
+    if tg_op = 'DELETE' then
+      return old;
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and v_old = v_new then
+    return new;
+  end if;
+
+  v_campana_id := nullif(v_row ->> 'campana_id', '')::uuid;
+  v_promocion_id := nullif(v_row ->> 'promocion_id', '')::uuid;
+
+  if tg_table_name = 'campanas' then
+    v_campana_id := v_entidad_id;
+  elsif tg_table_name = 'promociones' then
+    v_promocion_id := v_entidad_id;
+    v_campana_id := nullif(v_row ->> 'campana_id', '')::uuid;
+  elsif tg_table_name = 'promociones_detalle' then
+    v_promocion_id := nullif(v_row ->> 'promocion_id', '')::uuid;
+    select campana_id into v_campana_id from public.promociones where id = v_promocion_id;
+  elsif tg_table_name = 'comentarios' then
+    v_promocion_id := nullif(v_row ->> 'promocion_id', '')::uuid;
+    select campana_id into v_campana_id from public.promociones where id = v_promocion_id;
+  end if;
+
+  perform public.insert_audit_log(
+    p_entidad => v_entidad,
+    p_accion => tg_op,
+    p_entidad_id => v_entidad_id,
+    p_registro => v_registro,
+    p_campo => '*',
+    p_valor_anterior => coalesce(v_old::text, ''),
+    p_valor_nuevo => coalesce(v_new::text, ''),
+    p_campana_id => v_campana_id,
+    p_promocion_id => v_promocion_id,
+    p_operation_id => coalesce(current_setting('app.operation_id', true), ''),
+    p_origen => 'trigger',
+    p_contexto => jsonb_build_object(
+      'schema', tg_table_schema,
+      'table', tg_table_name,
+      'operation', tg_op,
+      'old', v_old,
+      'new', v_new
+    )
+  );
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+-- =========================================================
 -- Triggers updated_at
 -- =========================================================
 
@@ -302,6 +459,36 @@ create trigger comentarios_set_updated_at
 before update on public.comentarios
 for each row execute function public.set_updated_at();
 
+drop trigger if exists campanas_audit_row_change on public.campanas;
+create trigger campanas_audit_row_change
+after insert or update or delete on public.campanas
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists promociones_audit_row_change on public.promociones;
+create trigger promociones_audit_row_change
+after insert or update or delete on public.promociones
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists promociones_detalle_audit_row_change on public.promociones_detalle;
+create trigger promociones_detalle_audit_row_change
+after insert or update or delete on public.promociones_detalle
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists comentarios_audit_row_change on public.comentarios;
+create trigger comentarios_audit_row_change
+after insert or update or delete on public.comentarios
+for each row execute function public.audit_business_row_change();
+
+drop trigger if exists logs_prevent_update on public.logs;
+create trigger logs_prevent_update
+before update on public.logs
+for each row execute function public.logs_prevent_mutation();
+
+drop trigger if exists logs_prevent_delete on public.logs;
+create trigger logs_prevent_delete
+before delete on public.logs
+for each row execute function public.logs_prevent_mutation();
+
 drop trigger if exists notificaciones_set_updated_at on public.notificaciones;
 create trigger notificaciones_set_updated_at
 before update on public.notificaciones
@@ -341,6 +528,8 @@ select
   p.estado_registro,
   count(cm.id) filter (where cm.estado = 'ABIERTO') as comentarios_abiertos,
   count(cm.id) as total_comentarios,
+  p.usuario_crea,
+  p.usuario_edita,
   p.updated_at as fecha_modificacion
 from public.promociones p
 join public.campanas c on c.id = p.campana_id
@@ -350,7 +539,7 @@ group by c.legacy_actividad_id, p.oferta_id, c.tipo_actividad, c.canal, p.alcanc
   p.alcance_valor, b.comprador, b.division, p.tipo_promo, p.grupo_oferta, p.tipo_sku,
   p.variante, p.sku, p.num_parte, p.descripcion, p.tipo_cantidad, p.cantidad_minima,
   p.precio_antes, p.precio_ahora, p.descuento, p.comentario_comprador, p.aplica_segmento,
-  p.segmento_cliente, p.estado_registro, p.updated_at;
+  p.segmento_cliente, p.estado_registro, p.usuario_crea, p.usuario_edita, p.updated_at;
 
 create or replace view public.export_pricing
 with (security_invoker = true) as
@@ -459,6 +648,8 @@ create index if not exists idx_comentarios_promocion on public.comentarios(promo
 create index if not exists idx_comentarios_estado on public.comentarios(estado);
 create index if not exists idx_logs_promocion on public.logs(promocion_id);
 create index if not exists idx_logs_created_at on public.logs(created_at);
+create index if not exists idx_logs_request_id on public.logs(request_id);
+create index if not exists idx_logs_operation_id on public.logs(operation_id);
 create index if not exists idx_notificaciones_campana on public.notificaciones(campana_id);
 
 -- =========================================================
@@ -476,9 +667,11 @@ grant select, insert, update, delete on
   public.promociones,
   public.promociones_detalle,
   public.comentarios,
-  public.logs,
   public.notificaciones
 to authenticated;
+
+grant select on public.logs to authenticated;
+revoke insert, update, delete on public.logs from authenticated;
 
 grant select on
   public.consolidado,
@@ -720,10 +913,8 @@ using (
 );
 
 drop policy if exists logs_insert_authenticated on public.logs;
-create policy logs_insert_authenticated
-on public.logs for insert
-to authenticated
-with check (public.current_user_role() is not null);
+drop policy if exists logs_update_authenticated on public.logs;
+drop policy if exists logs_delete_authenticated on public.logs;
 
 drop policy if exists notificaciones_select_roles on public.notificaciones;
 create policy notificaciones_select_roles

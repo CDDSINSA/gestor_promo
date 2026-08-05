@@ -1,17 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  Circle,
   Eye,
   ImageUp,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
   Search,
+  Square,
+  Undo2,
   ZoomIn,
   ZoomOut,
   X,
@@ -27,9 +31,9 @@ import {
   createCatalogDesignProject,
   deleteCatalogDesignPages,
   getCatalogDesignSignedUrl,
-  logCatalogDesignPageStateChange,
   loadCatalogDesignData,
   reviewCatalogDesignPage,
+  updateCatalogDesignPageCommentStatus,
   updateCatalogDesignPage,
   updateCatalogDesignProject,
   uploadCatalogDesignPageImage,
@@ -40,6 +44,12 @@ import { Button, Card, CardContent, Header } from "./ui";
 
 const PROJECT_STATES = ["planificacion", "en_diseno", "en_revision", "aprobado", "consolidado", "cancelado"];
 const PAGE_STATES = ["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"];
+const ANNOTATION_COLOR = "#E53935";
+const ANNOTATION_TOOLS = [
+  ["rect", "Rectangulo", Square],
+  ["circle", "Circulo", Circle],
+  ["freehand", "Libre", Pencil],
+];
 
 function Field({ label, children }) {
   return <label className="field"><span>{label}</span>{children}</label>;
@@ -150,6 +160,92 @@ function formatSkuInfoValue(value) {
   return normalizeValue(value) || "Sin dato";
 }
 
+function getCommentStatus(comment) {
+  return String(comment?.estado || "abierto").toLowerCase() === "resuelto" ? "resuelto" : "abierto";
+}
+
+function clampRatio(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(1, Math.max(0, number));
+}
+
+function normalizeCommentAnnotations(comment) {
+  const raw = comment?.anotaciones || comment?.annotations || [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function stripDraftCoordinates(annotation) {
+  const { startX, startY, ...clean } = annotation || {};
+  return clean;
+}
+
+function buildBoxAnnotation(tool, startPoint, endPoint) {
+  const startX = Number.isFinite(startPoint?.startX) ? startPoint.startX : startPoint?.x;
+  const startY = Number.isFinite(startPoint?.startY) ? startPoint.startY : startPoint?.y;
+  const endX = endPoint?.x ?? startX;
+  const endY = endPoint?.y ?? startY;
+  return {
+    type: tool,
+    color: ANNOTATION_COLOR,
+    startX,
+    startY,
+    x: Math.min(startX, endX),
+    y: Math.min(startY, endY),
+    width: Math.abs(endX - startX),
+    height: Math.abs(endY - startY),
+  };
+}
+
+function isUsefulAnnotation(annotation) {
+  if (!annotation) return false;
+  if (annotation.type === "freehand") return Array.isArray(annotation.points) && annotation.points.length > 1;
+  return Number(annotation.width) > 0.008 && Number(annotation.height) > 0.008;
+}
+
+function getAnnotationAnchor(annotation) {
+  if (!annotation) return { x: 0.5, y: 0.5 };
+  if (annotation.type === "freehand" && Array.isArray(annotation.points) && annotation.points.length) {
+    const totals = annotation.points.reduce((acc, point) => ({ x: acc.x + clampRatio(point.x), y: acc.y + clampRatio(point.y) }), { x: 0, y: 0 });
+    return { x: totals.x / annotation.points.length, y: totals.y / annotation.points.length };
+  }
+  return {
+    x: clampRatio(annotation.x) + clampRatio(annotation.width) / 2,
+    y: clampRatio(annotation.y) + clampRatio(annotation.height) / 2,
+  };
+}
+
+function renderAnnotation(annotation, key, className = "", eventProps = {}) {
+  if (!annotation) return null;
+  const color = annotation.color === "#FFC72C" ? ANNOTATION_COLOR : annotation.color || ANNOTATION_COLOR;
+  const title = annotation.commentText ? `${annotation.commentType || "comentario"}: ${annotation.commentText}` : "";
+  if (annotation.type === "freehand") {
+    const points = Array.isArray(annotation.points)
+      ? annotation.points.map((point) => `${clampRatio(point.x)},${clampRatio(point.y)}`).join(" ")
+      : "";
+    if (!points) return null;
+    return <polyline key={key} className={className} points={points} fill="none" stroke={color} strokeWidth="0.006" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</polyline>;
+  }
+  const x = clampRatio(annotation.x);
+  const y = clampRatio(annotation.y);
+  const width = clampRatio(annotation.width);
+  const height = clampRatio(annotation.height);
+  if (!width || !height) return null;
+  if (annotation.type === "circle") {
+    return <ellipse key={key} className={className} cx={x + width / 2} cy={y + height / 2} rx={width / 2} ry={height / 2} fill="rgba(229,57,53,0.14)" stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</ellipse>;
+  }
+  return <rect key={key} className={className} x={x} y={y} width={width} height={height} fill="rgba(229,57,53,0.14)" stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</rect>;
+}
+
 export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseConnection, supabaseReady }) {
   const { appUser, role } = useAuth();
   const { can } = usePermissions();
@@ -165,6 +261,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const catalogosTrabajables = useMemo(() => catalogos.filter(isCatalogoTrabajable), [catalogos]);
   const catalogoById = useMemo(() => Object.fromEntries(catalogosTrabajables.map((catalogo) => [getCatalogoId(catalogo), catalogo])), [catalogosTrabajables]);
   const catalogoIdsTrabajables = useMemo(() => new Set(catalogosTrabajables.map(getCatalogoId)), [catalogosTrabajables]);
+  const imageShellRef = useRef(null);
 
   const [projects, setProjects] = useState([]);
   const [pages, setPages] = useState([]);
@@ -178,6 +275,13 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [commentText, setCommentText] = useState("");
   const [signedUrls, setSignedUrls] = useState({});
   const [viewerZoom, setViewerZoom] = useState(100);
+  const [commentPanelOpen, setCommentPanelOpen] = useState(false);
+  const [annotationMode, setAnnotationMode] = useState(false);
+  const [annotationTool, setAnnotationTool] = useState("rect");
+  const [draftAnnotations, setDraftAnnotations] = useState([]);
+  const [activeAnnotation, setActiveAnnotation] = useState(null);
+  const [activeCommentId, setActiveCommentId] = useState("");
+  const [hoveredAnnotation, setHoveredAnnotation] = useState(null);
   const [targetPageCount, setTargetPageCount] = useState("");
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
   const [skuFinderOpen, setSkuFinderOpen] = useState(false);
@@ -185,8 +289,21 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [skuSearchTerm, setSkuSearchTerm] = useState("");
   const [status, setStatus] = useState({ type: "idle", message: "" });
 
-  const visibleProjects = useMemo(() => projects.filter((project) => catalogoIdsTrabajables.has(String(project.catalogo_id || "").trim())), [projects, catalogoIdsTrabajables]);
-  const hiddenProjectCount = projects.length - visibleProjects.length;
+  const scopedProjectIds = useMemo(() => new Set(pages
+    .filter((page) => {
+      if (isAdminOrMark) return true;
+      if (isDesigner) return page.disenador_id === currentUserId;
+      if (isBuyer) return page.comprador_id === currentBuyerId;
+      return false;
+    })
+    .map((page) => page.proyecto_id)
+    .filter(Boolean)), [pages, isAdminOrMark, isDesigner, isBuyer, currentUserId, currentBuyerId]);
+  const visibleProjects = useMemo(() => projects.filter((project) => {
+    const catalogoId = String(project.catalogo_id || "").trim();
+    if (catalogoIdsTrabajables.has(catalogoId)) return true;
+    return !isAdminOrMark && scopedProjectIds.has(project.id);
+  }), [projects, catalogoIdsTrabajables, scopedProjectIds, isAdminOrMark]);
+  const hiddenProjectCount = isAdminOrMark ? projects.length - visibleProjects.length : 0;
   const canCreateProject = canManage
     && catalogoIdsTrabajables.has(String(projectForm.catalogo_id || "").trim())
     && Boolean(String(projectForm.nombre_proyecto || "").trim())
@@ -240,7 +357,22 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     };
   }, [selectedProjectPages]);
 
-  const selectedComments = useMemo(() => comments.filter((comment) => comment.pagina_id === selectedPage?.id), [comments, selectedPage]);
+  const selectedComments = useMemo(() => comments
+    .filter((comment) => comment.pagina_id === selectedPage?.id)
+    .sort((a, b) => {
+      const aResolved = getCommentStatus(a) === "resuelto";
+      const bResolved = getCommentStatus(b) === "resuelto";
+      if (aResolved !== bResolved) return aResolved ? 1 : -1;
+      return new Date(b.fecha_creacion || 0) - new Date(a.fecha_creacion || 0);
+    }), [comments, selectedPage]);
+  const selectedAnnotations = useMemo(() => selectedComments.flatMap((comment) => normalizeCommentAnnotations(comment).map((annotation) => ({
+    ...annotation,
+    commentId: comment.id,
+    commentType: comment.tipo || "comentario",
+    commentText: comment.comentario || "",
+    commentUser: getUserLabel(userById[comment.usuario_id]),
+    commentDate: formatDate(comment.fecha_creacion),
+  }))), [selectedComments, userById]);
   const selectedPageIndex = visiblePages.findIndex((page) => page.id === selectedPage?.id);
   const selectedImageUrl = selectedPage ? signedUrls[selectedPage.id] || "" : "";
   const selectedProjectPromoRows = useMemo(() => {
@@ -335,6 +467,15 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   useEffect(() => {
     setSelectedPageId((current) => visiblePages.some((page) => page.id === current) ? current : visiblePages[0]?.id || "");
   }, [visiblePages]);
+
+  useEffect(() => {
+    setCommentPanelOpen(false);
+    setAnnotationMode(false);
+    setDraftAnnotations([]);
+    setActiveAnnotation(null);
+    setActiveCommentId("");
+    setHoveredAnnotation(null);
+  }, [selectedPage?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -446,12 +587,6 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const updatePageField = (page, field, value) => {
     runAction("Actualizando página...", async () => {
       await updateCatalogDesignPage(supabaseConnection, page.id, { [field]: value, actualizado_por: currentUserId || null });
-      if (field === "estado") {
-        await logCatalogDesignPageStateChange(supabaseConnection, page, value, {
-          currentUserId,
-          action: "Cambio manual de estado de pagina",
-        });
-      }
     }, "Página actualizada.");
   };
 
@@ -460,20 +595,94 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     runAction("Subiendo imagen de página...", () => uploadCatalogDesignPageImage(supabaseConnection, page, selectedProject, file, currentUserId), "Imagen actualizada sin crear versiones.");
   };
 
+  const getAnnotationPoint = (event) => {
+    const rect = imageShellRef.current?.getBoundingClientRect();
+    if (!rect?.width || !rect?.height) return null;
+    return {
+      x: clampRatio((event.clientX - rect.left) / rect.width),
+      y: clampRatio((event.clientY - rect.top) / rect.height),
+    };
+  };
+
+  const beginAnnotation = (event) => {
+    if (!annotationMode || !selectedImageUrl) return;
+    const point = getAnnotationPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    openReviewPanel();
+    if (annotationTool === "freehand") {
+      setActiveAnnotation({ type: "freehand", color: ANNOTATION_COLOR, points: [point] });
+      return;
+    }
+    setActiveAnnotation(buildBoxAnnotation(annotationTool, { ...point, startX: point.x, startY: point.y }, point));
+  };
+
+  const moveAnnotation = (event) => {
+    if (!annotationMode || !activeAnnotation) return;
+    const point = getAnnotationPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    setActiveAnnotation((current) => {
+      if (!current) return current;
+      if (current.type === "freehand") {
+        const lastPoint = current.points[current.points.length - 1];
+        if (lastPoint && Math.abs(lastPoint.x - point.x) + Math.abs(lastPoint.y - point.y) < 0.003) return current;
+        return { ...current, points: [...current.points, point] };
+      }
+      return buildBoxAnnotation(current.type, current, point);
+    });
+  };
+
+  const endAnnotation = (event) => {
+    if (!activeAnnotation) return;
+    event.preventDefault();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const cleanAnnotation = stripDraftCoordinates(activeAnnotation);
+    if (isUsefulAnnotation(cleanAnnotation)) {
+      setDraftAnnotations((current) => [...current, cleanAnnotation]);
+    }
+    setActiveAnnotation(null);
+  };
+
+  const resetReviewDraft = () => {
+    setCommentText("");
+    setDraftAnnotations([]);
+    setActiveAnnotation(null);
+    setCommentPanelOpen(false);
+    setAnnotationMode(false);
+  };
+
+  const openReviewPanel = () => {
+    setSkuFinderOpen(false);
+    setCommentPanelOpen(true);
+  };
+
+  const undoAnnotation = () => {
+    setDraftAnnotations((current) => current.slice(0, -1));
+  };
+
   const addComment = () => {
     if (!selectedPage) return;
     runAction("Guardando comentario...", async () => {
-      await addCatalogDesignPageComment(supabaseConnection, selectedPage.id, commentText, "comentario", currentUserId);
-      setCommentText("");
+      await addCatalogDesignPageComment(supabaseConnection, selectedPage.id, commentText, "comentario", currentUserId, draftAnnotations);
+      resetReviewDraft();
     }, "Comentario guardado.");
   };
 
   const reviewPage = (nextStatus, type) => {
     if (!selectedPage) return;
     runAction("Registrando revisión...", async () => {
-      await reviewCatalogDesignPage(supabaseConnection, selectedPage, nextStatus, commentText, type, currentUserId);
-      setCommentText("");
+      await reviewCatalogDesignPage(supabaseConnection, selectedPage, nextStatus, commentText, type, currentUserId, draftAnnotations);
+      resetReviewDraft();
     }, nextStatus === "aprobada" ? "Página aprobada." : "Página enviada a ajustes.");
+  };
+
+  const updateCommentStatus = (comment, nextStatus) => {
+    if (!comment?.id) return;
+    runAction(nextStatus === "resuelto" ? "Marcando comentario como resuelto..." : "Reabriendo comentario...", async () => {
+      await updateCatalogDesignPageCommentStatus(supabaseConnection, comment.id, nextStatus, currentUserId);
+    }, nextStatus === "resuelto" ? "Comentario marcado como resuelto." : "Comentario reabierto.");
   };
 
   const viewPageImage = (page) => {
@@ -481,6 +690,11 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   };
 
   const canUploadSelectedPage = selectedPage && (isAdminOrMark || (canUpload && selectedPage.disenador_id === currentUserId));
+  const canReviewSelectedPage = selectedPage && (isAdminOrMark || (canReview && selectedPage.comprador_id === currentBuyerId));
+  const canUpdateCommentStatus = selectedPage && (isAdminOrMark || (isDesigner && selectedPage.disenador_id === currentUserId) || (isBuyer && selectedPage.comprador_id === currentBuyerId));
+  const canUseAnnotations = Boolean(selectedPage && selectedImageUrl && canReviewSelectedPage);
+  const pendingAnnotationCount = draftAnnotations.length + (activeAnnotation ? 1 : 0);
+  const hoveredAnnotationAnchor = hoveredAnnotation ? getAnnotationAnchor(hoveredAnnotation) : null;
 
   return <div className="catalog-design-page">
     <div className="toolbar">
@@ -542,13 +756,13 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
               <strong>{project.nombre_proyecto}</strong>
               <span>{project.estado} · entrega {formatDate(project.fecha_entrega) || "sin fecha"}</span>
             </button>)}
-            {!visibleProjects.length && projects.length > 0 && <div className="empty-state">No hay proyectos de diseno para catalogos trabajables.</div>}
+            {!visibleProjects.length && projects.length > 0 && <div className="empty-state">{isAdminOrMark ? "No hay proyectos de diseno para catalogos trabajables." : "No hay proyectos con paginas asignadas a tu usuario."}</div>}
             {!projects.length && <div className="empty-state">No hay proyectos de diseño creados.</div>}
           </div>
           <div className="catalog-design-summary-card">
             <span>Proyecto seleccionado</span>
             <strong>{selectedProject?.nombre_proyecto || "Sin proyecto seleccionado"}</strong>
-            <p>{selectedProjectCatalogo ? selectedProjectCatalogo.nombre || selectedProject.catalogo_id : "Seleccione un proyecto para revisar su avance."}</p>
+            <p>{selectedProject ? selectedProjectCatalogo?.nombre || selectedProject.catalogo_id || "Proyecto sin catalogo visible" : "Seleccione un proyecto para revisar su avance."}</p>
             {selectedProject && <div className="catalog-design-summary-meta">
               <span><b>Estado</b>{selectedProject.estado || "planificacion"}</span>
               <span><b>Entrega</b>{formatDate(selectedProject.fecha_entrega) || "sin fecha"}</span>
@@ -628,13 +842,29 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                   <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(1)} disabled={selectedPageIndex < 0 || selectedPageIndex >= visiblePages.length - 1}>Siguiente <ChevronRight size={16}/></Button>
                   <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.max(60, value - 20))} disabled={!selectedPage} title="Reducir zoom" aria-label="Reducir zoom"><ZoomOut size={16}/></Button>
                   <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.min(180, value + 20))} disabled={!selectedPage} title="Aumentar zoom" aria-label="Aumentar zoom"><ZoomIn size={16}/></Button>
-                  <Button className="catalog-design-sku-btn" variant="outline" onClick={() => setSkuFinderOpen(true)} title="Buscar informacion de SKU"><Search size={16}/> Buscar SKU</Button>
+                  <Button className="catalog-design-sku-btn" variant="outline" onClick={() => { setCommentPanelOpen(false); setAnnotationMode(false); setSkuFinderOpen(true); }} title="Buscar informacion de SKU"><Search size={16}/> Buscar SKU</Button>
                   {canUploadSelectedPage && <label className="btn btn-primary catalog-design-file-btn catalog-design-viewer-upload">
                     <ImageUp size={16}/> Actualizar imagen
                     <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => { uploadPageImage(selectedPage, event.target.files?.[0]); event.target.value = ""; }} />
                   </label>}
                 </div>
               </div>
+              {selectedPage && <div className="catalog-design-review-quickbar">
+                <div className="catalog-design-annotation-tools" aria-label="Herramientas de senalizacion">
+                  <Button className="catalog-design-pencil-btn" variant={annotationMode ? "default" : "outline"} onClick={() => { setAnnotationMode((value) => !value); openReviewPanel(); }} disabled={!canUseAnnotations} title={canUseAnnotations ? "Senalar sobre la pagina" : "Seleccione una pagina con imagen asignada para revisar."}>
+                    <Pencil size={16}/> Senalar
+                  </Button>
+                  {annotationMode && ANNOTATION_TOOLS.map(([tool, label, Icon]) => <button key={tool} type="button" className={annotationTool === tool ? "catalog-design-tool-btn selected" : "catalog-design-tool-btn"} onClick={() => setAnnotationTool(tool)} title={label} aria-label={label}><Icon size={16}/></button>)}
+                  {annotationMode && <button type="button" className="catalog-design-tool-btn" onClick={undoAnnotation} disabled={!draftAnnotations.length} title="Deshacer ultima senal" aria-label="Deshacer ultima senal"><Undo2 size={16}/></button>}
+                </div>
+                <div className="catalog-design-review-actions">
+                  <Button variant="outline" onClick={openReviewPanel} disabled={!selectedPage}><MessageSquare size={16}/> Comentar</Button>
+                  {canReviewSelectedPage && <>
+                    <Button onClick={() => reviewPage("aprobada", "aprobacion")}><CheckCircle2 size={16}/> Aprobar</Button>
+                    <Button variant="outline" onClick={() => { openReviewPanel(); if (!commentText.trim()) setCommentText("Requiere ajuste: "); }}><XCircle size={16}/> Rechazar</Button>
+                  </>}
+                </div>
+              </div>}
               {skuFinderOpen && <div className="catalog-design-sku-popover" role="dialog" aria-label="Buscar informacion de SKU">
                 <div className="catalog-design-sku-popover-head">
                   <div>
@@ -668,14 +898,110 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                   </div>)}
                 </div>
               </div>}
-              <div className="catalog-design-viewer-stage">
-                {selectedImageUrl ? <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Pagina de catalogo"} style={{ width: `${viewerZoom}%` }} /> : <div className="catalog-design-viewer-empty">
+              {commentPanelOpen && selectedPage && <div className="catalog-design-comment-popover" role="dialog" aria-label="Comentario de revision">
+                <div className="catalog-design-comment-popover-head">
+                  <div>
+                    <strong>Comentario de revision</strong>
+                    <span>{pendingAnnotationCount ? `${pendingAnnotationCount} senal${pendingAnnotationCount === 1 ? "" : "es"} por guardar` : "Sin senales pendientes"}</span>
+                  </div>
+                  <button type="button" className="icon-btn" onClick={() => { setCommentPanelOpen(false); setAnnotationMode(false); }} aria-label="Cerrar comentario"><X size={16}/></button>
+                </div>
+                <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Describe el cambio solicitado para el disenador." autoFocus={!annotationMode} />
+                <div className="catalog-design-comment-popover-actions">
+                  <Button variant="outline" onClick={resetReviewDraft}>Cancelar</Button>
+                  <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}><MessageSquare size={16}/> Guardar</Button>
+                  {canReviewSelectedPage && <>
+                    <Button onClick={() => reviewPage("aprobada", "aprobacion")}><CheckCircle2 size={16}/> Aprobar</Button>
+                    <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")}><XCircle size={16}/> Rechazar</Button>
+                  </>}
+                </div>
+              </div>}
+              <div className="catalog-design-review-workspace">
+                <aside className="catalog-design-comment-rail">
+                  <div className="catalog-design-comment-rail-head">
+                    <div>
+                      <strong>Comentarios</strong>
+                      <span>{selectedComments.length ? `${selectedComments.length} registrado${selectedComments.length === 1 ? "" : "s"}` : "Sin comentarios"}</span>
+                    </div>
+                    <Button variant="outline" onClick={openReviewPanel} disabled={!selectedPage}><MessageSquare size={16}/> Nuevo</Button>
+                  </div>
+                  <div className="catalog-design-comment-rail-list">
+                    {selectedComments.map((comment) => {
+                      const annotationCount = normalizeCommentAnnotations(comment).length;
+                      const commentStatus = getCommentStatus(comment);
+                      const selected = activeCommentId === comment.id || hoveredAnnotation?.commentId === comment.id;
+                      return <div key={comment.id} role="button" tabIndex={0} className={classNames("catalog-design-comment-item", selected && "selected", commentStatus === "resuelto" && "resolved")} onMouseEnter={() => setActiveCommentId(comment.id)} onMouseLeave={() => setActiveCommentId("")} onFocus={() => setActiveCommentId(comment.id)} onBlur={() => setActiveCommentId("")}>
+                        <span className="catalog-design-comment-meta">{comment.tipo || "comentario"} · {formatDate(comment.fecha_creacion) || "sin fecha"}</span>
+                        <span className={classNames("catalog-design-comment-status", commentStatus)}>{commentStatus}</span>
+                        <strong>{getUserLabel(userById[comment.usuario_id])}</strong>
+                        <p>{comment.comentario}</p>
+                        <div className="catalog-design-comment-item-foot">
+                          {annotationCount > 0 && <span className="catalog-design-comment-signal">{annotationCount} senal{annotationCount === 1 ? "" : "es"}</span>}
+                          {canUpdateCommentStatus && <button type="button" className="catalog-design-comment-status-btn" onClick={(event) => { event.stopPropagation(); updateCommentStatus(comment, commentStatus === "resuelto" ? "abierto" : "resuelto"); }} title={commentStatus === "resuelto" ? "Reabrir comentario" : "Marcar como resuelto"} aria-label={commentStatus === "resuelto" ? "Reabrir comentario" : "Marcar como resuelto"}>
+                            {commentStatus === "resuelto" ? <RefreshCw size={14}/> : <CheckCircle2 size={14}/>}
+                            <span>{commentStatus === "resuelto" ? "Reabrir" : "Resolver"}</span>
+                          </button>}
+                        </div>
+                      </div>;
+                    })}
+                    {!selectedComments.length && <div className="empty-state">Aun no hay comentarios para esta pagina.</div>}
+                  </div>
+                </aside>
+                <div className="catalog-design-viewer-surface">
+                  <div className="catalog-design-viewer-stage">
+                {selectedImageUrl ? <div className="catalog-design-image-shell" ref={imageShellRef} style={{ width: `${viewerZoom}%` }}>
+                  <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Pagina de catalogo"} />
+                  <svg
+                    className={classNames("catalog-design-annotation-layer", annotationMode && "drawing")}
+                    viewBox="0 0 1 1"
+                    preserveAspectRatio="none"
+                    onPointerDown={beginAnnotation}
+                    onPointerMove={moveAnnotation}
+                    onPointerUp={endAnnotation}
+                    onPointerCancel={endAnnotation}
+                  >
+                    {selectedAnnotations.map((annotation, index) => renderAnnotation(
+                      annotation,
+                      `${annotation.commentId}-${index}`,
+                      classNames("saved", (activeCommentId === annotation.commentId || hoveredAnnotation?.commentId === annotation.commentId) && "selected"),
+                      {
+                        onPointerEnter: () => {
+                          setHoveredAnnotation(annotation);
+                          setActiveCommentId(annotation.commentId);
+                        },
+                        onPointerLeave: () => {
+                          setHoveredAnnotation(null);
+                          setActiveCommentId("");
+                        },
+                        onFocus: () => {
+                          setHoveredAnnotation(annotation);
+                          setActiveCommentId(annotation.commentId);
+                        },
+                        onBlur: () => {
+                          setHoveredAnnotation(null);
+                          setActiveCommentId("");
+                        },
+                        tabIndex: 0,
+                      }
+                    ))}
+                    {draftAnnotations.map((annotation, index) => renderAnnotation(annotation, `draft-${index}`, "draft"))}
+                    {activeAnnotation && renderAnnotation(activeAnnotation, "active", "draft active")}
+                  </svg>
+                  {hoveredAnnotation && hoveredAnnotationAnchor && <div className="catalog-design-annotation-tooltip" style={{ left: `${hoveredAnnotationAnchor.x * 100}%`, top: `${hoveredAnnotationAnchor.y * 100}%` }}>
+                    <strong>{hoveredAnnotation.commentType || "comentario"} · {hoveredAnnotation.commentUser || "Usuario"}</strong>
+                    <p>{hoveredAnnotation.commentText}</p>
+                    {hoveredAnnotation.commentDate && <span>{hoveredAnnotation.commentDate}</span>}
+                  </div>}
+                  {annotationMode && <div className="catalog-design-drawing-hint">Arrastre sobre la imagen para senalar.</div>}
+                </div> : <div className="catalog-design-viewer-empty">
                   <ImageUp size={30}/>
                   <strong>{selectedPage ? "Sin imagen cargada" : "Seleccione una pagina"}</strong>
                   <span>{selectedPage ? "El diseñador debe cargar una imagen JPG o PNG de calidad media para revision." : "Use la tabla inferior para elegir una pagina del proyecto."}</span>
                 </div>}
               </div>
-              {selectedPage && <p className="catalog-design-viewer-note">Ruta Storage: {selectedPage.archivo_path || `catalogos/${selectedProject?.catalogo_id}/paginas/pagina_${selectedPage.numero_pagina}.jpg`}</p>}
+                  {selectedPage && <p className="catalog-design-viewer-note">Ruta Storage: {selectedPage.archivo_path || `catalogos/${selectedProject?.catalogo_id}/paginas/pagina_${selectedPage.numero_pagina}.jpg`}</p>}
+                </div>
+              </div>
             </div>
             <div className="table-wrap catalog-design-table">
               <table>
@@ -708,7 +1034,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
           </CardContent>
         </Card>
 
-        <Card>
+        {false && <Card>
           <CardContent>
             <div className="toolbar compact">
               <div><h2>Comentarios y revisión</h2><p>{selectedPage ? `Página ${selectedPage.numero_pagina}` : "Seleccione una página para revisar."}</p></div>
@@ -717,22 +1043,25 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
               <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Agregar comentario, aprobación, rechazo o ajuste." />
               <div className="toolbar-actions">
                 <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}><MessageSquare size={16}/> Comentar</Button>
-                {(isAdminOrMark || (canReview && selectedPage.comprador_id === currentBuyerId)) && <>
+                {canReviewSelectedPage && <>
                   <Button onClick={() => reviewPage("aprobada", "aprobacion")}><CheckCircle2 size={16}/> Aprobar</Button>
                   <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")}><XCircle size={16}/> Rechazar</Button>
                 </>}
               </div>
               <div className="catalog-design-comments">
-                {selectedComments.map((comment) => <div key={comment.id}>
-                  <strong>{comment.tipo || "comentario"} · {getUserLabel(userById[comment.usuario_id])}</strong>
-                  <p>{comment.comentario}</p>
-                  <span>{formatDate(comment.fecha_creacion)}</span>
-                </div>)}
+                {selectedComments.map((comment) => {
+                  const annotationCount = normalizeCommentAnnotations(comment).length;
+                  return <div key={comment.id}>
+                    <strong>{comment.tipo || "comentario"} · {getUserLabel(userById[comment.usuario_id])}{annotationCount ? ` · ${annotationCount} senal${annotationCount === 1 ? "" : "es"}` : ""}</strong>
+                    <p>{comment.comentario}</p>
+                    <span>{formatDate(comment.fecha_creacion)}</span>
+                  </div>;
+                })}
                 {!selectedComments.length && <div className="empty-state">Aún no hay comentarios para esta página.</div>}
               </div>
             </div> : <div className="empty-state">Seleccione una página desde la tabla.</div>}
           </CardContent>
-        </Card>
+        </Card>}
       </div>
     </div>
   </div>;

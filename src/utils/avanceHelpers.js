@@ -42,6 +42,61 @@ export function getCompradorIdentityKeys(comprador) {
     });
 }
 
+export function getAppUserBuyerProfile(appUser) {
+  return Array.isArray(appUser?.compradores) ? appUser.compradores[0] : appUser?.compradores;
+}
+
+export function findCompradorForAppUser(appUser, compradores = []) {
+  const buyerProfile = getAppUserBuyerProfile(appUser) || {};
+  const userKeys = [
+    appUser?.buyer_id,
+    appUser?.buyerId,
+    appUser?.comprador_id,
+    appUser?.compradorId,
+    appUser?.comprador,
+    appUser?.nombre,
+    appUser?.email,
+    buyerProfile?.id,
+    buyerProfile?.comprador_id,
+    buyerProfile?.compradorId,
+    buyerProfile?.comprador,
+    buyerProfile?.nombre,
+    buyerProfile?.correo,
+  ].map(normalizeKey).filter(Boolean);
+
+  if (!userKeys.length) return null;
+  return (compradores || []).find((comprador) => {
+    const buyerKeys = getCompradorIdentityKeys(comprador);
+    return userKeys.some((key) => buyerKeys.includes(key));
+  }) || null;
+}
+
+export function getAuthorizedCompradoresForBuyer(currentBuyer, compradores = []) {
+  if (!currentBuyer) return [];
+  const activeBuyers = (compradores || []).filter((buyer) => buyer?.activo !== false);
+  const currentKeys = getCompradorIdentityKeys(currentBuyer);
+
+  return activeBuyers.filter((buyer) => {
+    const isCurrentBuyer = getCompradorIdentityKeys(buyer).some((key) => currentKeys.includes(key));
+    return isCurrentBuyer
+      || compradorReferencesSenior(currentBuyer, buyer)
+      || compradorReferencesSenior(buyer, currentBuyer);
+  });
+}
+
+export function getAuthorizedCompradoresForAppUser(appUser, compradores = [], restrictToBuyerScope = false) {
+  const activeBuyers = (compradores || []).filter((buyer) => buyer?.activo !== false);
+  if (!restrictToBuyerScope) return activeBuyers;
+  const currentBuyer = findCompradorForAppUser(appUser, activeBuyers);
+  return getAuthorizedCompradoresForBuyer(currentBuyer, activeBuyers);
+}
+
+export function getAuthorizedCompradorNamesForAppUser(appUser, compradores = [], restrictToBuyerScope = false) {
+  return getAuthorizedCompradoresForAppUser(appUser, compradores, restrictToBuyerScope)
+    .map(getCompradorNombre)
+    .filter(Boolean);
+}
+
 export function getSeniorIds(comprador) {
   return String(comprador?.senior_id || comprador?.seniorId || comprador?.senior || "")
     .split(/[;|,]/)

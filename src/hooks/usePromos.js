@@ -4,10 +4,17 @@ export function usePromos({
   selectedBuyerConfig,
   getMasterDivision,
   normalizeRow,
+  auditUser = "",
 } = {}) {
   const updateRow = (id, field, value) => setRows((prev) => prev.map((row) => {
     if (row.id !== id) return row;
     const updated = { ...row, [field]: value };
+    if (auditUser) {
+      updated.usuarioEdita = auditUser;
+      updated.usuario_edita = auditUser;
+      updated.ultima_modificacion_por = auditUser;
+      updated.fecha_modificacion = new Date().toISOString();
+    }
     if (field === "aplicaSegmento") {
       updated.aplica_segmento = value;
       if (value !== "SI") { updated.segmento = "Todos"; updated.segmentoCliente = ""; updated.segmento_cliente = ""; }

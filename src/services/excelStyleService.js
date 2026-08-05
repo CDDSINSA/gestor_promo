@@ -1,10 +1,12 @@
 import { normalizeCanal } from "../utils/promoHelpers";
+import { complexPromoTypes } from "../promoTypes/promoTypeEngine";
 
-const SIMPLE_PROMO_TYPES = new Set(["descuento", "precio fijo"]);
-const COMPLEX_PROMO_BAND_COLORS = ["E2F0D9", "FCE4D6"];
+const COMPLEX_PROMO_TYPES = new Set(complexPromoTypes.map((type) => normalizeCanal(type)));
+const COMPLEX_PROMO_BAND_COLORS = ["FFE2F0D9", "FFFCE4D6"];
+const EXCEL_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-export async function loadStyledXlsx() {
-  const module = await import("xlsx-js-style");
+async function loadExcelJS() {
+  const module = await import("exceljs");
   return module.default || module;
 }
 
@@ -22,15 +24,15 @@ function getOfferGroupKey(row = {}) {
 
 function shouldBandPromoRow(row = {}) {
   const promoType = normalizeCanal(getPromoType(row));
-  return Boolean(promoType) && !SIMPLE_PROMO_TYPES.has(promoType);
+  return COMPLEX_PROMO_TYPES.has(promoType);
 }
 
 function getBandGroupKey(row = {}) {
   return `${normalizeCanal(getActivityId(row))}::${normalizeCanal(getOfferGroupKey(row))}::${normalizeCanal(getPromoType(row))}`;
 }
 
-export function applyComplexPromoBanding(XLSX, worksheet, dataRows = [], columnCount = 0) {
-  if (!worksheet || !dataRows.length || !columnCount) return worksheet;
+function applyComplexPromoBanding(worksheet, dataRows = [], columnCount = 0) {
+  if (!worksheet || !dataRows.length || !columnCount) return;
 
   const groupColorIndexes = new Map();
   let nextColorIndex = 0;
@@ -45,23 +47,41 @@ export function applyComplexPromoBanding(XLSX, worksheet, dataRows = [], columnC
     }
 
     const color = COMPLEX_PROMO_BAND_COLORS[groupColorIndexes.get(groupKey)];
-    const excelRowIndex = dataIndex + 1;
+    const excelRowIndex = dataIndex + 2;
+    const worksheetRow = worksheet.getRow(excelRowIndex);
 
     for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-      const address = XLSX.utils.encode_cell({ r: excelRowIndex, c: columnIndex });
-      const cell = worksheet[address] || { t: "s", v: "" };
-      worksheet[address] = {
-        ...cell,
-        s: {
-          ...(cell.s || {}),
-          fill: {
-            patternType: "solid",
-            fgColor: { rgb: color },
-          },
-        },
+      const cell = worksheetRow.getCell(columnIndex + 1);
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: color },
       };
     }
   });
+}
 
-  return worksheet;
+function downloadBuffer(buffer, fileName) {
+  const blob = new Blob([buffer], { type: EXCEL_MIME_TYPE });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = [], columnCount = 0, fileName }) {
+  const ExcelJS = await loadExcelJS();
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sheetName);
+
+  rows.forEach((row) => worksheet.addRow(row));
+  applyComplexPromoBanding(worksheet, dataRows, columnCount);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBuffer(buffer, fileName);
 }

@@ -24,6 +24,20 @@ function normalizeHeader(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+export function hasPromoFieldValue(value) {
+  return value !== undefined && value !== null && !(typeof value === "string" && value.trim() === "");
+}
+
+export function pickPromoFieldValue(...values) {
+  const match = values.find(hasPromoFieldValue);
+  return match === undefined ? "" : match;
+}
+
+export function pickPromoFieldValueOr(fallback, ...values) {
+  const match = values.find(hasPromoFieldValue);
+  return match === undefined ? fallback : match;
+}
+
 export function normalizeDivisionesCatalogo(value) {
   const rawItems = Array.isArray(value) ? value : String(value || "").split(/[;|,]/);
   const seen = new Set();
@@ -467,6 +481,8 @@ export function toAppRow(row) {
   const grupoOferta = row.grupoOferta || row.grupo_oferta || "";
   const offerId = resolveOfferId(row, rowId, activityId, tipoPromo, grupoOferta);
   const compradorId = row.comprador_id || row.compradorId || "";
+  const usuarioCrea = row.usuarioCrea || row.usuario_crea || "";
+  const usuarioEdita = row.usuarioEdita || row.usuario_edita || row.ultima_modificacion_por || "";
   return {
     ...row,
     id: rowId,
@@ -490,12 +506,12 @@ export function toAppRow(row) {
     num_parte: row.num_parte || row.numParte || "",
     tipoCantidad: row.tipoCantidad || row.tipo_cantidad || "Exacta",
     tipo_cantidad: row.tipo_cantidad || row.tipoCantidad || "Exacta",
-    cantidadMinima: row.cantidadMinima || row.cantidad_minima || 1,
-    cantidad_minima: row.cantidad_minima || row.cantidadMinima || 1,
-    precioAntes: row.precioAntes || row.precio_antes || "",
-    precio_antes: row.precio_antes || row.precioAntes || "",
-    precioAhora: row.precioAhora || row.precio_ahora || "",
-    precio_ahora: row.precio_ahora || row.precioAhora || "",
+    cantidadMinima: pickPromoFieldValueOr(1, row.cantidadMinima, row.cantidad_minima),
+    cantidad_minima: pickPromoFieldValueOr(1, row.cantidad_minima, row.cantidadMinima),
+    precioAntes: pickPromoFieldValue(row.precioAntes, row.precio_antes),
+    precio_antes: pickPromoFieldValue(row.precio_antes, row.precioAntes),
+    precioAhora: pickPromoFieldValue(row.precioAhora, row.precio_ahora),
+    precio_ahora: pickPromoFieldValue(row.precio_ahora, row.precioAhora),
     comentario: row.comentario || row.comentario_comprador || "",
     comentario_comprador: row.comentario_comprador || row.comentario || "",
     aplicaSegmento,
@@ -507,6 +523,11 @@ export function toAppRow(row) {
     alcance_tipo: normalizeAlcanceType(row.alcance_tipo || row.alcanceTipo),
     alcanceValor: row.alcanceValor || row.alcance_valor || "",
     alcance_valor: row.alcance_valor || row.alcanceValor || "",
+    usuarioCrea,
+    usuario_crea: usuarioCrea,
+    usuarioEdita,
+    usuario_edita: usuarioEdita,
+    ultima_modificacion_por: row.ultima_modificacion_por || usuarioEdita,
   };
 }
 
@@ -514,7 +535,7 @@ export function toExcelRow(row) {
   const segmented = isSegmentedRow(row);
   const segmentoCliente = segmented ? row.segmentoCliente || row.segmento_cliente || row.segmento || "" : "";
   const rowId = row.row_id || row.id || makeId("ROW");
-  const activityId = row.actividadId || row.actividad_id || row.catalogo_id || "BIFOLIAR_JUN2026";
+  const activityId = row.actividadId || row.actividad_id || row.catalogo_id || "";
   const tipoPromo = row.tipoPromo || row.tipo_promo || "";
   const grupoOferta = row.grupoOferta || row.grupo_oferta || "";
   const offerId = resolveOfferId(row, rowId, activityId, tipoPromo, grupoOferta);
@@ -534,10 +555,10 @@ export function toExcelRow(row) {
     num_parte: row.numParte || row.num_parte || "",
     descripcion: row.descripcion || "",
     tipo_cantidad: row.tipoCantidad || row.tipo_cantidad || "Exacta",
-    cantidad_minima: row.cantidadMinima || row.cantidad_minima || 1,
-    precio_antes: row.precioAntes || row.precio_antes || "",
-    precio_ahora: row.precioAhora || row.precio_ahora || "",
-    descuento: row.descuento || "",
+    cantidad_minima: pickPromoFieldValueOr(1, row.cantidadMinima, row.cantidad_minima),
+    precio_antes: pickPromoFieldValue(row.precioAntes, row.precio_antes),
+    precio_ahora: pickPromoFieldValue(row.precioAhora, row.precio_ahora),
+    descuento: pickPromoFieldValue(row.descuento),
     comentario_comprador: row.comentario || row.comentario_comprador || "",
     aplica_segmento: segmented ? "SI" : "NO",
     segmento: segmented ? segmentoCliente : "Todos",
@@ -547,7 +568,9 @@ export function toExcelRow(row) {
     estado_registro: getPromotionStatus(row),
     fecha_creacion: row.fecha_creacion || new Date().toISOString(),
     fecha_modificacion: new Date().toISOString(),
-    ultima_modificacion_por: row.ultima_modificacion_por || "",
+    usuario_crea: row.usuario_crea || row.usuarioCrea || "",
+    usuario_edita: row.usuario_edita || row.usuarioEdita || row.ultima_modificacion_por || "",
+    ultima_modificacion_por: row.ultima_modificacion_por || row.usuario_edita || row.usuarioEdita || "",
   };
 }
 

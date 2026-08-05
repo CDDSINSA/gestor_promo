@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Download, Search, X } from "lucide-react";
 import { PERMISSIONS } from "../constants/permissions";
 import { usePermissions } from "../hooks/usePermissions";
-import { applyComplexPromoBanding, loadStyledXlsx } from "../services/excelStyleService";
+import { exportStyledWorkbook } from "../services/excelStyleService";
 import { formatPromotionValidationErrors, validatePromotions } from "../services/promotionValidationService";
 import { loadExportDataFromSupabase } from "../services/supabaseService";
 import {
@@ -23,6 +23,10 @@ const OPERATIONAL_EXPORT_STATUSES = new Set(["APROBADO", "APROBADA", "APROVADO",
 function isOperationalExportReady(row) {
   const status = String(row.estado_registro || row.estadoRegistro || "").trim().toUpperCase();
   return OPERATIONAL_EXPORT_STATUSES.has(status);
+}
+
+function displayValue(value) {
+  return value ?? "";
 }
 
 export default function ExportPageV2({ rows = [], actividades = [], comentarios = [], supabaseConnection = null, supabaseReady = false }) {
@@ -204,26 +208,26 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       desc: "Base operativa para configurar promociones.",
       file: "export_pricing",
       onlyApproved: true,
-      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["tipo_sku", (row) => row.tipoSku || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["tipo_cantidad", (row) => row.tipoCantidad || ""], ["cantidad_minima", (row) => row.cantidadMinima || ""], ["precio_antes", (row) => row.precioAntes || ""], ["precio_ahora", (row) => row.precioAhora || ""], ["descuento", (row) => row.descuento || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["tipo_sku", (row) => row.tipoSku || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["tipo_cantidad", (row) => row.tipoCantidad || ""], ["cantidad_minima", (row) => displayValue(row.cantidadMinima)], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
     },
     mercadeo: {
       title: "Mercadeo",
       desc: "Base para artes, catalogo y revision.",
       file: "export_mercadeo",
-      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["nombre_actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["num_parte", (row) => row.numParte || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => row.precioAntes || ""], ["precio_ahora", (row) => row.precioAhora || ""], ["descuento", (row) => row.descuento || ""], ["comentario_comprador", (row) => row.comentario || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad], ["comentarios_abiertos_mercadeo", (row, ctx) => ctx.comentariosLineaAbiertos]],
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["nombre_actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["num_parte", (row) => row.numParte || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["comentario_comprador", (row) => row.comentario || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad], ["comentarios_abiertos_mercadeo", (row, ctx) => ctx.comentariosLineaAbiertos]],
     },
     planimetria: {
       title: "Planimetria",
       desc: "Base para tickets, rotulos y exhibiciones.",
       file: "export_planimetria",
       onlyApproved: true,
-      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["comprador", (row) => row.comprador || ""], ["division", (row) => row.division || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => row.precioAntes || ""], ["precio_ahora", (row) => row.precioAhora || ""], ["descuento", (row) => row.descuento || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["comprador", (row) => row.comprador || ""], ["division", (row) => row.division || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
     },
     consolidado: {
       title: "Consolidado",
       desc: "Base completa con revision y aplicabilidad.",
       file: "consolidado_promociones",
-      columns: [["Actividad", (row, ctx) => ctx.activityId], ["Nombre actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""], ["Tipo actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["Canal", (row, ctx) => ctx.activity.canal || ""], ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""], ["Segmenta", (row, ctx) => ctx.segmenta], ["Segmento cliente", (row, ctx) => ctx.segmentoCliente], ["Comprador", (row) => row.comprador || ""], ["Tipo promo", (row) => row.tipoPromo || ""], ["Oferta", (row) => row.grupoOferta || ""], ["Rol", (row) => row.tipoSku || ""], ["Variante", (row) => row.variante || ""], ["SKU", (row) => row.sku || ""], ["Descripcion", (row) => row.descripcion || ""], ["Cantidad", (row) => row.cantidadMinima || ""], ["Precio ahora", (row) => row.precioAhora || ""], ["Descuento", (row) => row.descuento || ""], ["Comentarios actividad", (row, ctx) => ctx.comentariosActividad], ["Comentarios linea", (row, ctx) => ctx.comentariosLinea]],
+      columns: [["Actividad", (row, ctx) => ctx.activityId], ["Nombre actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""], ["Tipo actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["Canal", (row, ctx) => ctx.activity.canal || ""], ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""], ["Segmenta", (row, ctx) => ctx.segmenta], ["Segmento cliente", (row, ctx) => ctx.segmentoCliente], ["Comprador", (row) => row.comprador || ""], ["Tipo promo", (row) => row.tipoPromo || ""], ["Oferta", (row) => row.grupoOferta || ""], ["Rol", (row) => row.tipoSku || ""], ["Variante", (row) => row.variante || ""], ["SKU", (row) => row.sku || ""], ["Descripcion", (row) => row.descripcion || ""], ["Cantidad", (row) => displayValue(row.cantidadMinima)], ["Precio ahora", (row) => displayValue(row.precioAhora)], ["Descuento", (row) => displayValue(row.descuento)], ["Comentarios actividad", (row, ctx) => ctx.comentariosActividad], ["Comentarios linea", (row, ctx) => ctx.comentariosLinea]],
     },
   };
 
@@ -242,7 +246,6 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       return;
     }
 
-    const XLSX = await loadStyledXlsx();
     const sheetRows = [
       def.columns.map(([label]) => label),
       ...exportRows.map((row) => {
@@ -251,11 +254,13 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       }),
     ];
 
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
-    applyComplexPromoBanding(XLSX, worksheet, exportRows, def.columns.length);
-    XLSX.utils.book_append_sheet(workbook, worksheet, def.title);
-    XLSX.writeFile(workbook, `${def.file}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    await exportStyledWorkbook({
+      sheetName: def.title,
+      rows: sheetRows,
+      dataRows: exportRows,
+      columnCount: def.columns.length,
+      fileName: `${def.file}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    });
   };
 
   return (
