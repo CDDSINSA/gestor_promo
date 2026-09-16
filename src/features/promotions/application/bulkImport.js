@@ -27,6 +27,21 @@ export function parseClipboardValues(text) {
   return parseClipboardRows(text).map((cells) => cells[0]).filter(isNumericSku);
 }
 
+// Use the same parsers as preview generation so reward columns are never omitted.
+export function getBulkSkuCodes(text, column, promoType) {
+  const builders = {
+    [BULK_COLUMN_UMBRAL_TABLE]: buildUmbralBulkPreview,
+    [BULK_COLUMN_COMBO_TABLE]: buildComboBulkPreview,
+    [BULK_COLUMN_BUY_X_GET_X_TABLE]: buildBuyXGetXBulkPreview,
+    [BULK_COLUMN_MEGAPACK_TABLE]: buildMegapackBulkPreview,
+  };
+  const items = builders[column]?.(text, {}, promoType);
+  const skus = items
+    ? items.flatMap((item) => [item.principalSku || item.sku, ...(item.rewards || []).map((reward) => reward.sku)]).filter(isNumericSku)
+    : parseClipboardValues(text);
+  return [...new Set(skus)];
+}
+
 export function isBulkTableColumn(column) {
   return [
     BULK_COLUMN_UMBRAL_TABLE,
@@ -241,7 +256,7 @@ export function buildUmbralBulkPreview(text, skuMaster = {}) {
       const master = skuMaster[sku] || {};
       const invalidThreshold = threshold.cantidadMinima === "";
       const canApply = Boolean(sku && !invalidThreshold);
-      const descripcion = canApply ? `${master.descripcion || "SKU no encontrado en archivo comprador"} | ${threshold.label}` : invalidThreshold ? `El encabezado "${threshold.label}" no tiene cantidad minima.` : "Fila sin SKU.";
+      const descripcion = canApply ? `${master.descripcion || "SKU no encontrado en maestro en la BD"} | ${threshold.label}` : invalidThreshold ? `El encabezado "${threshold.label}" no tiene cantidad minima.` : "Fila sin SKU.";
       preview.push({ index: preview.length + 1, sku: sku || "SKU vacio", descripcion, campo: `Umbral ${threshold.label}`, valorActual: "", valorNuevo: benefit.display, thresholdLabel: threshold.label, cantidadMinima: threshold.cantidadMinima, precioAhora: benefit.precioAhora, descuento: benefit.descuento, warning: !canApply || !master.descripcion, canApply });
     });
   });
@@ -318,7 +333,7 @@ export function buildComboBulkPreview(text, skuMaster = {}) {
     const master = skuMaster[sku] || {};
     const warning = !role || !sku || !master.descripcion;
     const benefit = hasPromoFieldValue(precioAhora) ? `Precio fijo ${precioAhora}` : hasPromoFieldValue(descuento) ? `Descuento ${descuento}` : "Sin beneficio";
-    preview.push({ index: preview.length + 1, scenario: currentScenario, sku: sku || "SKU vacio", descripcion: `${currentScenario} | ${role || "Rol no reconocido"} | ${master.descripcion || "SKU no encontrado en archivo comprador"}`, campo: role === "regalia" ? "RegalÃ­a" : role === "principal" ? "Principal" : "Rol", valorActual: "", valorNuevo: benefit, role, cantidadMinima: 1, precioAhora, descuento, comentario, warning, canApply: Boolean(role && sku) });
+    preview.push({ index: preview.length + 1, scenario: currentScenario, sku: sku || "SKU vacio", descripcion: `${currentScenario} | ${role || "Rol no reconocido"} | ${master.descripcion || "SKU no encontrado en maestro en la BD"}`, campo: role === "regalia" ? "RegalÃ­a" : role === "principal" ? "Principal" : "Rol", valorActual: "", valorNuevo: benefit, role, cantidadMinima: 1, precioAhora, descuento, comentario, warning, canApply: Boolean(role && sku) });
     previousRole = role || previousRole;
   });
   if (!preview.some((item) => item.canApply)) preview.push({ index: "Aviso", sku: "Sin combos", descripcion: "Pegue columnas: Tipo, Sku, Ahora con iva y descuento.", campo: "Formato", valorActual: "", valorNuevo: "Sin filas para aplicar", warning: true, canApply: false });
@@ -347,7 +362,7 @@ export function buildBuyXGetXBulkPreview(text, skuMaster = {}, promoType = BUY_X
     const warning = !sku || !parsedVariant || !master.descripcion;
     const variantLabel = parsedVariant ? parsedVariant.variant : variantText || "Variante invalida";
     const benefit = hasPromoFieldValue(precioAhora) ? `Precio fijo ${precioAhora}` : hasPromoFieldValue(descuento) ? `Descuento ${descuento}` : "Sin precio/descuento principal";
-    preview.push({ index: preview.length + 1, sku: sku || "SKU vacio", descripcion: `${variantLabel} | ${master.descripcion || "SKU no encontrado en archivo comprador"}`, campo: "Variante", valorActual: "", valorNuevo: benefit, variant: variantLabel, principalQty: parsedVariant?.principalQty || 0, rewardQty: parsedVariant?.rewardQty || 0, precioAhora, descuento, warning, canApply: Boolean(sku && parsedVariant) });
+    preview.push({ index: preview.length + 1, sku: sku || "SKU vacio", descripcion: `${variantLabel} | ${master.descripcion || "SKU no encontrado en maestro en la BD"}`, campo: "Variante", valorActual: "", valorNuevo: benefit, variant: variantLabel, principalQty: parsedVariant?.principalQty || 0, rewardQty: parsedVariant?.rewardQty || 0, precioAhora, descuento, warning, canApply: Boolean(sku && parsedVariant) });
   });
   if (!preview.some((item) => item.canApply)) preview.push({ index: "Aviso", sku: "Sin variantes", descripcion: `Pegue columnas: SKU, variante, ahora c IVA y descuento para ${promoType}.`, campo: "Formato", valorActual: "", valorNuevo: "Sin filas para aplicar", warning: true, canApply: false });
   return preview;
@@ -381,7 +396,7 @@ export function buildMegapackBulkPreview(text, skuMaster = {}) {
     preview.push({
       index: preview.length + 1,
       sku: principalSku || "SKU principal vacio",
-      descripcion: `${principalMaster.descripcion || "SKU principal no encontrado en archivo comprador"} | RegalÃ­as: ${rewardSummary || "sin regalÃ­as vÃ¡lidas"}`,
+      descripcion: `${principalMaster.descripcion || "SKU principal no encontrado en maestro en la BD"} | RegalÃ­as: ${rewardSummary || "sin regalÃ­as vÃ¡lidas"}`,
       campo: MEGAPACK_PROMO_TYPE,
       valorActual: "",
       valorNuevo: `Compra ${principalQty || "?"} | Obsequia ${rewardSummary || "?"}`,

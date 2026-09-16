@@ -1,11 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CheckCircle2,
   Circle,
   Eye,
   ImageUp,
+  LayoutGrid,
+  List,
+  Maximize2,
+  Minimize2,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -45,6 +51,23 @@ import { Button, Card, CardContent, Header } from "./ui";
 const PROJECT_STATES = ["planificacion", "en_diseno", "en_revision", "aprobado", "consolidado", "cancelado"];
 const PAGE_STATES = ["pendiente", "en_diseno", "en_revision", "ajustes", "aprobada", "rechazada", "lista_consolidar"];
 const ANNOTATION_COLOR = "#E53935";
+const COMMENT_CATEGORIES = [
+  { id: "precio", label: "Precio / Promo", color: "#D97706", icon: "🏷️" },
+  { id: "imagen", label: "Arte / Imagen", color: "#00A6C8", icon: "🖼️" },
+  { id: "ajuste", label: "Ajuste Crítico", color: "#E53935", icon: "⚠️" },
+  { id: "general", label: "General / Texto", color: "#006B3F", icon: "📝" },
+];
+
+const CATEGORY_COLORS = {
+  precio: "#D97706",
+  imagen: "#00A6C8",
+  ajuste: "#E53935",
+  general: "#006B3F",
+  rechazo: "#E53935",
+  aprobacion: "#006B3F",
+  comentario: "#E53935",
+};
+
 const ANNOTATION_TOOLS = [
   ["rect", "Rectangulo", Square],
   ["circle", "Circulo", Circle],
@@ -189,14 +212,24 @@ function stripDraftCoordinates(annotation) {
   return clean;
 }
 
-function buildBoxAnnotation(tool, startPoint, endPoint) {
+function hexToRgba(hex, alpha = 0.15) {
+  if (!hex || typeof hex !== "string" || !hex.startsWith("#")) return `rgba(229,57,53,${alpha})`;
+  const clean = hex.slice(1);
+  const num = parseInt(clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function buildBoxAnnotation(tool, startPoint, endPoint, color = ANNOTATION_COLOR) {
   const startX = Number.isFinite(startPoint?.startX) ? startPoint.startX : startPoint?.x;
   const startY = Number.isFinite(startPoint?.startY) ? startPoint.startY : startPoint?.y;
   const endX = endPoint?.x ?? startX;
   const endY = endPoint?.y ?? startY;
   return {
     type: tool,
-    color: ANNOTATION_COLOR,
+    color,
     startX,
     startY,
     x: Math.min(startX, endX),
@@ -226,24 +259,47 @@ function getAnnotationAnchor(annotation) {
 
 function renderAnnotation(annotation, key, className = "", eventProps = {}) {
   if (!annotation) return null;
-  const color = annotation.color === "#FFC72C" ? ANNOTATION_COLOR : annotation.color || ANNOTATION_COLOR;
-  const title = annotation.commentText ? `${annotation.commentType || "comentario"}: ${annotation.commentText}` : "";
+  const color = annotation.color || CATEGORY_COLORS[annotation.commentType] || ANNOTATION_COLOR;
+  const title = annotation.commentText
+    ? `${annotation.commentIndex ? `#${annotation.commentIndex} ` : ""}${annotation.commentType || "comentario"}: ${annotation.commentText}`
+    : "";
+  const anchor = getAnnotationAnchor(annotation);
+  const pinRadius = 0.017;
+
+  let shape = null;
   if (annotation.type === "freehand") {
     const points = Array.isArray(annotation.points)
       ? annotation.points.map((point) => `${clampRatio(point.x)},${clampRatio(point.y)}`).join(" ")
       : "";
     if (!points) return null;
-    return <polyline key={key} className={className} points={points} fill="none" stroke={color} strokeWidth="0.006" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</polyline>;
+    shape = <polyline className="annotation-shape" points={points} fill="none" stroke={color} strokeWidth="0.006" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke">{title && <title>{title}</title>}</polyline>;
+  } else {
+    const x = clampRatio(annotation.x);
+    const y = clampRatio(annotation.y);
+    const width = clampRatio(annotation.width);
+    const height = clampRatio(annotation.height);
+    if (!width || !height) return null;
+    const fillColor = hexToRgba(color, 0.16);
+    if (annotation.type === "circle") {
+      shape = <ellipse className="annotation-shape" cx={x + width / 2} cy={y + height / 2} rx={width / 2} ry={height / 2} fill={fillColor} stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke">{title && <title>{title}</title>}</ellipse>;
+    } else {
+      shape = <rect className="annotation-shape" x={x} y={y} width={width} height={height} fill={fillColor} stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke">{title && <title>{title}</title>}</rect>;
+    }
   }
-  const x = clampRatio(annotation.x);
-  const y = clampRatio(annotation.y);
-  const width = clampRatio(annotation.width);
-  const height = clampRatio(annotation.height);
-  if (!width || !height) return null;
-  if (annotation.type === "circle") {
-    return <ellipse key={key} className={className} cx={x + width / 2} cy={y + height / 2} rx={width / 2} ry={height / 2} fill="rgba(229,57,53,0.14)" stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</ellipse>;
-  }
-  return <rect key={key} className={className} x={x} y={y} width={width} height={height} fill="rgba(229,57,53,0.14)" stroke={color} strokeWidth="0.006" vectorEffect="non-scaling-stroke" {...eventProps}>{title && <title>{title}</title>}</rect>;
+
+  return (
+    <g key={key} className={classNames("catalog-design-annotation-group", className)} {...eventProps}>
+      {shape}
+      {annotation.commentIndex && (
+        <g className="catalog-design-pin" transform={`translate(${clampRatio(anchor.x)}, ${clampRatio(anchor.y)})`}>
+          <circle r={pinRadius} fill={color} stroke="#ffffff" strokeWidth="0.003" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.4))" />
+          <text textAnchor="middle" dy="0.006" fill="#ffffff" fontSize="0.017" fontWeight="bold" fontFamily="system-ui, -apple-system, sans-serif">
+            {annotation.commentIndex}
+          </text>
+        </g>
+      )}
+    </g>
+  );
 }
 
 export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseConnection, supabaseReady }) {
@@ -262,6 +318,8 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const catalogoById = useMemo(() => Object.fromEntries(catalogosTrabajables.map((catalogo) => [getCatalogoId(catalogo), catalogo])), [catalogosTrabajables]);
   const catalogoIdsTrabajables = useMemo(() => new Set(catalogosTrabajables.map(getCatalogoId)), [catalogosTrabajables]);
   const imageShellRef = useRef(null);
+  const viewerStageRef = useRef(null);
+  const filmstripTrackRef = useRef(null);
 
   const [projects, setProjects] = useState([]);
   const [pages, setPages] = useState([]);
@@ -273,9 +331,17 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [projectForm, setProjectForm] = useState(() => buildInitialProject(catalogos));
   const [filters, setFilters] = useState({ designer: "", buyer: "", state: "" });
   const [commentText, setCommentText] = useState("");
+  const [commentCategory, setCommentCategory] = useState("ajuste");
   const [signedUrls, setSignedUrls] = useState({});
   const [viewerZoom, setViewerZoom] = useState(100);
-  const [commentPanelOpen, setCommentPanelOpen] = useState(false);
+  const [pageViewMode, setPageViewMode] = useState("filmstrip");
+  const [focusMode, setFocusMode] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [activeSideTab, setActiveSideTab] = useState("comments");
+  const [isDraftingComment, setIsDraftingComment] = useState(false);
+  const [sideRailCollapsed, setSideRailCollapsed] = useState(false);
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotationTool, setAnnotationTool] = useState("rect");
   const [draftAnnotations, setDraftAnnotations] = useState([]);
@@ -284,7 +350,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [hoveredAnnotation, setHoveredAnnotation] = useState(null);
   const [targetPageCount, setTargetPageCount] = useState("");
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
-  const [skuFinderOpen, setSkuFinderOpen] = useState(false);
+  const [configCollapsed, setConfigCollapsed] = useState(false);
   const [skuQuery, setSkuQuery] = useState("");
   const [skuSearchTerm, setSkuSearchTerm] = useState("");
   const [status, setStatus] = useState({ type: "idle", message: "" });
@@ -357,6 +423,12 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     };
   }, [selectedProjectPages]);
 
+  const chronologicalOrder = useMemo(() => {
+    const pageComments = comments.filter((c) => c.pagina_id === selectedPage?.id);
+    const sorted = [...pageComments].sort((a, b) => new Date(a.fecha_creacion || 0) - new Date(b.fecha_creacion || 0));
+    return new Map(sorted.map((c, idx) => [c.id, idx + 1]));
+  }, [comments, selectedPage?.id]);
+
   const selectedComments = useMemo(() => comments
     .filter((comment) => comment.pagina_id === selectedPage?.id)
     .sort((a, b) => {
@@ -365,14 +437,21 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       if (aResolved !== bResolved) return aResolved ? 1 : -1;
       return new Date(b.fecha_creacion || 0) - new Date(a.fecha_creacion || 0);
     }), [comments, selectedPage]);
-  const selectedAnnotations = useMemo(() => selectedComments.flatMap((comment) => normalizeCommentAnnotations(comment).map((annotation) => ({
-    ...annotation,
-    commentId: comment.id,
-    commentType: comment.tipo || "comentario",
-    commentText: comment.comentario || "",
-    commentUser: getUserLabel(userById[comment.usuario_id]),
-    commentDate: formatDate(comment.fecha_creacion),
-  }))), [selectedComments, userById]);
+
+  const selectedAnnotations = useMemo(() => selectedComments.flatMap((comment) => {
+    const commentNumber = chronologicalOrder.get(comment.id) || 1;
+    const catColor = CATEGORY_COLORS[comment.tipo] || ANNOTATION_COLOR;
+    return normalizeCommentAnnotations(comment).map((annotation) => ({
+      ...annotation,
+      color: annotation.color || catColor,
+      commentId: comment.id,
+      commentIndex: commentNumber,
+      commentType: comment.tipo || "comentario",
+      commentText: comment.comentario || "",
+      commentUser: getUserLabel(userById[comment.usuario_id]),
+      commentDate: formatDate(comment.fecha_creacion),
+    }));
+  }), [selectedComments, chronologicalOrder, userById]);
   const selectedPageIndex = visiblePages.findIndex((page) => page.id === selectedPage?.id);
   const selectedImageUrl = selectedPage ? signedUrls[selectedPage.id] || "" : "";
   const selectedProjectPromoRows = useMemo(() => {
@@ -414,6 +493,109 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     const currentIndex = selectedPageIndex >= 0 ? selectedPageIndex : 0;
     const nextIndex = Math.min(visiblePages.length - 1, Math.max(0, currentIndex + direction));
     selectViewerPage(visiblePages[nextIndex]);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const tag = event.target?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || event.target?.isContentEditable) {
+        return;
+      }
+      if (event.code === "Space" && !event.repeat) {
+        event.preventDefault();
+        setIsSpacePressed(true);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goToViewerPage(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goToViewerPage(1);
+      } else if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        setFocusMode((prev) => !prev);
+      } else if (event.key === "Escape") {
+        setFocusMode(false);
+      }
+    };
+
+    const handleKeyUp = (event) => {
+      if (event.code === "Space") {
+        setIsSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [visiblePages, selectedPageIndex, focusMode]);
+
+  useEffect(() => {
+    const stage = viewerStageRef.current;
+    if (!stage) return;
+    const handleWheel = (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const delta = event.deltaY < 0 ? 15 : -15;
+        setViewerZoom((prev) => Math.max(50, Math.min(220, prev + delta)));
+      }
+    };
+    stage.addEventListener("wheel", handleWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPage || pageViewMode !== "filmstrip") return;
+    const card = document.getElementById(`filmstrip-card-${selectedPage.id}`);
+    if (card) {
+      card.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+  }, [selectedPage?.id, pageViewMode]);
+
+  const scrollFilmstrip = (direction) => {
+    if (!filmstripTrackRef.current) return;
+    filmstripTrackRef.current.scrollBy({ left: direction * 360, behavior: "smooth" });
+  };
+
+  const handleStagePointerDown = (event) => {
+    if (annotationMode && !isSpacePressed) return;
+    if (event.button !== 0) return;
+    const stage = viewerStageRef.current;
+    if (!stage) return;
+    if (viewerZoom <= 100 && !isSpacePressed) return;
+
+    setIsPanning(true);
+    setPanStart({
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: stage.scrollLeft,
+      scrollTop: stage.scrollTop,
+    });
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {}
+  };
+
+  const handleStagePointerMove = (event) => {
+    if (!isPanning) return;
+    const stage = viewerStageRef.current;
+    if (!stage) return;
+    const dx = event.clientX - panStart.x;
+    const dy = event.clientY - panStart.y;
+    stage.scrollLeft = panStart.scrollLeft - dx;
+    stage.scrollTop = panStart.scrollTop - dy;
+  };
+
+  const handleStagePointerUp = (event) => {
+    if (isPanning) {
+      setIsPanning(false);
+      try {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      } catch {}
+    }
   };
 
   const refreshData = async () => {
@@ -469,7 +651,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   }, [visiblePages]);
 
   useEffect(() => {
-    setCommentPanelOpen(false);
+    setIsDraftingComment(false);
     setAnnotationMode(false);
     setDraftAnnotations([]);
     setActiveAnnotation(null);
@@ -611,11 +793,12 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     openReviewPanel();
+    const currentColor = CATEGORY_COLORS[commentCategory] || ANNOTATION_COLOR;
     if (annotationTool === "freehand") {
-      setActiveAnnotation({ type: "freehand", color: ANNOTATION_COLOR, points: [point] });
+      setActiveAnnotation({ type: "freehand", color: currentColor, points: [point] });
       return;
     }
-    setActiveAnnotation(buildBoxAnnotation(annotationTool, { ...point, startX: point.x, startY: point.y }, point));
+    setActiveAnnotation(buildBoxAnnotation(annotationTool, { ...point, startX: point.x, startY: point.y }, point, currentColor));
   };
 
   const moveAnnotation = (event) => {
@@ -630,7 +813,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
         if (lastPoint && Math.abs(lastPoint.x - point.x) + Math.abs(lastPoint.y - point.y) < 0.003) return current;
         return { ...current, points: [...current.points, point] };
       }
-      return buildBoxAnnotation(current.type, current, point);
+      return buildBoxAnnotation(current.type, current, point, current.color);
     });
   };
 
@@ -649,13 +832,25 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     setCommentText("");
     setDraftAnnotations([]);
     setActiveAnnotation(null);
-    setCommentPanelOpen(false);
+    setIsDraftingComment(false);
     setAnnotationMode(false);
   };
 
   const openReviewPanel = () => {
-    setSkuFinderOpen(false);
-    setCommentPanelOpen(true);
+    setActiveSideTab("comments");
+    setIsDraftingComment(true);
+    setSideRailCollapsed(false);
+  };
+
+  const highlightAndScrollComment = (commentId) => {
+    if (!commentId) return;
+    setActiveCommentId(commentId);
+    setActiveSideTab("comments");
+    setSideRailCollapsed(false);
+    const element = document.getElementById(`catalog-comment-${commentId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   };
 
   const undoAnnotation = () => {
@@ -665,7 +860,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const addComment = () => {
     if (!selectedPage) return;
     runAction("Guardando comentario...", async () => {
-      await addCatalogDesignPageComment(supabaseConnection, selectedPage.id, commentText, "comentario", currentUserId, draftAnnotations);
+      await addCatalogDesignPageComment(supabaseConnection, selectedPage.id, commentText, commentCategory, currentUserId, draftAnnotations);
       resetReviewDraft();
     }, "Comentario guardado.");
   };
@@ -673,7 +868,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const reviewPage = (nextStatus, type) => {
     if (!selectedPage) return;
     runAction("Registrando revisión...", async () => {
-      await reviewCatalogDesignPage(supabaseConnection, selectedPage, nextStatus, commentText, type, currentUserId, draftAnnotations);
+      await reviewCatalogDesignPage(supabaseConnection, selectedPage, nextStatus, commentText, commentCategory || type, currentUserId, draftAnnotations);
       resetReviewDraft();
     }, nextStatus === "aprobada" ? "Página aprobada." : "Página enviada a ajustes.");
   };
@@ -696,7 +891,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const pendingAnnotationCount = draftAnnotations.length + (activeAnnotation ? 1 : 0);
   const hoveredAnnotationAnchor = hoveredAnnotation ? getAnnotationAnchor(hoveredAnnotation) : null;
 
-  return <div className="catalog-design-page">
+  return <div className={classNames("catalog-design-page", focusMode && "catalog-design-focus-active")}>
     <div className="toolbar">
       <Header title="Diseño de Catálogos" subtitle="Proyectos por página, avances de diseño, revisión del comprador y consolidación final." />
       <div className="toolbar-actions catalog-design-header-actions">
@@ -782,47 +977,60 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       </Card>
 
       <div className="catalog-design-main">
-        <Card className="catalog-design-config-card">
+        <Card className={classNames("catalog-design-config-card", configCollapsed && "collapsed")}>
           <CardContent>
-            <div className="toolbar">
+            <div className="toolbar catalog-design-config-toolbar" onClick={() => setConfigCollapsed((v) => !v)} style={{ cursor: "pointer" }}>
               <div>
-                <h2>Configuracion del catalogo</h2>
-                <p>{selectedProject?.catalogo_id ? `Catalogo ${selectedProject.catalogo_id}` : "Proyecto de diseño por páginas"}</p>
+                <div className="catalog-design-config-title-row">
+                  <h2>Configuración del catálogo</h2>
+                  {configCollapsed && selectedProject && (
+                    <span className="catalog-design-config-pill">
+                      <strong>{selectedProject.nombre_proyecto || "Proyecto"}</strong> · {selectedProject.estado || "planificación"} · {selectedProjectPageCount} págs.
+                    </span>
+                  )}
+                </div>
+                <p>{selectedProject?.catalogo_id ? `Catálogo ${selectedProject.catalogo_id}` : "Proyecto de diseño por páginas"}</p>
               </div>
-              {canManage && selectedProject && <div className="toolbar-actions">
-                <Button variant="outline" onClick={saveSelectedProject}><Save size={16}/> Guardar proyecto</Button>
-              </div>}
+              <div className="toolbar-actions" onClick={(e) => e.stopPropagation()}>
+                {canManage && selectedProject && !configCollapsed && (
+                  <Button variant="outline" onClick={saveSelectedProject}><Save size={16}/> Guardar proyecto</Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="catalog-design-collapse-toggle-btn"
+                  onClick={() => setConfigCollapsed((v) => !v)}
+                  title={configCollapsed ? "Expandir configuración" : "Contraer configuración hacia arriba"}
+                  aria-label={configCollapsed ? "Expandir configuración" : "Contraer configuración hacia arriba"}
+                >
+                  {configCollapsed ? <ChevronDown size={16}/> : <ChevronUp size={16}/>}
+                  <span>{configCollapsed ? "Expandir" : "Contraer"}</span>
+                </Button>
+              </div>
             </div>
 
-            {selectedProject && <div className="catalog-design-project-edit">
-              {canManage ? <>
-                <Field label="Nombre"><input value={selectedProject.nombre_proyecto || ""} onChange={(event) => updateProjectField("nombre_proyecto", event.target.value)} /></Field>
-                <Field label="Estado"><select value={selectedProject.estado || "planificacion"} onChange={(event) => updateProjectField("estado", event.target.value)}>{PROJECT_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select></Field>
-                <Field label="Inicio"><input type="date" value={selectedProject.fecha_inicio || ""} onChange={(event) => updateProjectField("fecha_inicio", event.target.value)} /></Field>
-                <Field label="Entrega"><input type="date" value={selectedProject.fecha_entrega || ""} onChange={(event) => updateProjectField("fecha_entrega", event.target.value)} /></Field>
-                <Field label="Cantidad de paginas"><input type="number" min="1" max="120" value={targetPageCount} onChange={(event) => setTargetPageCount(event.target.value)} /></Field>
-              </> : <p className="readonly">Estado del proyecto: {selectedProject.estado}. Entrega: {formatDate(selectedProject.fecha_entrega) || "sin fecha"}.</p>}
-            </div>}
-            {selectedProject && canManage && <p className="catalog-design-name-preview">Cantidad actual: {selectedProjectPageCount} paginas. Si reduces, solo se eliminan paginas vacias sin imagen ni comentarios.</p>}
+            {!configCollapsed && (
+              <>
+                {selectedProject && <div className="catalog-design-project-edit">
+                  {canManage ? <>
+                    <Field label="Nombre"><input value={selectedProject.nombre_proyecto || ""} onChange={(event) => updateProjectField("nombre_proyecto", event.target.value)} /></Field>
+                    <Field label="Estado"><select value={selectedProject.estado || "planificacion"} onChange={(event) => updateProjectField("estado", event.target.value)}>{PROJECT_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select></Field>
+                    <Field label="Inicio"><input type="date" value={selectedProject.fecha_inicio || ""} onChange={(event) => updateProjectField("fecha_inicio", event.target.value)} /></Field>
+                    <Field label="Entrega"><input type="date" value={selectedProject.fecha_entrega || ""} onChange={(event) => updateProjectField("fecha_entrega", event.target.value)} /></Field>
+                    <Field label="Cantidad de paginas"><input type="number" min="1" max="120" value={targetPageCount} onChange={(event) => setTargetPageCount(event.target.value)} /></Field>
+                  </> : <p className="readonly">Estado del proyecto: {selectedProject.estado}. Entrega: {formatDate(selectedProject.fecha_entrega) || "sin fecha"}.</p>}
+                </div>}
+                {selectedProject && canManage && <p className="catalog-design-name-preview">Cantidad actual: {selectedProjectPageCount} paginas. Si reduces, solo se eliminan paginas vacias sin imagen ni comentarios.</p>}
+              </>
+            )}
           </CardContent>
         </Card>
-
-        <div className="catalog-design-metrics">
-          <Card><CardContent><span>Total</span><strong>{metrics.total}</strong></CardContent></Card>
-          <Card><CardContent><span>Pendientes</span><strong>{metrics.pendientes}</strong></CardContent></Card>
-          <Card><CardContent><span>En revisión</span><strong>{metrics.revision}</strong></CardContent></Card>
-          <Card><CardContent><span>Aprobadas</span><strong>{metrics.aprobadas}</strong></CardContent></Card>
-          <Card><CardContent><span>Ajustes</span><strong>{metrics.ajustes}</strong></CardContent></Card>
-          <Card><CardContent><span>Listas</span><strong>{metrics.listas}</strong></CardContent></Card>
-          <Card className="catalog-design-progress"><CardContent><span>Avance</span><strong>{metrics.porcentaje}%</strong></CardContent></Card>
-        </div>
 
         <Card className="grid-card catalog-design-viewer-card">
           <CardContent>
             <div className="toolbar catalog-design-viewer-toolbar">
               <div>
                 <h2>Páginas de {selectedProject?.nombre_proyecto || "proyecto"}</h2>
-                <p>{selectedPage ? `${selectedPage.titulo_pagina || `Pagina ${selectedPage.numero_pagina}`} · ${selectedPage.estado || "pendiente"}` : "Seleccione una página para revisar el diseño."}</p>
+                <p>{selectedPage ? `${selectedPage.titulo_pagina || `Página ${selectedPage.numero_pagina}`} · ${selectedPage.estado || "pendiente"}` : "Seleccione una página para revisar el diseño."}</p>
               </div>
               <div className="toolbar-actions filters">
                 <select value={filters.designer} onChange={(event) => setFilters((current) => ({ ...current, designer: event.target.value }))}><option value="">Diseñador</option>{designerOptions.map((user) => <option key={user.id} value={user.id}>{user.nombre || user.email}</option>)}</select>
@@ -830,32 +1038,80 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                 <select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))}><option value="">Estado</option>{PAGE_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select>
               </div>
             </div>
+
             <div className="catalog-design-viewer">
               <div className="catalog-design-viewer-actions">
                 <div className="catalog-design-viewer-current">
-                  <span>Página seleccionada</span>
-                  <strong>{selectedPage?.titulo_pagina || "Sin página"}</strong>
-                  {selectedPage && <StateBadge state={selectedPage.estado}/>}
+                  <div className="catalog-design-viewer-current-title-row">
+                    <span>Pág.</span>
+                    <strong>{selectedPage?.titulo_pagina || "Sin página"}</strong>
+                    {selectedPage && (
+                      canManage ? (
+                        <select
+                          className="catalog-design-quick-state-select"
+                          value={selectedPage.estado || "pendiente"}
+                          onChange={(e) => updatePageField(selectedPage, "estado", e.target.value)}
+                          title="Cambiar estado de esta página directamente"
+                        >
+                          {PAGE_STATES.map((state) => (
+                            <option key={state} value={state}>{state.replace(/_/g, " ")}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <StateBadge state={selectedPage.estado}/>
+                      )
+                    )}
+                  </div>
+                  {selectedPage && (
+                    <div className="catalog-design-viewer-current-meta">
+                      <span title="Diseñador asignado">🎨 {getUserLabel(userById[selectedPage.disenador_id]) || "Sin diseñador"}</span>
+                      <span className="dot-sep">·</span>
+                      <span title="Comprador asignado">🛒 {getBuyerLabel(buyerById[selectedPage.comprador_id]) || "Sin comprador"}</span>
+                    </div>
+                  )}
                 </div>
+
                 <div className="catalog-design-viewer-controls">
-                  <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(-1)} disabled={selectedPageIndex <= 0}><ChevronLeft size={16}/> Anterior</Button>
-                  <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(1)} disabled={selectedPageIndex < 0 || selectedPageIndex >= visiblePages.length - 1}>Siguiente <ChevronRight size={16}/></Button>
-                  <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.max(60, value - 20))} disabled={!selectedPage} title="Reducir zoom" aria-label="Reducir zoom"><ZoomOut size={16}/></Button>
-                  <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.min(180, value + 20))} disabled={!selectedPage} title="Aumentar zoom" aria-label="Aumentar zoom"><ZoomIn size={16}/></Button>
-                  <Button className="catalog-design-sku-btn" variant="outline" onClick={() => { setCommentPanelOpen(false); setAnnotationMode(false); setSkuFinderOpen(true); }} title="Buscar informacion de SKU"><Search size={16}/> Buscar SKU</Button>
+                  <div className="catalog-design-nav-group" role="group" aria-label="Navegación de páginas">
+                    <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(-1)} disabled={selectedPageIndex <= 0} title="Página anterior (o flecha izquierda)"><ChevronLeft size={16}/> Anterior</Button>
+                    <span className="catalog-design-page-indicator" title="Página actual de páginas visibles">{visiblePages.length ? `${selectedPageIndex + 1} / ${visiblePages.length}` : "0 / 0"}</span>
+                    <Button className="catalog-design-nav-btn" variant="outline" onClick={() => goToViewerPage(1)} disabled={selectedPageIndex < 0 || selectedPageIndex >= visiblePages.length - 1} title="Página siguiente (o flecha derecha)">Siguiente <ChevronRight size={16}/></Button>
+                  </div>
+
+                  <div className="catalog-design-zoom-group" role="group" aria-label="Controles de zoom">
+                    <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.max(50, value - 15))} disabled={!selectedPage} title="Reducir zoom" aria-label="Reducir zoom"><ZoomOut size={16}/></Button>
+                    <span className="catalog-design-zoom-level" title="Nivel de zoom actual">{viewerZoom}%</span>
+                    <Button className="catalog-design-zoom-btn" variant="outline" onClick={() => setViewerZoom((value) => Math.min(220, value + 15))} disabled={!selectedPage} title="Aumentar zoom" aria-label="Aumentar zoom"><ZoomIn size={16}/></Button>
+                    <Button className="catalog-design-zoom-preset-btn" variant={viewerZoom === 100 ? "default" : "outline"} onClick={() => setViewerZoom(100)} disabled={!selectedPage} title="Ajustar al ancho (100%)">Ajustar</Button>
+                    <Button className="catalog-design-zoom-preset-btn" variant={viewerZoom === 140 ? "default" : "outline"} onClick={() => setViewerZoom(140)} disabled={!selectedPage} title="Zoom detalle (140%)">140%</Button>
+                  </div>
+
+                  <Button
+                    className={classNames("catalog-design-focus-btn", focusMode && "active")}
+                    variant={focusMode ? "default" : "outline"}
+                    onClick={() => setFocusMode((v) => !v)}
+                    title={focusMode ? "Salir de Modo Enfoque (F o Esc)" : "Modo Enfoque / Pantalla Completa (F)"}
+                  >
+                    {focusMode ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}
+                    <span>{focusMode ? "Salir Enfoque" : "Modo Enfoque"}</span>
+                  </Button>
+
+                  <Button className={classNames("catalog-design-sku-btn", activeSideTab === "sku" && "active")} variant="outline" onClick={() => { setActiveSideTab("sku"); setSideRailCollapsed(false); }} title="Buscar información de SKU"><Search size={16}/> Buscar SKU</Button>
+
                   {canUploadSelectedPage && <label className="btn btn-primary catalog-design-file-btn catalog-design-viewer-upload">
                     <ImageUp size={16}/> Actualizar imagen
                     <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => { uploadPageImage(selectedPage, event.target.files?.[0]); event.target.value = ""; }} />
                   </label>}
                 </div>
               </div>
+
               {selectedPage && <div className="catalog-design-review-quickbar">
-                <div className="catalog-design-annotation-tools" aria-label="Herramientas de senalizacion">
-                  <Button className="catalog-design-pencil-btn" variant={annotationMode ? "default" : "outline"} onClick={() => { setAnnotationMode((value) => !value); openReviewPanel(); }} disabled={!canUseAnnotations} title={canUseAnnotations ? "Senalar sobre la pagina" : "Seleccione una pagina con imagen asignada para revisar."}>
-                    <Pencil size={16}/> Senalar
+                <div className="catalog-design-annotation-tools" aria-label="Herramientas de señalización">
+                  <Button className="catalog-design-pencil-btn" variant={annotationMode ? "default" : "outline"} onClick={() => { setAnnotationMode((value) => !value); openReviewPanel(); }} disabled={!canUseAnnotations} title={canUseAnnotations ? "Señalar sobre la página con imagen" : "Seleccione una página con imagen asignada para revisar."}>
+                    <Pencil size={16}/> Señalar
                   </Button>
                   {annotationMode && ANNOTATION_TOOLS.map(([tool, label, Icon]) => <button key={tool} type="button" className={annotationTool === tool ? "catalog-design-tool-btn selected" : "catalog-design-tool-btn"} onClick={() => setAnnotationTool(tool)} title={label} aria-label={label}><Icon size={16}/></button>)}
-                  {annotationMode && <button type="button" className="catalog-design-tool-btn" onClick={undoAnnotation} disabled={!draftAnnotations.length} title="Deshacer ultima senal" aria-label="Deshacer ultima senal"><Undo2 size={16}/></button>}
+                  {annotationMode && <button type="button" className="catalog-design-tool-btn" onClick={undoAnnotation} disabled={!draftAnnotations.length} title="Deshacer última señal" aria-label="Deshacer última señal"><Undo2 size={16}/></button>}
                 </div>
                 <div className="catalog-design-review-actions">
                   <Button variant="outline" onClick={openReviewPanel} disabled={!selectedPage}><MessageSquare size={16}/> Comentar</Button>
@@ -865,203 +1121,571 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                   </>}
                 </div>
               </div>}
-              {skuFinderOpen && <div className="catalog-design-sku-popover" role="dialog" aria-label="Buscar informacion de SKU">
-                <div className="catalog-design-sku-popover-head">
-                  <div>
-                    <strong>Buscar SKU</strong>
-                    <span>Valida datos promocionales contra la pagina visible.</span>
+
+              <div className={classNames("catalog-design-review-workspace", sideRailCollapsed && "rail-collapsed")}>
+                <aside className={classNames("catalog-design-comment-rail", sideRailCollapsed && "collapsed")}>
+                  <div className="catalog-design-rail-tabs-bar">
+                    <div className="catalog-design-rail-tabs">
+                      <button
+                        type="button"
+                        className={classNames("catalog-design-tab-btn", activeSideTab === "comments" && "active")}
+                        onClick={() => setActiveSideTab("comments")}
+                      >
+                        <MessageSquare size={14}/> Comentarios
+                        {selectedComments.length > 0 && <span className="catalog-design-tab-badge">{selectedComments.length}</span>}
+                      </button>
+                      <button
+                        type="button"
+                        className={classNames("catalog-design-tab-btn", activeSideTab === "sku" && "active")}
+                        onClick={() => setActiveSideTab("sku")}
+                      >
+                        <Search size={14}/> Buscar SKU
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-btn catalog-design-rail-toggle-btn"
+                      onClick={() => setSideRailCollapsed((c) => !c)}
+                      title={sideRailCollapsed ? "Expandir panel" : "Contraer panel"}
+                      aria-label={sideRailCollapsed ? "Expandir panel" : "Contraer panel"}
+                    >
+                      {sideRailCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                    </button>
                   </div>
-                  <button type="button" className="icon-btn" onClick={() => setSkuFinderOpen(false)} aria-label="Cerrar buscador SKU"><X size={16}/></button>
-                </div>
-                <form className="catalog-design-sku-search" onSubmit={submitSkuSearch}>
-                  <input value={skuQuery} onChange={(event) => setSkuQuery(event.target.value)} placeholder="Codigo SKU" autoFocus />
-                  <Button type="submit" disabled={!skuQuery.trim()}><Search size={16}/> Buscar</Button>
-                </form>
-                <div className="catalog-design-sku-results">
-                  {!skuSearchTerm && <div className="catalog-design-sku-empty">Ingrese un codigo para consultar descripcion, precios, descuento y comentario.</div>}
-                  {skuSearchTerm && !skuSearchResults.length && <div className="catalog-design-sku-empty">No se encontro informacion para el SKU {skuSearchTerm}.</div>}
-                  {skuSearchResults.map((row, index) => <div className="catalog-design-sku-result" key={`${row.id || row.row_id || row.sku}-${index}`}>
-                    <div className="catalog-design-sku-result-head">
-                      <span>SKU</span>
-                      <strong>{formatSkuInfoValue(row.sku)}</strong>
-                    </div>
-                    <p>{formatSkuInfoValue(getPromoField(row, "descripcion"))}</p>
-                    <div className="catalog-design-sku-data">
-                      <div><span>Antes</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAntes", "precio_antes"))}</strong></div>
-                      <div><span>Ahora</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAhora", "precio_ahora"))}</strong></div>
-                      <div><span>Descuento</span><strong>{formatSkuInfoValue(getPromoField(row, "descuento"))}</strong></div>
-                    </div>
-                    <div className="catalog-design-sku-comment">
-                      <span>Comentario</span>
-                      <p>{formatSkuInfoValue(getPromoField(row, "comentario", "comentario_comprador"))}</p>
-                    </div>
-                  </div>)}
-                </div>
-              </div>}
-              {commentPanelOpen && selectedPage && <div className="catalog-design-comment-popover" role="dialog" aria-label="Comentario de revision">
-                <div className="catalog-design-comment-popover-head">
-                  <div>
-                    <strong>Comentario de revision</strong>
-                    <span>{pendingAnnotationCount ? `${pendingAnnotationCount} senal${pendingAnnotationCount === 1 ? "" : "es"} por guardar` : "Sin senales pendientes"}</span>
-                  </div>
-                  <button type="button" className="icon-btn" onClick={() => { setCommentPanelOpen(false); setAnnotationMode(false); }} aria-label="Cerrar comentario"><X size={16}/></button>
-                </div>
-                <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Describe el cambio solicitado para el disenador." autoFocus={!annotationMode} />
-                <div className="catalog-design-comment-popover-actions">
-                  <Button variant="outline" onClick={resetReviewDraft}>Cancelar</Button>
-                  <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}><MessageSquare size={16}/> Guardar</Button>
-                  {canReviewSelectedPage && <>
-                    <Button onClick={() => reviewPage("aprobada", "aprobacion")}><CheckCircle2 size={16}/> Aprobar</Button>
-                    <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")}><XCircle size={16}/> Rechazar</Button>
-                  </>}
-                </div>
-              </div>}
-              <div className="catalog-design-review-workspace">
-                <aside className="catalog-design-comment-rail">
-                  <div className="catalog-design-comment-rail-head">
-                    <div>
-                      <strong>Comentarios</strong>
-                      <span>{selectedComments.length ? `${selectedComments.length} registrado${selectedComments.length === 1 ? "" : "s"}` : "Sin comentarios"}</span>
-                    </div>
-                    <Button variant="outline" onClick={openReviewPanel} disabled={!selectedPage}><MessageSquare size={16}/> Nuevo</Button>
-                  </div>
-                  <div className="catalog-design-comment-rail-list">
-                    {selectedComments.map((comment) => {
-                      const annotationCount = normalizeCommentAnnotations(comment).length;
-                      const commentStatus = getCommentStatus(comment);
-                      const selected = activeCommentId === comment.id || hoveredAnnotation?.commentId === comment.id;
-                      return <div key={comment.id} role="button" tabIndex={0} className={classNames("catalog-design-comment-item", selected && "selected", commentStatus === "resuelto" && "resolved")} onMouseEnter={() => setActiveCommentId(comment.id)} onMouseLeave={() => setActiveCommentId("")} onFocus={() => setActiveCommentId(comment.id)} onBlur={() => setActiveCommentId("")}>
-                        <span className="catalog-design-comment-meta">{comment.tipo || "comentario"} · {formatDate(comment.fecha_creacion) || "sin fecha"}</span>
-                        <span className={classNames("catalog-design-comment-status", commentStatus)}>{commentStatus}</span>
-                        <strong>{getUserLabel(userById[comment.usuario_id])}</strong>
-                        <p>{comment.comentario}</p>
-                        <div className="catalog-design-comment-item-foot">
-                          {annotationCount > 0 && <span className="catalog-design-comment-signal">{annotationCount} senal{annotationCount === 1 ? "" : "es"}</span>}
-                          {canUpdateCommentStatus && <button type="button" className="catalog-design-comment-status-btn" onClick={(event) => { event.stopPropagation(); updateCommentStatus(comment, commentStatus === "resuelto" ? "abierto" : "resuelto"); }} title={commentStatus === "resuelto" ? "Reabrir comentario" : "Marcar como resuelto"} aria-label={commentStatus === "resuelto" ? "Reabrir comentario" : "Marcar como resuelto"}>
-                            {commentStatus === "resuelto" ? <RefreshCw size={14}/> : <CheckCircle2 size={14}/>}
-                            <span>{commentStatus === "resuelto" ? "Reabrir" : "Resolver"}</span>
-                          </button>}
+
+                  {!sideRailCollapsed && activeSideTab === "comments" && (
+                    <div className="catalog-design-rail-content">
+                      <div className="catalog-design-comment-rail-head">
+                        <div>
+                          <strong>Comentarios de página</strong>
+                          <span>{selectedComments.length ? `${selectedComments.length} registrado${selectedComments.length === 1 ? "" : "s"}` : "Sin comentarios"}</span>
                         </div>
-                      </div>;
-                    })}
-                    {!selectedComments.length && <div className="empty-state">Aun no hay comentarios para esta pagina.</div>}
-                  </div>
+                        {!isDraftingComment && (
+                          <Button variant="outline" onClick={openReviewPanel} disabled={!selectedPage}>
+                            <Plus size={15}/> Nuevo
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Integrated Comment Composer */}
+                      {isDraftingComment && selectedPage && (
+                        <div className="catalog-design-comment-composer">
+                          <div className="catalog-design-composer-head">
+                            <strong>Nuevo comentario</strong>
+                            {pendingAnnotationCount > 0 && (
+                              <span className="catalog-design-composer-signal-tag">
+                                {pendingAnnotationCount} señal{pendingAnnotationCount === 1 ? "" : "es"} en imagen
+                              </span>
+                            )}
+                          </div>
+                          <div className="catalog-design-category-selector" role="radiogroup" aria-label="Categoría de observación">
+                            {COMMENT_CATEGORIES.map((cat) => (
+                              <button
+                                key={cat.id}
+                                type="button"
+                                className={classNames("catalog-design-cat-pill", commentCategory === cat.id && "selected")}
+                                style={{ "--cat-color": cat.color }}
+                                onClick={() => setCommentCategory(cat.id)}
+                              >
+                                <span>{cat.icon}</span> {cat.label}
+                              </button>
+                            ))}
+                          </div>
+                          <textarea
+                            value={commentText}
+                            onChange={(event) => setCommentText(event.target.value)}
+                            placeholder="Describe el ajuste necesario para el diseñador..."
+                            rows={3}
+                            autoFocus={!annotationMode}
+                          />
+                          <div className="catalog-design-composer-actions">
+                            <Button variant="outline" onClick={resetReviewDraft}>Cancelar</Button>
+                            <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}>
+                              <Save size={15}/> Guardar
+                            </Button>
+                            {canReviewSelectedPage && (
+                              <>
+                                <Button onClick={() => reviewPage("aprobada", "aprobacion")} title="Aprobar página">
+                                  <CheckCircle2 size={15}/> Aprobar
+                                </Button>
+                                <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")} title="Enviar a ajustes">
+                                  <XCircle size={15}/> Rechazar
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Comments List */}
+                      <div className="catalog-design-comment-rail-list">
+                        {selectedComments.map((comment) => {
+                          const commentNumber = chronologicalOrder.get(comment.id) || 1;
+                          const annotationCount = normalizeCommentAnnotations(comment).length;
+                          const commentStatus = getCommentStatus(comment);
+                          const selected = activeCommentId === comment.id || hoveredAnnotation?.commentId === comment.id;
+                          const catColor = CATEGORY_COLORS[comment.tipo] || ANNOTATION_COLOR;
+                          const categoryInfo = COMMENT_CATEGORIES.find((c) => c.id === comment.tipo);
+                          return (
+                            <div
+                              key={comment.id}
+                              id={`catalog-comment-${comment.id}`}
+                              role="button"
+                              tabIndex={0}
+                              className={classNames(
+                                "catalog-design-comment-item",
+                                selected && "selected",
+                                commentStatus === "resuelto" && "resolved"
+                              )}
+                              style={{ "--comment-accent": catColor }}
+                              onMouseEnter={() => setActiveCommentId(comment.id)}
+                              onMouseLeave={() => setActiveCommentId("")}
+                              onFocus={() => setActiveCommentId(comment.id)}
+                              onBlur={() => setActiveCommentId("")}
+                              onClick={() => highlightAndScrollComment(comment.id)}
+                            >
+                              <div className="catalog-design-comment-item-top">
+                                <div className="catalog-design-comment-id-badge" style={{ backgroundColor: catColor }}>
+                                  #{commentNumber}
+                                </div>
+                                <span className="catalog-design-comment-cat-tag" style={{ color: catColor }}>
+                                  {categoryInfo ? `${categoryInfo.icon} ${categoryInfo.label}` : (comment.tipo || "Comentario")}
+                                </span>
+                                <span className="catalog-design-comment-meta">{formatDate(comment.fecha_creacion) || "sin fecha"}</span>
+                                <span className={classNames("catalog-design-comment-status", commentStatus)}>{commentStatus}</span>
+                              </div>
+                              <strong>{getUserLabel(userById[comment.usuario_id])}</strong>
+                              <p>{comment.comentario}</p>
+                              <div className="catalog-design-comment-item-foot">
+                                {annotationCount > 0 ? (
+                                  <span className="catalog-design-comment-signal" style={{ color: catColor, borderColor: catColor }}>
+                                    Pin #{commentNumber} ({annotationCount} señal{annotationCount === 1 ? "" : "es"})
+                                  </span>
+                                ) : <span />}
+                                {canUpdateCommentStatus && (
+                                  <button
+                                    type="button"
+                                    className="catalog-design-comment-status-btn"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      updateCommentStatus(comment, commentStatus === "resuelto" ? "abierto" : "resuelto");
+                                    }}
+                                    title={commentStatus === "resuelto" ? "Reabrir comentario" : "Marcar como resuelto"}
+                                  >
+                                    {commentStatus === "resuelto" ? <RefreshCw size={13}/> : <CheckCircle2 size={13}/>}
+                                    <span>{commentStatus === "resuelto" ? "Reabrir" : "Resolver"}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {!selectedComments.length && !isDraftingComment && (
+                          <div className="empty-state">Aún no hay comentarios para esta página.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {!sideRailCollapsed && activeSideTab === "sku" && (
+                    <div className="catalog-design-rail-content">
+                      <div className="catalog-design-sku-head">
+                        <div>
+                          <strong>Buscar SKU</strong>
+                          <span>Valida datos promocionales en paralelo al catálogo</span>
+                        </div>
+                      </div>
+                      <form className="catalog-design-sku-search" onSubmit={submitSkuSearch}>
+                        <input
+                          value={skuQuery}
+                          onChange={(event) => setSkuQuery(event.target.value)}
+                          placeholder="Código SKU (ej. 102345)"
+                          autoFocus
+                        />
+                        <Button type="submit" disabled={!skuQuery.trim()}><Search size={15}/> Buscar</Button>
+                      </form>
+                      <div className="catalog-design-sku-results">
+                        {!skuSearchTerm && (
+                          <div className="catalog-design-sku-empty">
+                            Ingrese un código para consultar descripción, precios, descuento y comentario.
+                          </div>
+                        )}
+                        {skuSearchTerm && !skuSearchResults.length && (
+                          <div className="catalog-design-sku-empty">
+                            No se encontró información para el SKU {skuSearchTerm}.
+                          </div>
+                        )}
+                        {skuSearchResults.map((row, index) => (
+                          <div className="catalog-design-sku-result" key={`${row.id || row.row_id || row.sku}-${index}`}>
+                            <div className="catalog-design-sku-result-head">
+                              <span>SKU</span>
+                              <strong>{formatSkuInfoValue(row.sku)}</strong>
+                            </div>
+                            <p>{formatSkuInfoValue(getPromoField(row, "descripcion"))}</p>
+                            <div className="catalog-design-sku-data">
+                              <div><span>Antes</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAntes", "precio_antes"))}</strong></div>
+                              <div><span>Ahora</span><strong>{formatSkuInfoValue(getPromoField(row, "precioAhora", "precio_ahora"))}</strong></div>
+                              <div><span>Descuento</span><strong>{formatSkuInfoValue(getPromoField(row, "descuento"))}</strong></div>
+                            </div>
+                            <div className="catalog-design-sku-comment">
+                              <span>Comentario del comprador</span>
+                              <p>{formatSkuInfoValue(getPromoField(row, "comentario", "comentario_comprador"))}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </aside>
+
                 <div className="catalog-design-viewer-surface">
-                  <div className="catalog-design-viewer-stage">
-                {selectedImageUrl ? <div className="catalog-design-image-shell" ref={imageShellRef} style={{ width: `${viewerZoom}%` }}>
-                  <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Pagina de catalogo"} />
-                  <svg
-                    className={classNames("catalog-design-annotation-layer", annotationMode && "drawing")}
-                    viewBox="0 0 1 1"
-                    preserveAspectRatio="none"
-                    onPointerDown={beginAnnotation}
-                    onPointerMove={moveAnnotation}
-                    onPointerUp={endAnnotation}
-                    onPointerCancel={endAnnotation}
+                  <div
+                    className={classNames(
+                      "catalog-design-viewer-stage",
+                      (viewerZoom > 100 || isSpacePressed) && !annotationMode && "can-pan",
+                      isPanning && "is-panning"
+                    )}
+                    ref={viewerStageRef}
+                    onPointerDown={handleStagePointerDown}
+                    onPointerMove={handleStagePointerMove}
+                    onPointerUp={handleStagePointerUp}
+                    onPointerCancel={handleStagePointerUp}
                   >
-                    {selectedAnnotations.map((annotation, index) => renderAnnotation(
-                      annotation,
-                      `${annotation.commentId}-${index}`,
-                      classNames("saved", (activeCommentId === annotation.commentId || hoveredAnnotation?.commentId === annotation.commentId) && "selected"),
-                      {
-                        onPointerEnter: () => {
-                          setHoveredAnnotation(annotation);
-                          setActiveCommentId(annotation.commentId);
-                        },
-                        onPointerLeave: () => {
-                          setHoveredAnnotation(null);
-                          setActiveCommentId("");
-                        },
-                        onFocus: () => {
-                          setHoveredAnnotation(annotation);
-                          setActiveCommentId(annotation.commentId);
-                        },
-                        onBlur: () => {
-                          setHoveredAnnotation(null);
-                          setActiveCommentId("");
-                        },
-                        tabIndex: 0,
-                      }
-                    ))}
-                    {draftAnnotations.map((annotation, index) => renderAnnotation(annotation, `draft-${index}`, "draft"))}
-                    {activeAnnotation && renderAnnotation(activeAnnotation, "active", "draft active")}
-                  </svg>
-                  {hoveredAnnotation && hoveredAnnotationAnchor && <div className="catalog-design-annotation-tooltip" style={{ left: `${hoveredAnnotationAnchor.x * 100}%`, top: `${hoveredAnnotationAnchor.y * 100}%` }}>
-                    <strong>{hoveredAnnotation.commentType || "comentario"} · {hoveredAnnotation.commentUser || "Usuario"}</strong>
-                    <p>{hoveredAnnotation.commentText}</p>
-                    {hoveredAnnotation.commentDate && <span>{hoveredAnnotation.commentDate}</span>}
-                  </div>}
-                  {annotationMode && <div className="catalog-design-drawing-hint">Arrastre sobre la imagen para senalar.</div>}
-                </div> : <div className="catalog-design-viewer-empty">
-                  <ImageUp size={30}/>
-                  <strong>{selectedPage ? "Sin imagen cargada" : "Seleccione una pagina"}</strong>
-                  <span>{selectedPage ? "El diseñador debe cargar una imagen JPG o PNG de calidad media para revision." : "Use la tabla inferior para elegir una pagina del proyecto."}</span>
-                </div>}
-              </div>
+                    {selectedImageUrl ? (
+                      <div className="catalog-design-image-shell" ref={imageShellRef} style={{ width: `${viewerZoom}%` }}>
+                        <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Página de catálogo"} draggable={false} />
+                        <svg
+                          className={classNames("catalog-design-annotation-layer", annotationMode && "drawing")}
+                          viewBox="0 0 1 1"
+                          preserveAspectRatio="none"
+                          onPointerDown={beginAnnotation}
+                          onPointerMove={moveAnnotation}
+                          onPointerUp={endAnnotation}
+                          onPointerCancel={endAnnotation}
+                        >
+                          {selectedAnnotations.map((annotation, index) => renderAnnotation(
+                            annotation,
+                            `${annotation.commentId}-${index}`,
+                            classNames("saved", (activeCommentId === annotation.commentId || hoveredAnnotation?.commentId === annotation.commentId) && "selected"),
+                            {
+                              onPointerEnter: () => {
+                                setHoveredAnnotation(annotation);
+                                highlightAndScrollComment(annotation.commentId);
+                              },
+                              onPointerLeave: () => {
+                                setHoveredAnnotation(null);
+                                setActiveCommentId("");
+                              },
+                              onClick: (event) => {
+                                event.stopPropagation();
+                                highlightAndScrollComment(annotation.commentId);
+                              },
+                              onFocus: () => {
+                                setHoveredAnnotation(annotation);
+                                highlightAndScrollComment(annotation.commentId);
+                              },
+                              onBlur: () => {
+                                setHoveredAnnotation(null);
+                                setActiveCommentId("");
+                              },
+                              tabIndex: 0,
+                            }
+                          ))}
+                          {draftAnnotations.map((annotation, index) => renderAnnotation(annotation, `draft-${index}`, "draft"))}
+                          {activeAnnotation && renderAnnotation(activeAnnotation, "active", "draft active")}
+                        </svg>
+                        {hoveredAnnotation && hoveredAnnotationAnchor && (
+                          <div className="catalog-design-annotation-tooltip" style={{ left: `${hoveredAnnotationAnchor.x * 100}%`, top: `${hoveredAnnotationAnchor.y * 100}%` }}>
+                            <strong>{hoveredAnnotation.commentIndex ? `#${hoveredAnnotation.commentIndex} ` : ""}{hoveredAnnotation.commentType || "comentario"} · {hoveredAnnotation.commentUser || "Usuario"}</strong>
+                            <p>{hoveredAnnotation.commentText}</p>
+                            {hoveredAnnotation.commentDate && <span>{hoveredAnnotation.commentDate}</span>}
+                          </div>
+                        )}
+                        {annotationMode && <div className="catalog-design-drawing-hint">Arrastre sobre la imagen para señalar.</div>}
+                        {viewerZoom > 100 && !annotationMode && (
+                          <div className="catalog-design-pan-hint">
+                            <span>💡 Arrastre con el ratón para desplazarse por la imagen (Pan)</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="catalog-design-viewer-empty">
+                        <ImageUp size={32}/>
+                        <strong>{selectedPage ? "Sin imagen cargada" : "Seleccione una página"}</strong>
+                        <span>{selectedPage ? "El diseñador debe cargar una imagen JPG o PNG para revisión." : "Use la tira inferior o tabla para elegir una página del proyecto."}</span>
+                      </div>
+                    )}
+                  </div>
                   {selectedPage && <p className="catalog-design-viewer-note">Ruta Storage: {selectedPage.archivo_path || `catalogos/${selectedProject?.catalogo_id}/paginas/pagina_${selectedPage.numero_pagina}.jpg`}</p>}
                 </div>
               </div>
             </div>
-            <div className="table-wrap catalog-design-table">
-              <table>
-                <thead><tr><th>Página</th><th>Miniatura</th><th>Título</th><th>Diseñador</th><th>Comprador</th><th>Estado</th><th>Última carga</th><th>Acciones</th></tr></thead>
-                <tbody>
-                  {visiblePages.map((page) => {
-                    const canUploadPage = isAdminOrMark || (canUpload && page.disenador_id === currentUserId);
-                    const imageUrl = signedUrls[page.id];
-                    return <tr key={page.id} className={selectedPage?.id === page.id ? "catalog-design-selected-row" : ""}>
-                      <td><strong>{page.numero_pagina}</strong></td>
-                      <td>{imageUrl ? <button type="button" className="catalog-design-thumb" onClick={() => viewPageImage(page)}><img src={imageUrl} alt={`Pagina ${page.numero_pagina}`} /></button> : <span className="catalog-design-no-thumb">Sin imagen</span>}</td>
-                      <td>{page.titulo_pagina || "Sin título"}</td>
-                      <td>{canManage ? <select value={page.disenador_id || ""} onChange={(event) => updatePageField(page, "disenador_id", event.target.value || null)}><option value="">Sin asignar</option>{designerOptions.map((user) => <option key={user.id} value={user.id}>{user.nombre || user.email}</option>)}</select> : getUserLabel(userById[page.disenador_id])}</td>
-                      <td>{canManage ? <select value={page.comprador_id || ""} onChange={(event) => updatePageField(page, "comprador_id", event.target.value || null)}><option value="">Sin asignar</option>{buyers.map((buyer) => <option key={buyer.id} value={buyer.id}>{buyer.comprador}</option>)}</select> : getBuyerLabel(buyerById[page.comprador_id])}</td>
-                      <td>{canManage ? <select value={page.estado || "pendiente"} onChange={(event) => updatePageField(page, "estado", event.target.value)}>{PAGE_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select> : <StateBadge state={page.estado}/>}</td>
-                      <td>{formatDate(page.fecha_ultima_carga) || "Sin carga"}</td>
-                      <td>
-                        <div className="catalog-design-actions">
-                          {canUploadPage && <label className="btn btn-outline catalog-design-file-btn"><ImageUp size={16}/> Subir<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => { uploadPageImage(page, event.target.files?.[0]); event.target.value = ""; }} /></label>}
-                          {page.archivo_path && <Button variant="outline" onClick={() => viewPageImage(page)}><Eye size={16}/> Visor</Button>}
-                          <Button variant="outline" onClick={() => setSelectedPageId(page.id)}><MessageSquare size={16}/> Revisar</Button>
-                        </div>
-                      </td>
-                    </tr>;
-                  })}
-                  {!visiblePages.length && <tr><td colSpan={8}><div className="empty-state">No hay páginas visibles con los filtros actuales.</div></td></tr>}
-                </tbody>
-              </table>
+
+            <div className="catalog-design-pages-header">
+              <div className="catalog-design-pages-title-group">
+                <h3>Hojas del Proyecto ({visiblePages.length})</h3>
+                <span className="catalog-design-pages-subtitle">
+                  {pageViewMode === "filmstrip"
+                    ? "Haga clic en una miniatura para abrirla en el visor sin perder de vista el catálogo."
+                    : "Vista tabular tradicional para auditoría de fechas y asignación rápida."}
+                </span>
+              </div>
+              <div className="catalog-design-view-mode-toggle" role="tablist" aria-label="Modo de visualización de páginas">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={pageViewMode === "filmstrip"}
+                  className={classNames("catalog-design-view-mode-btn", pageViewMode === "filmstrip" && "active")}
+                  onClick={() => setPageViewMode("filmstrip")}
+                  title="Ver como tira de miniaturas continua"
+                >
+                  <LayoutGrid size={15}/> Tira de Miniaturas
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={pageViewMode === "table"}
+                  className={classNames("catalog-design-view-mode-btn", pageViewMode === "table" && "active")}
+                  onClick={() => setPageViewMode("table")}
+                  title="Ver como tabla tradicional"
+                >
+                  <List size={15}/> Tabla Detallada
+                </button>
+              </div>
             </div>
+
+            {pageViewMode === "filmstrip" ? (
+              <div className="catalog-design-filmstrip-wrapper">
+                <button
+                  type="button"
+                  className="catalog-design-filmstrip-nav-btn left"
+                  onClick={() => scrollFilmstrip(-1)}
+                  title="Desplazar hacia la izquierda"
+                  aria-label="Desplazar hacia la izquierda"
+                >
+                  <ChevronLeft size={18}/>
+                </button>
+
+                <div className="catalog-design-filmstrip-track" ref={filmstripTrackRef}>
+                  {visiblePages.map((page) => {
+                    const isSelected = selectedPage?.id === page.id;
+                    const imageUrl = signedUrls[page.id];
+                    const pageCommentsCount = commentCountByPageId[page.id] || 0;
+                    const canUploadPage = isAdminOrMark || (canUpload && page.disenador_id === currentUserId);
+                    return (
+                      <div
+                        key={page.id}
+                        id={`filmstrip-card-${page.id}`}
+                        className={classNames("catalog-design-filmstrip-card", isSelected && "selected")}
+                        onClick={() => selectViewerPage(page)}
+                        role="button"
+                        tabIndex={0}
+                        title={`Página ${page.numero_pagina} · ${page.estado || "pendiente"}`}
+                      >
+                        <div className="catalog-design-filmstrip-card-head">
+                          <span className="catalog-design-filmstrip-page-num">#{page.numero_pagina}</span>
+                          <StateBadge state={page.estado || "pendiente"} />
+                        </div>
+
+                        <div className="catalog-design-filmstrip-card-preview">
+                          {imageUrl ? (
+                            <img src={imageUrl} alt={`Pág. ${page.numero_pagina}`} loading="lazy" draggable={false} />
+                          ) : (
+                            <div className="catalog-design-filmstrip-empty">
+                              <ImageUp size={22} />
+                              <span>Sin arte</span>
+                            </div>
+                          )}
+                          {isSelected && <div className="catalog-design-filmstrip-active-pill">EN VISOR</div>}
+                        </div>
+
+                        <div className="catalog-design-filmstrip-card-foot">
+                          <div className="catalog-design-filmstrip-comments-count">
+                            {pageCommentsCount > 0 ? (
+                              <span className="catalog-design-filmstrip-comment-pill" title={`${pageCommentsCount} observaciones`}>
+                                <MessageSquare size={12} /> {pageCommentsCount}
+                              </span>
+                            ) : (
+                              <span className="catalog-design-filmstrip-no-comments">0 obs.</span>
+                            )}
+                          </div>
+
+                          {canUploadPage && (
+                            <label
+                              className="btn btn-outline catalog-design-filmstrip-upload-btn"
+                              title="Subir o actualizar imagen de esta página"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ImageUp size={12} /> Subir
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                                onChange={(event) => {
+                                  uploadPageImage(page, event.target.files?.[0]);
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!visiblePages.length && (
+                    <div className="empty-state">No hay páginas disponibles con los filtros actuales.</div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="catalog-design-filmstrip-nav-btn right"
+                  onClick={() => scrollFilmstrip(1)}
+                  title="Desplazar hacia la derecha"
+                  aria-label="Desplazar hacia la derecha"
+                >
+                  <ChevronRight size={18}/>
+                </button>
+              </div>
+            ) : (
+              <div className="table-wrap catalog-design-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Pág.</th>
+                      <th>Miniatura</th>
+                      <th>Título</th>
+                      <th>Diseñador</th>
+                      <th>Comprador</th>
+                      <th>Estado</th>
+                      <th>Comentarios</th>
+                      <th>Última carga</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visiblePages.map((page) => {
+                      const canUploadPage = isAdminOrMark || (canUpload && page.disenador_id === currentUserId);
+                      const imageUrl = signedUrls[page.id];
+                      const pageCommentsCount = commentCountByPageId[page.id] || 0;
+                      const isSelected = selectedPage?.id === page.id;
+                      return (
+                        <tr
+                          key={page.id}
+                          className={isSelected ? "catalog-design-selected-row" : ""}
+                          onClick={() => selectViewerPage(page)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <td><strong>#{page.numero_pagina}</strong></td>
+                          <td>
+                            {imageUrl ? (
+                              <button
+                                type="button"
+                                className="catalog-design-thumb"
+                                onClick={(e) => { e.stopPropagation(); selectViewerPage(page); }}
+                                title="Ver en visor"
+                              >
+                                <img src={imageUrl} alt={`Página ${page.numero_pagina}`} />
+                              </button>
+                            ) : (
+                              <span className="catalog-design-no-thumb">Sin imagen</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="catalog-design-table-title">
+                              <strong>{page.titulo_pagina || `Página ${page.numero_pagina}`}</strong>
+                            </div>
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {canManage ? (
+                              <select
+                                className="catalog-design-table-select"
+                                value={page.disenador_id || ""}
+                                onChange={(event) => updatePageField(page, "disenador_id", event.target.value || null)}
+                              >
+                                <option value="">Sin asignar</option>
+                                {designerOptions.map((user) => (
+                                  <option key={user.id} value={user.id}>{user.nombre || user.email}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="catalog-design-table-user">{getUserLabel(userById[page.disenador_id])}</span>
+                            )}
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {canManage ? (
+                              <select
+                                className="catalog-design-table-select"
+                                value={page.comprador_id || ""}
+                                onChange={(event) => updatePageField(page, "comprador_id", event.target.value || null)}
+                              >
+                                <option value="">Sin asignar</option>
+                                {buyers.map((buyer) => (
+                                  <option key={buyer.id} value={buyer.id}>{buyer.comprador}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="catalog-design-table-user">{getBuyerLabel(buyerById[page.comprador_id])}</span>
+                            )}
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            {canManage ? (
+                              <select
+                                className="catalog-design-table-select"
+                                value={page.estado || "pendiente"}
+                                onChange={(event) => updatePageField(page, "estado", event.target.value)}
+                              >
+                                {PAGE_STATES.map((state) => (
+                                  <option key={state} value={state}>{state.replace(/_/g, " ")}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <StateBadge state={page.estado}/>
+                            )}
+                          </td>
+                          <td>
+                            {pageCommentsCount > 0 ? (
+                              <span className="catalog-design-table-comment-pill" title={`${pageCommentsCount} comentarios registrados`}>
+                                <MessageSquare size={13}/> {pageCommentsCount}
+                              </span>
+                            ) : (
+                              <span className="catalog-design-table-no-comments">—</span>
+                            )}
+                          </td>
+                          <td>{formatDate(page.fecha_ultima_carga) || "Sin carga"}</td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <div className="catalog-design-actions">
+                              {canUploadPage && (
+                                <label className="btn btn-outline catalog-design-file-btn" title="Subir nueva imagen">
+                                  <ImageUp size={15}/> Subir
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                                    onChange={(event) => {
+                                      uploadPageImage(page, event.target.files?.[0]);
+                                      event.target.value = "";
+                                    }}
+                                  />
+                                </label>
+                              )}
+                              <Button
+                                variant={isSelected ? "default" : "outline"}
+                                onClick={() => selectViewerPage(page)}
+                                title="Abrir página en el visor"
+                              >
+                                <Eye size={15}/> Revisar
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!visiblePages.length && <tr><td colSpan={9}><div className="empty-state">No hay páginas visibles con los filtros actuales.</div></td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
-
-        {false && <Card>
-          <CardContent>
-            <div className="toolbar compact">
-              <div><h2>Comentarios y revisión</h2><p>{selectedPage ? `Página ${selectedPage.numero_pagina}` : "Seleccione una página para revisar."}</p></div>
-            </div>
-            {selectedPage ? <div className="catalog-design-review">
-              <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Agregar comentario, aprobación, rechazo o ajuste." />
-              <div className="toolbar-actions">
-                <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}><MessageSquare size={16}/> Comentar</Button>
-                {canReviewSelectedPage && <>
-                  <Button onClick={() => reviewPage("aprobada", "aprobacion")}><CheckCircle2 size={16}/> Aprobar</Button>
-                  <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")}><XCircle size={16}/> Rechazar</Button>
-                </>}
-              </div>
-              <div className="catalog-design-comments">
-                {selectedComments.map((comment) => {
-                  const annotationCount = normalizeCommentAnnotations(comment).length;
-                  return <div key={comment.id}>
-                    <strong>{comment.tipo || "comentario"} · {getUserLabel(userById[comment.usuario_id])}{annotationCount ? ` · ${annotationCount} senal${annotationCount === 1 ? "" : "es"}` : ""}</strong>
-                    <p>{comment.comentario}</p>
-                    <span>{formatDate(comment.fecha_creacion)}</span>
-                  </div>;
-                })}
-                {!selectedComments.length && <div className="empty-state">Aún no hay comentarios para esta página.</div>}
-              </div>
-            </div> : <div className="empty-state">Seleccione una página desde la tabla.</div>}
-          </CardContent>
-        </Card>}
       </div>
     </div>
   </div>;

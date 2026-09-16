@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, CircleDashed, Layers3, ListChecks, Save, Tag, Users } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
 import { PERMISSIONS } from "../constants/permissions";
@@ -246,7 +246,7 @@ export default function GestionAvancesPage({
   const seniorsCompletos = seniorSummaries.filter((senior) => senior.completo).length;
   const totalOfertas = seniorSummaries.reduce((total, senior) => total + senior.ofertas, 0);
   const progress = totalDivisiones ? Math.round((totalDivisionesCompletas / totalDivisiones) * 100) : 0;
-  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar cambios";
 
   const toggleDivision = (divisionStatus, seniorName) => {
     const division = divisionStatus?.division;

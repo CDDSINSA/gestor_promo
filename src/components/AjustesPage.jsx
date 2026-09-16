@@ -1,7 +1,6 @@
-﻿import React, { useState } from "react";
-import { Plus, Save, Search, FileSpreadsheet, Trash2 } from "lucide-react";
+import React, { useState } from "react";
+import { Plus, Save, Search, FileSpreadsheet, Trash2, Download } from "lucide-react";
 import { DIVISIONES_CATALOGO } from "../constants";
-import { SUPABASE_CONNECTION_OVERRIDES_ENABLED, SUPABASE_PROJECT_URL } from "../services/supabaseService";
 import { classNames, formatVigenciaRange, makeId } from "../utils/common";
 import { Button, Card, CardContent, Header } from "./ui";
 import {
@@ -13,6 +12,7 @@ import {
   isCompradorJunior,
 } from "../utils/avanceHelpers";
 import { normalizeCanal, normalizeCatalogo, splitChannelValues } from "../utils/promoHelpers";
+import SkuMasterSettingsCard from "../features/skuMaster/SkuMasterSettingsCard";
 
 function Field({ label, value, onChange, type = "text", ...props }) { return <label className="field"><span>{label}</span><input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
 
@@ -35,6 +35,9 @@ export default function AjustesPage({
   actividades = [],
   supabaseSettings,
   setSupabaseSettings,
+  supabaseConnection,
+  onSkuMasterUpdated,
+  onSaveExcel,
   onSaveSupabaseSettings,
   onSaveCatalogSettings,
   onDeleteCatalogo,
@@ -46,13 +49,22 @@ export default function AjustesPage({
   const [selectedId, setSelectedId] = useState(catalogos[0]?.id);
   const [selectedBuyerIndex, setSelectedBuyerIndex] = useState(0);
   const [activeSection, setActiveSection] = useState("general");
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const downloadExcelBackup = async () => {
+    if (isExportingExcel || !onSaveExcel) return;
+    setIsExportingExcel(true);
+    try {
+      await onSaveExcel();
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
   const selected = catalogos.find((c) => c.id === selectedId) || catalogos[0];
   const getCompradorKey = (item) => item?.comprador || item?.nombre || "";
   const activeBuyerIndex = selectedBuyerIndex < compradores.length ? selectedBuyerIndex : 0;
   const selectedBuyer = compradores[activeBuyerIndex];
   const selectedBuyerActive = selectedBuyer?.activo !== false;
   const selectedBuyerCategoria = getCompradorCategoria(selectedBuyer) || "Senior";
-  const canEditSupabaseConnection = SUPABASE_CONNECTION_OVERRIDES_ENABLED;
   const seniorOptions = compradores
     .filter((buyer, index) => index !== activeBuyerIndex && buyer.activo !== false && !isCompradorJunior(buyer))
     .map((buyer) => ({ id: getCompradorId(buyer), nombre: getCompradorNombre(buyer) }))
@@ -68,7 +80,7 @@ export default function AjustesPage({
 
   const addCatalogo = () => {
     const id = makeId("cat");
-    const nuevoCatalogo = { id, nombre: "Nuevo catalogo", canal: "Retail", vigencia_inicio: "", vigencia_fin: "", vigencia: "", estado: "Borrador", color: "bg-emerald-700", docId: `local-${id}`, tokenConexion: "********", notificaciones: false, correos: "" };
+    const nuevoCatalogo = { id, nombre: "Nuevo catalogo", canal: "Retail", vigencia_inicio: "", vigencia_fin: "", vigencia: "", estado: "Borrador", color: "bg-emerald-700", docId: `local-${id}`, tokenConexion: "********", notificaciones: false, notificacionesEnvivo: true, notificaciones_envivo: true, correos: "" };
     setCatalogos((prev) => [...prev, nuevoCatalogo]);
     setSelectedId(id);
   };
@@ -124,8 +136,6 @@ export default function AjustesPage({
     setSelectedId(nextId);
   };
 
-  const updateSupabase = (field, value) => setSupabaseSettings((prev) => ({ ...prev, [field]: value }));
-
   const getBuyerImpact = (buyer) => {
     const buyerId = getCompradorId(buyer);
     const buyerName = getCompradorNombre(buyer);
@@ -166,49 +176,43 @@ export default function AjustesPage({
   };
 
   return <div className="settings-page">
-    <Header title="Ajustes" subtitle="Configuracion administrativa de catalogos, conexion Supabase, notificaciones y fuentes maestras." />
+    <Header title="Ajustes" subtitle="Configuración administrativa de catálogos, estado del sistema, notificaciones y fuentes maestras." />
     <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
       <button type="button" className={activeSection === "general" ? "selected" : ""} onClick={() => setActiveSection("general")}>General</button>
       <button type="button" className={activeSection === "compradores" ? "selected" : ""} onClick={() => setActiveSection("compradores")}>Compradores</button>
       <button type="button" className={activeSection === "catalogos" ? "selected" : ""} onClick={() => setActiveSection("catalogos")}>Catalogos</button>
+      <button type="button" className={activeSection === "maestro" ? "selected" : ""} onClick={() => setActiveSection("maestro")}>Maestro de SKU (ERP)</button>
     </div>
 
     {activeSection === "general" && <Card className="settings-section-card">
       <CardContent>
         <div className="toolbar">
-          <h2>Configuracion general</h2>
+          <h2>Estado del sistema</h2>
           <div className="toolbar-actions">
-            <Button className="settings-btn-save" onClick={onSaveSupabaseSettings} disabled={isSyncing || !canEditSupabaseConnection}><Save size={16}/> {canEditSupabaseConnection ? "Guardar conexion" : "Conexion fija"}</Button>
-            <Button className="settings-btn-test" variant="outline" onClick={onTestSupabaseConnection} disabled={isSyncing}><Search size={16}/> Probar</Button>
-            <Button className="settings-btn-validate" variant="outline" onClick={onValidateSupabaseSession} disabled={isSyncing}><FileSpreadsheet size={16}/> Validar sesion</Button>
+            <Button className="settings-btn-test" variant="outline" onClick={onTestSupabaseConnection} disabled={isSyncing}><Search size={16}/> Probar conexión</Button>
+            <Button className="settings-btn-validate" variant="outline" onClick={onValidateSupabaseSession} disabled={isSyncing}><FileSpreadsheet size={16}/> Validar sesión</Button>
           </div>
         </div>
         <div className="connection-panel">
           <div>
-            <strong>Conexion Supabase</strong>
-            <span>{SUPABASE_PROJECT_URL}</span>
-            <p>{supabaseStatus?.message || (canEditSupabaseConnection ? "Configure Supabase para operar con la sesion del usuario actual." : "La conexion se toma de las variables de entorno del despliegue.")}</p>
+            <strong>Conexión con el servidor</strong>
+            <p>{supabaseStatus?.message || "La conexión se administra de forma segura a través de variables de entorno del sistema."}</p>
           </div>
-          {canEditSupabaseConnection ? <>
-            <label className="field wide">
-              <span>URL Supabase</span>
-              <input value={supabaseSettings.url || ""} onChange={(e) => updateSupabase("url", e.target.value)} placeholder="https://hanvbbezofcengyorooc.supabase.co" />
-            </label>
-            <label className="field">
-              <span>Anon key</span>
-              <input type="password" value={supabaseSettings.anonKey || ""} onChange={(e) => updateSupabase("anonKey", e.target.value)} placeholder="sb_publishable_..." />
-            </label>
-          </> : <>
-            <label className="field wide">
-              <span>URL Supabase</span>
-              <input value={SUPABASE_PROJECT_URL} readOnly />
-            </label>
-            <label className="field">
-              <span>Anon key</span>
-              <input type="password" value={supabaseSettings.anonKey ? "********" : ""} readOnly />
-            </label>
-          </>}
         </div>
+      </CardContent>
+    </Card>}
+
+    {activeSection === "general" && <Card className="settings-section-card">
+      <CardContent>
+        <div className="toolbar">
+          <h2>Respaldo de promociones en Excel</h2>
+          <div className="toolbar-actions">
+            <Button onClick={downloadExcelBackup} disabled={isSyncing || isExportingExcel || !onSaveExcel}>
+              <Download size={16}/>{isExportingExcel ? "Generando Excel..." : "Descargar catálogo Excel"}
+            </Button>
+          </div>
+        </div>
+        <p>Descarga Catalogo_Promociones_Actualizado.xlsx con los datos actualmente cargados en la sesión, incluidos los cambios sin guardar. No es una copia completa de la base de datos.</p>
       </CardContent>
     </Card>}
 
@@ -313,9 +317,18 @@ export default function AjustesPage({
             <label className="field"><span>Estado</span><select value={selected?.estado || "Borrador"} onChange={(e) => updateSelected("estado", e.target.value)}><option>Preliminar</option><option>Activo</option><option>Borrador</option><option>Cerrado</option></select></label>
             <label className="field wide"><span>Correos para notificacion por cambios</span><textarea value={selected?.correos || ""} onChange={(e) => updateSelected("correos", e.target.value)} /></label>
             <div className="switch-row wide"><div><strong>Enviar notificaciones por cambios</strong><p>Aplica cuando se modifica SKU, precio, descuento o logica de promocion.</p></div><button className={selected?.notificaciones ? "switch on" : "switch"} onClick={() => updateSelected("notificaciones", !selected?.notificaciones)}><span/></button></div>
+            <div className="switch-row wide"><div><strong>Activar notificaciones en vivo</strong><p>Muestra avisos dentro de la app cuando Compras o Mercadeo guardan cambios relevantes.</p></div><button className={selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false ? "switch on" : "switch"} onClick={() => updateSelectedFields({ notificacionesEnvivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false), notificaciones_envivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false) })}><span/></button></div>
           </div>
         </CardContent>
       </Card>
     </div>}
+
+    {activeSection === "maestro" && (
+      <SkuMasterSettingsCard
+        supabaseConnection={supabaseConnection || supabaseSettings}
+        supabaseReady={Boolean(supabaseSettings?.url || SUPABASE_PROJECT_URL)}
+        onSkuMasterUpdated={onSkuMasterUpdated}
+      />
+    )}
   </div>;
 }

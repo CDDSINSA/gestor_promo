@@ -202,3 +202,24 @@ export const comentariosIniciales = [
     prioridad: "MEDIA",
   },
 ];
+
+export const canastoFidelizacionInicial = [
+  // COMASA - SKU 1009
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1002", descuento: 20, estatus: "Activo", comprador: "Juan Perez" },
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1102", descuento: 23, estatus: "Activo", comprador: "Juan Perez" },
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1003", descuento: 8, estatus: "Activo", comprador: "Juan Perez" },
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1103", descuento: 5, estatus: "Activo", comprador: "Juan Perez" },
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1104", descuento: 23, estatus: "Activo", comprador: "Juan Perez" },
+  { canal: "comasa", sku: "1009", division: "Ferretería", segmento_id: "1105", descuento: 8, estatus: "Activo", comprador: "Juan Perez" },
+  // COMASA - SKU 34324
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1002", descuento: 25, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1102", descuento: 23, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1003", descuento: 45, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1103", descuento: 23, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1104", descuento: 8, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "comasa", sku: "34324", division: "Pinturas", segmento_id: "1105", descuento: 9, estatus: "Activo", comprador: "Marcela Torres" },
+  // RETAIL - SKU 200001
+  { canal: "retail", sku: "200001", division: "Pinturas", segmento_id: "1001", descuento: 15, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "retail", sku: "200001", division: "Pinturas", segmento_id: "1005", descuento: 18, estatus: "Activo", comprador: "Marcela Torres" },
+  { canal: "retail", sku: "200001", division: "Pinturas", segmento_id: "1007", descuento: 22, estatus: "Activo", comprador: "Marcela Torres" },
+];

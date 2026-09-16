@@ -72,6 +72,7 @@ export const CATALOG_SYNC_FIELDS = [
   "doc_id",
   "token_conexion",
   "notificaciones",
+  "notificaciones_envivo",
   "correos",
   "divisiones",
 ];
@@ -220,7 +221,7 @@ export function buildPromotionSyncState(promotions = []) {
   promotions.forEach((row) => {
     const normalized = toExcelRow(row);
     const rowId = getPromotionSyncId(normalized);
-    if (rowId) state.set(rowId, getPromotionSyncSnapshot(normalized));
+    if (rowId) state.set(rowId, getPromotionSyncSnapshot(row));
   });
   return state;
 }

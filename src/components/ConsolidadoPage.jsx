@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { classNames, makeId } from "../utils/common";
 import { exportStyledWorkbook } from "../services/excelStyleService";
+import { isAnulledPromotion } from "../features/promotions/application/promotionAnulation";
 import {
   channelMatchesFilter,
   formatDurationHours,
@@ -224,7 +225,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const paginatedRows = rowsFiltradas.slice((safeCurrentPage - 1) * CONSOLIDADO_PAGE_SIZE, safeCurrentPage * CONSOLIDADO_PAGE_SIZE);
   const visibleActivityIds = new Set(rowsFiltradas.map(getActivityId).filter(Boolean));
-  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar Supabase";
+  const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar cambios";
   const generalComments = appliedFilters
     ? comentarios.filter((comment) => isActivityComment(comment) && visibleActivityIds.has(comment.actividadId || comment.actividad_id))
     : [];
@@ -256,6 +257,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     ["Cantidad", (row) => getCantidadMinima(row)],
     ["Precio ahora", (row) => getPrecioAhora(row)],
     ["Descuento", (row) => row.descuento ?? ""],
+    ["Estado", (row) => row.estado_registro || row.estadoRegistro || ""],
     ["Comentarios actividad", (row) => getActivityComments(getActivityId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
     ["Comentarios linea", (row) => getComentariosRow(getRowId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
   ];
@@ -359,7 +361,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
                     const activityName = getActivityName(row, activity);
                     const rowId = getRowId(row);
                     return (
-                      <tr key={rowId} className={abiertos ? "row-warning" : ""}>
+                      <tr key={rowId} className={classNames(abiertos && "row-warning", isAnulledPromotion(row) && "row-anulled")}>
                         <td><b>{activityId}</b>{comentariosActividad.length > 0 && <small className="activity-comment-badge">{comentariosActividad.length} general</small>}</td>
                         <td>{activityName || "Sin nombre"}</td>
                         <td>{getOfferId(row)}</td>
@@ -379,6 +381,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
                         <td>{getCantidadMinima(row)}</td>
                         <td>{getPrecioAhora(row)}</td>
                         <td>{row.descuento}</td>
+                        <td><span className={isAnulledPromotion(row) ? "pill red" : "pill green"}>{row.estado_registro || row.estadoRegistro || "REGISTRADO"}</span></td>
                         <td>
                           <div className="comments-cell">
                             {comentariosRow.map((c) => {

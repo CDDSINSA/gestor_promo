@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Bell,
   BellOff,
@@ -7,9 +7,13 @@ import {
   LayoutDashboard,
   ListChecks,
   Plus,
-  RefreshCw,
   Settings,
   MessageSquareWarning,
+  Percent,
+  ShoppingBag,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
 } from "lucide-react";
 import { hasSupabaseConnection } from "../services/supabaseService";
 import { PERMISSIONS, ROLES, normalizeRole } from "../constants/permissions";
@@ -112,74 +116,217 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
     ? `Tienes ${buyerOpenComments} comentario${buyerOpenComments === 1 ? "" : "s"} abierto${buyerOpenComments === 1 ? "" : "s"} de Mercadeo por revisar.`
     : "No tienes comentarios abiertos de Mercadeo.";
 
+  const [selectedSection, setSelectedSection] = useState("hub"); // "hub" | "estrategia"
+
   return <div>
     <div className="home-topbar">
-      <Header title="Inicio" subtitle="Panel general para administrar catalogos, promociones, cambios y exportaciones." />
-      <div className={classNames("sync-panel compact home-sync", statusType)}>
-        <div className="home-sync-main">
-          <span className={classNames("home-sync-dot", supabaseReady && "ready", statusType === "loading" && "loading", statusType === "error" && "error")} aria-hidden="true"></span>
-          <div>
-            <strong>Conexión</strong>
-            <span>{supabaseReady ? "Supabase activo" : "Sin conexión configurada"}</span>
-            <p title={statusMessage}>{statusMessage}</p>
+      <Header
+        title={selectedSection === "hub" ? "Portal de Gestión Comercial" : "Estrategia Comercial: Catálogos"}
+        subtitle={selectedSection === "hub"
+          ? "Gestión centralizada de fidelización de clientes y campañas comerciales."
+          : "Panel para administrar catálogos activos, promociones y exportaciones."}
+      />
+    </div>
+
+    {selectedSection === "hub" ? (
+      <div className="home-hub-container">
+        <div className="home-hub-canvas">
+          <div className="home-hub-glow-emerald" aria-hidden="true" />
+          <div className="home-hub-glow-cyan" aria-hidden="true" />
+          
+          <div className="home-hub-intro">
+            <span className="home-hub-pill">
+              <span className="home-hub-pill-dot" />
+              SISTEMA DE GESTIÓN COMERCIAL
+            </span>
+            <h2 className="home-hub-title">Seleccione el Proceso Comercial</h2>
           </div>
-        </div>
-        <div className="toolbar-actions home-sync-actions">
-          {can(PERMISSIONS.SYNC_SUPABASE) && <Button variant="outline" className="sync-compact-btn" onClick={onLoadSupabase} disabled={!supabaseReady || isSyncing}><RefreshCw size={16}/> Actualizar conexión</Button>}
-          {!supabaseReady && can(PERMISSIONS.MANAGE_SETTINGS) && <Button variant="outline" onClick={() => setActive("ajustes")}><Settings size={16}/> Configurar</Button>}
-        </div>
-      </div>
-    </div>
-    <div className="metrics">
-      <Metric title="Catalogos activos" value={activos} icon={LayoutDashboard}/>
-      <Metric title="Promos registradas" value={visibleRowsCount} icon={ListChecks}/>
-      <Metric title="Cambios recientes" value={logsCount} icon={History}/>
-      <Metric title="Conexion Supabase" value={supabaseReady ? "ON" : "OFF"} icon={Bell}/>
-    </div>
-    <div className="toolbar home-catalog-toolbar">
-      <div className="home-catalog-title">
-        <h2>Catalogos disponibles</h2>
-        {showBuyerCommentAlert && (
-          <div className={classNames("buyer-comment-alert", buyerOpenComments ? "has-open" : "clear")}>
-            <div className="buyer-comment-alert-icon"><MessageSquareWarning size={18}/></div>
-            <div>
-              <strong>{buyerOpenComments ? "Comentarios abiertos" : "Sin pendientes"}</strong>
-              <span>{buyerCommentAlertCopy}</span>
+
+          <div className="home-hub-cards-grid">
+            {/* Tarjeta 1: Fidelización de Clientes */}
+            <div
+              className="hub-tile hub-tile-fidelizacion"
+              onClick={() => setActive("fidelizacion")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActive("fidelizacion");
+                }
+              }}
+            >
+              <div className="hub-tile-header">
+                <div className="hub-tile-icon-box emerald">
+                  <Percent size={28} />
+                </div>
+                <div className="hub-tile-tag-wrap">
+                  <span className="hub-tile-badge emerald">Canastos Permanentes</span>
+                  <span className="hub-tile-indicator">Fidelización</span>
+                </div>
+              </div>
+
+              <div className="hub-tile-body">
+                <h3 className="hub-tile-title">Fidelización de Clientes</h3>
+                <p className="hub-tile-desc">
+                  Gestión de canastos de artículos y descuentos permanentes por segmento de clientes para <strong>Comasa</strong> y <strong>Retail</strong>. Consulta por división y solicitudes de actualización con análisis de deltas.
+                </p>
+
+                <div className="hub-tile-features">
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check emerald" />
+                    <span>Segmentos Comasa & Retail</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check emerald" />
+                    <span>Canastos permanentes</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check emerald" />
+                    <span>Análisis de deltas & aprobaciones</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hub-tile-footer">
+                <button
+                  type="button"
+                  className="hub-cta-button emerald"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActive("fidelizacion");
+                  }}
+                >
+                  <span>Ingresar a Fidelización</span>
+                  <ArrowRight size={17} className="hub-cta-arrow" />
+                </button>
+              </div>
+            </div>
+
+            {/* Tarjeta 2: Campañas Comerciales */}
+            <div
+              className="hub-tile hub-tile-estrategia"
+              onClick={() => setSelectedSection("estrategia")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedSection("estrategia");
+                }
+              }}
+            >
+              <div className="hub-tile-header">
+                <div className="hub-tile-icon-box cyan">
+                  <ShoppingBag size={28} />
+                </div>
+                <div className="hub-tile-tag-wrap">
+                  <span className="hub-tile-badge cyan">Promociones & Catálogos</span>
+                  <span className="hub-tile-indicator">Estrategia Comercial</span>
+                </div>
+              </div>
+
+              <div className="hub-tile-body">
+                <h3 className="hub-tile-title">Campañas Comerciales</h3>
+                <p className="hub-tile-desc">
+                  Planificación y administración de catálogos comerciales bimensuales, promociones masivas, combos, escalas y promociones especiales para tiendas y canales corporativos.
+                </p>
+
+                <div className="hub-tile-features">
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check cyan" />
+                    <span>Catálogos comerciales bimensuales</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check cyan" />
+                    <span>Combos, escalas y ofertas masivas</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check cyan" />
+                    <span>Canales tiendas y corporativo</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hub-tile-footer">
+                <button
+                  type="button"
+                  className="hub-cta-button cyan"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSection("estrategia");
+                  }}
+                >
+                  <span>Explorar Catálogos Activos</span>
+                  <ArrowRight size={17} className="hub-cta-arrow" />
+                </button>
+              </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
-      <div className="toolbar-actions">
-        {can(PERMISSIONS.CREATE_SPECIAL_PROMO) && <Button onClick={() => setActive("especial")}><Plus size={16}/> Nueva promocion especial</Button>}
-        {can(PERMISSIONS.MANAGE_SETTINGS) && <Button variant="outline" onClick={() => setActive("ajustes")}><Settings size={16}/> Ajustes</Button>}
-      </div>
-    </div>
-    <div className="catalog-grid">
-      {catalogosVisibles.map((cat) => {
-        const stats = catalogStats.get(cat.id) || { compradores: new Set(), divisiones: new Set(), skus: new Set() };
-        return <Card key={cat.id} className="catalog-card">
-            <div className={classNames("color-strip", cat.color)}></div>
-            <CardContent>
-              <div className="catalog-head">
+    ) : (
+      <div className="home-estrategia-section">
+        <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Button variant="outline" className="btn-sm" onClick={() => setSelectedSection("hub")}>
+            <ArrowLeft size={15} /> Volver al menú principal
+          </Button>
+        </div>
+
+        <div className="metrics">
+          <Metric title="Catalogos activos" value={activos} icon={LayoutDashboard}/>
+          <Metric title="Promos registradas" value={visibleRowsCount} icon={ListChecks}/>
+          <Metric title="Cambios recientes" value={logsCount} icon={History}/>
+          <Metric title="Conexion Supabase" value={supabaseReady ? "ON" : "OFF"} icon={Bell}/>
+        </div>
+
+        <div id="catalogos-section" className="toolbar home-catalog-toolbar">
+          <div className="home-catalog-title">
+            <h2>Catalogos disponibles</h2>
+            {showBuyerCommentAlert && (
+              <div className={classNames("buyer-comment-alert", buyerOpenComments ? "has-open" : "clear")}>
+                <div className="buyer-comment-alert-icon"><MessageSquareWarning size={18}/></div>
                 <div>
-                  <h3>{cat.nombre}</h3>
-                  <p className="catalog-note">{stats.compradores.size} compradores - {stats.divisiones.size} divisiones - {stats.skusCount ?? stats.skus.size} SKU</p>
-                  <p className="catalog-meta-row"><span>{cat.canal}</span><span><CalendarDays size={14}/>{cat.vigencia}</span></p>
-                </div>
-                <div className="catalog-status">
-                  <span className={cat.estado === "Activo" ? "pill green" : "pill"}>{cat.estado}</span>
-                  <span className={cat.notificaciones ? "notification-dot active" : "notification-dot inactive"} title={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"} aria-label={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"}>
-                    {cat.notificaciones ? <Bell size={15}/> : <BellOff size={15}/>}
-                  </span>
+                  <strong>{buyerOpenComments ? "Comentarios abiertos" : "Sin pendientes"}</strong>
+                  <span>{buyerCommentAlertCopy}</span>
                 </div>
               </div>
-              <div className="catalog-actions">
-                {can(PERMISSIONS.VIEW_PROMOS) && <Button className="full" onClick={() => { setCatalogoActivo(cat); setActive("promos"); }}>Trabajar catalogo</Button>}
-                {can(PERMISSIONS.VIEW_AVANCES) && <Button className="full btn-avances" variant="outline" onClick={() => onOpenAvances?.(cat)}><ListChecks size={16}/> Avances</Button>}
-              </div>
-            </CardContent>
-          </Card>;
-      })}
-    </div>
+            )}
+          </div>
+          <div className="toolbar-actions">
+            {can(PERMISSIONS.CREATE_SPECIAL_PROMO) && <Button onClick={() => setActive("especial")}><Plus size={16}/> Nueva promocion especial</Button>}
+            {can(PERMISSIONS.MANAGE_SETTINGS) && <Button variant="outline" onClick={() => setActive("ajustes")}><Settings size={16}/> Ajustes</Button>}
+          </div>
+        </div>
+
+        <div className="catalog-grid">
+          {catalogosVisibles.map((cat) => {
+            const stats = catalogStats.get(cat.id) || { compradores: new Set(), divisiones: new Set(), skus: new Set() };
+            return <Card key={cat.id} className="catalog-card">
+                <div className={classNames("color-strip", cat.color)}></div>
+                <CardContent>
+                  <div className="catalog-head">
+                    <div>
+                      <h3>{cat.nombre}</h3>
+                      <p className="catalog-note">{stats.compradores.size} compradores - {stats.divisiones.size} divisiones - {stats.skusCount ?? stats.skus.size} SKU</p>
+                      <p className="catalog-meta-row"><span>{cat.canal}</span><span><CalendarDays size={14}/>{cat.vigencia}</span></p>
+                    </div>
+                    <div className="catalog-status">
+                      <span className={cat.estado === "Activo" ? "pill green" : "pill"}>{cat.estado}</span>
+                      <span className={cat.notificaciones ? "notification-dot active" : "notification-dot inactive"} title={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"} aria-label={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"}>
+                        {cat.notificaciones ? <Bell size={15}/> : <BellOff size={15}/>}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="catalog-actions">
+                    {can(PERMISSIONS.VIEW_PROMOS) && <Button className="full" onClick={() => { setCatalogoActivo(cat); setActive("promos"); }}>Trabajar catalogo</Button>}
+                    {can(PERMISSIONS.VIEW_AVANCES) && <Button className="full btn-avances" variant="outline" onClick={() => onOpenAvances?.(cat)}><ListChecks size={16}/> Avances</Button>}
+                  </div>
+                </CardContent>
+              </Card>;
+          })}
+        </div>
+      </div>
+    )}
   </div>;
 }

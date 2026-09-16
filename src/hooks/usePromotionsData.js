@@ -16,11 +16,6 @@ export function usePromotionsData({ useDemoData = false } = {}) {
   const [promocionesDetalle, setPromocionesDetalle] = useState([]);
   const [comentarios, setComentarios] = useState(() => useDemoData ? comentariosIniciales : []);
   const [logs, setLogsState] = useState([]);
-  const [consultedLogs, setConsultedLogs] = useState([]);
-  const [logsPage, setLogsPage] = useState(1);
-  const [logsPageSize, setLogsPageSize] = useState(25);
-  const [logsHasNextPage, setLogsHasNextPage] = useState(false);
-  const [logsStatus, setLogsStatus] = useState({ type: "idle", message: "Presione consultar para cargar logs." });
 
   const setLogs = useCallback((updater) => {
     setLogsState((currentLogs) => ensureLogIds(typeof updater === "function" ? updater(currentLogs) : updater));
@@ -32,11 +27,6 @@ export function usePromotionsData({ useDemoData = false } = {}) {
     setPromocionesDetalle([]);
     setComentarios(useDemoData ? comentariosIniciales : []);
     setLogsState([]);
-    setConsultedLogs([]);
-    setLogsPage(1);
-    setLogsPageSize(25);
-    setLogsHasNextPage(false);
-    setLogsStatus({ type: "idle", message: "Presione consultar para cargar logs." });
   }, [useDemoData]);
 
   return {
@@ -50,16 +40,6 @@ export function usePromotionsData({ useDemoData = false } = {}) {
     setComentarios,
     logs,
     setLogs,
-    consultedLogs,
-    setConsultedLogs,
-    logsPage,
-    setLogsPage,
-    logsPageSize,
-    setLogsPageSize,
-    logsHasNextPage,
-    setLogsHasNextPage,
-    logsStatus,
-    setLogsStatus,
     resetPromotionsData,
   };
 }

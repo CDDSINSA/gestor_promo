@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { createGroupForPromoType, isComplexPromoType } from "../promoTypes/promoTypeEngine";
 import { normalizeValue } from "../utils/common";
 import { isActivityComment, isSegmentedRow } from "../utils/promoHelpers";
+import { isAnulledPromotion } from "../features/promotions/application/promotionAnulation";
 
 export function getPromoRowActivityId(row) {
   return row.actividadId || row.actividad_id || row.catalogo_id || "";
@@ -37,6 +38,7 @@ export function usePromoFilters({
   const getRowsForCurrentActivity = (rowList) => currentActivityId ? rowList.filter((row) => getPromoRowActivityId(row) === currentActivityId) : rowList;
   const createGroupForCurrentActivity = (promoType, rowList = rows) => createGroupForPromoType(promoType, getRowsForCurrentActivity(rowList));
   const rowMatchesActiveScope = (row, promoType = tipoActivo) => {
+    if (isAnulledPromotion(row)) return false;
     if (!compradorSeleccionado || !currentActivityId) return false;
     const matchesActivity = getPromoRowActivityId(row) === currentActivityId;
     const matchesBuyer = getPromoRowBuyer(row) === comprador;
@@ -44,6 +46,7 @@ export function usePromoFilters({
   };
 
   const activeRows = useMemo(() => rows.filter((row) => {
+    if (isAnulledPromotion(row)) return false;
     if (!compradorSeleccionado || !currentActivityId) return false;
     const rowType = row.tipoPromo || row.tipo_promo;
     const matchesActivity = getPromoRowActivityId(row) === currentActivityId;
@@ -68,6 +71,7 @@ export function usePromoFilters({
   const benefitStatusText = missingBenefitCount ? `${missingBenefitCount} codigo(s) sin precio ni descuento` : activeRows.length ? "Todos los codigos tienen precio o descuento" : "Sin codigos pendientes";
 
   const comboGroups = useMemo(() => Array.from(new Set(rows.filter((row) => {
+    if (isAnulledPromotion(row)) return false;
     if (!compradorSeleccionado || !currentActivityId) return false;
     const matchesActivity = getPromoRowActivityId(row) === currentActivityId;
     const matchesBuyer = getPromoRowBuyer(row) === comprador;
