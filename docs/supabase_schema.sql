@@ -72,6 +72,7 @@ create table if not exists public.campanas (
   doc_id text not null default '',
   token_conexion text not null default '',
   notificaciones boolean not null default false,
+  notificaciones_envivo boolean not null default true,
   correos text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

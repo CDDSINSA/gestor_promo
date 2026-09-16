@@ -17,7 +17,7 @@ Archivos revisados:
 
 Supabase es la unica fuente operativa del frontend. Google Sheets / Drive ya no forma parte del codigo activo de la app. Excel se mantiene solo como respaldo, importacion/exportacion y puente operativo.
 
-El maestro SKU debe seguir fuera de Supabase.
+El maestro SKU reside exclusivamente en `sku_master` de Supabase y se consulta por códigos, bajo demanda. Ver [diseño vigente](maestro_sku_por_demanda.md).
 
 ## Inventario de datos fuente
 
@@ -57,7 +57,7 @@ El CSV completo contiene 281 filas de inventario y confirma estas tablas/vistas:
 - Tablas principales: `campanas`, `promociones`, `promociones_detalle`, `comentarios`, `logs`.
 - Catalogos operativos: `compradores`, `usuarios_app`, `configuracion`, `segmentos_clientes`, `responsables_solicitudes`, `jerarquia_categorias`, `avances_catalogo`, `notificaciones`.
 - Vistas generadas: `consolidado`, `export_pricing`, `export_mercadeo`, `export_planimetria`.
-- `sku_master` existe en el esquema, pero no debe usarse para el MVP porque el maestro SKU se mantiene fuera de Supabase.
+- `sku_master` es la fuente vigente del maestro; las consultas operativas filtran los SKU requeridos.
 
 ## Brechas revisadas
 
@@ -382,7 +382,7 @@ Esto reduce el cambio en pantallas y mantiene la migracion localizada en servici
 - La pestana Logs consulta informacion solo cuando el usuario presiona Consultar.
 - Excel sigue funcionando como exportacion.
 - Las vistas generadas reemplazan `CONSOLIDADO` y `EXPORT_*`.
-- No se sube maestro SKU a Supabase.
+- El administrador actualiza el maestro SKU en Supabase desde Ajustes.
 - No se expone service role key en el frontend.
 - La migracion conserva `row_id`, `actividad_id`, `oferta_id` y `comentario_id` legacy.
 
@@ -390,7 +390,7 @@ Esto reduce el cambio en pantallas y mantiene la migracion localizada en servici
 
 - La trazabilidad por persona depende parcialmente de campos operativos de la app y logs; la auditoria avanzada por usuario final queda pendiente.
 - Las fechas vienen mezcladas entre ISO y formato local; la migracion debe normalizarlas.
-- `sku_master` existe en Supabase, pero no debe usarse desde la app.
+- `sku_master` se consulta desde la app con sesión autenticada y filtros por SKU; no se descarga completo.
 
 ## Siguiente paso propuesto
 

@@ -11,10 +11,6 @@ from datetime import datetime, timezone
 import pandas as pd
 
 
-DEFAULT_SUPABASE_URL = "https://hanvbbezofcengyorooc.supabase.co"
-DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_DBBFpGllQwN98skP71n-Dg_kXzmEMgS"
-
-
 def clean(value):
     if value is None:
         return ""
@@ -463,11 +459,13 @@ def main():
         return 0
 
     rest = SupabaseRest(
-        os.getenv("SUPABASE_URL", DEFAULT_SUPABASE_URL),
-        os.getenv("SUPABASE_ANON_KEY", DEFAULT_SUPABASE_ANON_KEY),
+        os.getenv("SUPABASE_URL", ""),
+        os.getenv("SUPABASE_ANON_KEY", ""),
         os.getenv("SUPABASE_TECH_EMAIL", ""),
         os.getenv("SUPABASE_TECH_PASSWORD", ""),
     )
+    if not rest.url or not rest.anon_key:
+        raise RuntimeError("Faltan SUPABASE_URL y SUPABASE_ANON_KEY.")
     rest.login()
     role = rest.role()
     if role != "ADMIN":

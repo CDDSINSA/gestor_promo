@@ -210,6 +210,7 @@ declare
   v_target_solicitante_buyer_id uuid;
   v_activity_type text;
   v_requires_solicitante boolean;
+  v_solicitante_text text;
   v_touched_offer_context_keys text[] := array[]::text[];
   v_invalid_offer record;
   v_count_promos integer := 0;
@@ -371,25 +372,78 @@ begin
           using errcode = '42501';
       end if;
 
-      if v_is_buyer then
+      v_solicitante_text := coalesce(nullif(v_row ->> 'solicitante', ''), nullif(v_row ->> 'comprador', ''));
+
+      -- Resolver solicitante_buyer_id
+      v_buyer_id := null;
+
+      -- 1. Si viene solicitante_buyer_id o buyer_id en el payload (UUID o ID numérico)
+      if coalesce(v_row ->> 'solicitante_buyer_id', v_row ->> 'buyer_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
         select c.id into v_buyer_id
         from public.compradores c
-        where c.id = any(v_current_buyer_scope_ids)
-          and c.comprador = coalesce(nullif(v_row ->> 'solicitante', ''), nullif(v_row ->> 'comprador', ''))
+        where c.id = (coalesce(v_row ->> 'solicitante_buyer_id', v_row ->> 'buyer_id'))::uuid
         limit 1;
-        if v_buyer_id is null and coalesce(nullif(v_row ->> 'solicitante', ''), nullif(v_row ->> 'comprador', '')) is not null then
+      elsif coalesce(v_row ->> 'solicitante_buyer_id', v_row ->> 'buyer_id', '') <> '' then
+        select c.id into v_buyer_id
+        from public.compradores c
+        where c.comprador_id = coalesce(v_row ->> 'solicitante_buyer_id', v_row ->> 'buyer_id')
+        limit 1;
+      end if;
+
+      -- 2. Si ya existía en public.campanas, heredar el comprador previo si aún no se tiene
+      if v_buyer_id is null and v_campana_id is not null then
+        v_buyer_id := v_existing_solicitante_buyer_id;
+      end if;
+
+      -- 3. Búsqueda por texto (nombre de comprador o correo)
+      if v_buyer_id is null and v_solicitante_text is not null then
+        -- 3a. Coincidencia exacta
+        select c.id into v_buyer_id
+        from public.compradores c
+        where c.comprador = v_solicitante_text
+        limit 1;
+
+        -- 3b. Coincidencia sin distinción de mayúsculas / espacios
+        if v_buyer_id is null then
+          select c.id into v_buyer_id
+          from public.compradores c
+          where lower(trim(c.comprador)) = lower(trim(v_solicitante_text))
+             or lower(trim(c.correo)) = lower(trim(v_solicitante_text))
+          limit 1;
+        end if;
+
+        -- 3c. Coincidencia ortográfica/fonética común (s/z, tildes)
+        if v_buyer_id is null then
+          select c.id into v_buyer_id
+          from public.compradores c
+          where replace(translate(lower(trim(c.comprador)), 'áéíóúàèìòùz', 'aeiouaeious'), ' ', '') =
+                replace(translate(lower(trim(v_solicitante_text)), 'áéíóúàèìòùz', 'aeiouaeious'), ' ', '')
+          limit 1;
+        end if;
+
+        -- 3d. Coincidencia por correo que contenga el nombre/apellido
+        if v_buyer_id is null and length(v_solicitante_text) > 3 then
+          select c.id into v_buyer_id
+          from public.compradores c
+          where c.correo ilike '%' || split_part(lower(trim(v_solicitante_text)), ' ', 1) || '%'
+            and (split_part(lower(trim(v_solicitante_text)), ' ', 2) = '' or c.correo ilike '%' || split_part(lower(trim(v_solicitante_text)), ' ', 2) || '%')
+          limit 1;
+        end if;
+      end if;
+
+      if v_is_buyer then
+        if v_buyer_id is not null and not (v_buyer_id = any(v_current_buyer_scope_ids)) then
           raise exception 'No autorizado para crear o modificar la actividad % con el comprador indicado.', v_id
             using errcode = '42501';
         end if;
         v_buyer_id := coalesce(v_buyer_id, v_current_buyer_id);
-      else
-        select c.id into v_buyer_id
-        from public.compradores c
-        where c.comprador = coalesce(nullif(v_row ->> 'solicitante', ''), nullif(v_row ->> 'comprador', ''))
-        limit 1;
       end if;
 
-      if v_buyer_id is null and v_requires_solicitante then
+      -- Asegurar fallback al comprador existente si aún no se resuelve
+      v_buyer_id := coalesce(v_buyer_id, v_existing_solicitante_buyer_id);
+
+      -- Solo bloquear si es NUEVA actividad y no se logró determinar ningún comprador válido
+      if v_buyer_id is null and v_requires_solicitante and v_campana_id is null then
         raise exception 'Actividad % sin comprador solicitante valido (%).', v_id, coalesce(v_row ->> 'solicitante', v_row ->> 'comprador', '');
       end if;
 
@@ -401,7 +455,7 @@ begin
       insert into public.campanas as c (
         legacy_actividad_id, tipo_actividad, nombre_actividad, canal, fecha_inicio, fecha_fin,
         solicitante_buyer_id, estado, motivo_solicitud, color, doc_id, token_conexion,
-        notificaciones, correos, comprador, responsable, recursos_ocupados, fecha_estado,
+        notificaciones, notificaciones_envivo, correos, comprador, responsable, recursos_ocupados, fecha_estado,
         fecha_nuevo, fecha_aprovado, fecha_entrabajo, fecha_finalizado, fecha_asignado,
         fecha_trabajando, fecha_resuelto, tiempo_nuevo_horas, tiempo_aprovado_horas,
         tiempo_entrabajo_horas, tiempo_finalizado_horas, tiempo_asignado_horas,
@@ -422,6 +476,7 @@ begin
         coalesce(v_catalogo ->> 'doc_id', ''),
         coalesce(v_catalogo ->> 'token_conexion', ''),
         coalesce(nullif(v_catalogo ->> 'notificaciones', '')::boolean, false),
+        coalesce(nullif(v_catalogo ->> 'notificaciones_envivo', '')::boolean, true),
         coalesce(v_catalogo ->> 'correos', ''),
         case
           when v_is_buyer then coalesce(nullif(v_row ->> 'comprador', ''), nullif(v_row ->> 'solicitante', ''), v_current_buyer_name)
@@ -457,8 +512,8 @@ begin
         fecha_fin = excluded.fecha_fin,
         solicitante_buyer_id = case
           when v_is_admin and excluded.tipo_actividad = 'CATALOGO' and excluded.solicitante_buyer_id is null then c.solicitante_buyer_id
-          when v_is_admin then excluded.solicitante_buyer_id
-          else c.solicitante_buyer_id
+          when v_is_admin and excluded.solicitante_buyer_id is not null then excluded.solicitante_buyer_id
+          else coalesce(c.solicitante_buyer_id, excluded.solicitante_buyer_id)
         end,
         estado = excluded.estado,
         motivo_solicitud = excluded.motivo_solicitud,
@@ -466,6 +521,7 @@ begin
         doc_id = excluded.doc_id,
         token_conexion = excluded.token_conexion,
         notificaciones = excluded.notificaciones,
+        notificaciones_envivo = excluded.notificaciones_envivo,
         correos = excluded.correos,
         comprador = excluded.comprador,
         responsable = excluded.responsable,
@@ -693,24 +749,33 @@ begin
           using errcode = '42501';
       end if;
 
-      if v_is_buyer then
-        v_buyer_id := v_existing_buyer_id;
+      -- Resolver buyer_id de la promocion por ID primero
+      v_buyer_id := null;
+      if coalesce(v_row ->> 'buyer_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        select id into v_buyer_id from public.compradores where id = (v_row ->> 'buyer_id')::uuid limit 1;
+      end if;
+      v_buyer_id := coalesce(v_buyer_id, v_existing_buyer_id);
+
+      if v_buyer_id is null and nullif(v_row ->> 'comprador_id', '') is not null then
+        select id into v_buyer_id from public.compradores where comprador_id = v_row ->> 'comprador_id' limit 1;
+      end if;
+
+      if v_buyer_id is null and nullif(v_row ->> 'comprador', '') is not null then
+        select id into v_buyer_id from public.compradores where comprador = v_row ->> 'comprador' limit 1;
         if v_buyer_id is null then
-          select id into v_buyer_id
-          from public.compradores
-          where id = any(v_current_buyer_scope_ids)
-            and comprador = v_row ->> 'comprador'
-          limit 1;
-          if v_buyer_id is null and nullif(v_row ->> 'comprador', '') is not null then
-            raise exception 'No autorizado para crear la promocion % con el comprador indicado.', v_id
-              using errcode = '42501';
-          end if;
+          select id into v_buyer_id from public.compradores where lower(trim(comprador)) = lower(trim(v_row ->> 'comprador')) limit 1;
+        end if;
+      end if;
+
+      if v_is_buyer then
+        if v_buyer_id is not null and not (v_buyer_id = any(v_current_buyer_scope_ids)) then
+          raise exception 'No autorizado para crear o modificar la promocion % con el comprador indicado.', v_id
+            using errcode = '42501';
         end if;
         v_buyer_id := coalesce(v_buyer_id, v_current_buyer_id);
         v_campana_id := coalesce(v_existing_campana_id, v_target_campana_id);
       else
         v_campana_id := v_target_campana_id;
-        select id into v_buyer_id from public.compradores where comprador = v_row ->> 'comprador' limit 1;
       end if;
 
       if coalesce(nullif(v_row ->> 'actividad_id', ''), '') = '' then
@@ -1185,22 +1250,30 @@ begin
           using errcode = '42501';
       end if;
 
-      if v_is_buyer then
-        v_buyer_id := v_existing_buyer_id;
+      -- Resolver buyer_id del avance por ID primero
+      v_buyer_id := null;
+      if coalesce(v_row ->> 'buyer_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        select id into v_buyer_id from public.compradores where id = (v_row ->> 'buyer_id')::uuid limit 1;
+      end if;
+      v_buyer_id := coalesce(v_buyer_id, v_existing_buyer_id);
+
+      if v_buyer_id is null and nullif(v_row ->> 'comprador_id', '') is not null then
+        select id into v_buyer_id from public.compradores where comprador_id = v_row ->> 'comprador_id' limit 1;
+      end if;
+
+      if v_buyer_id is null and nullif(v_row ->> 'comprador', '') is not null then
+        select id into v_buyer_id from public.compradores where comprador = v_row ->> 'comprador' limit 1;
         if v_buyer_id is null then
-          select id into v_buyer_id
-          from public.compradores
-          where id = any(v_current_buyer_scope_ids)
-            and comprador = v_row ->> 'comprador'
-          limit 1;
-          if v_buyer_id is null and nullif(v_row ->> 'comprador', '') is not null then
-            raise exception 'No autorizado para modificar el avance % con el comprador indicado.', v_id
-              using errcode = '42501';
-          end if;
+          select id into v_buyer_id from public.compradores where lower(trim(comprador)) = lower(trim(v_row ->> 'comprador')) limit 1;
+        end if;
+      end if;
+
+      if v_is_buyer then
+        if v_buyer_id is not null and not (v_buyer_id = any(v_current_buyer_scope_ids)) then
+          raise exception 'No autorizado para modificar el avance % con el comprador indicado.', v_id
+            using errcode = '42501';
         end if;
         v_buyer_id := coalesce(v_buyer_id, v_current_buyer_id);
-      else
-        select id into v_buyer_id from public.compradores where comprador = v_row ->> 'comprador' limit 1;
       end if;
 
       if v_buyer_id is null then
