@@ -1,0 +1,79 @@
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    linear-gradient(180deg, #eef8f3 0, #f8fafc 16rem),
+    #f8fafc;
+}
+
+.login-card {
+  width: min(100%, 28rem);
+}
+
+.login-card > div {
+  padding: 1.25rem;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.login-brand .brand-logo {
+  background: #006b3f;
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  line-height: 1.6rem;
+  font-weight: var(--weight-strong);
+}
+
+.login-brand p {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.login-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.login-form .btn {
+  justify-content: center;
+  width: 100%;
+}
+
+.login-status,
+.logs-status {
+  margin: 0;
+  color: #047857;
+  font-size: 0.82rem;
+  line-height: 1.2rem;
+}
+
+.login-status.success {
+  color: #047857;
+}
+
+.login-status.error,
+.logs-status.error {
+  color: #b91c1c;
+}
+
+.recovery-info {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.82rem;
+  line-height: 1.2rem;
+}

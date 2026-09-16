@@ -1,10 +1,8 @@
-export const DEFAULT_SUPABASE_URL = "https://hanvbbezofcengyorooc.supabase.co";
-export const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_DBBFpGllQwN98skP71n-Dg_kXzmEMgS";
 export const STORAGE_KEY = "sinsaPromo.supabaseConnection";
 export const APP_SESSION_STORAGE_KEY = "sinsaPromo.appSession";
 export const REQUEST_TIMEOUT_MS = 45000;
 export const SELECT_PAGE_SIZE = 1000;
-export const SUPABASE_CONNECTION_OVERRIDES_ENABLED = Boolean(import.meta.env?.DEV);
+export const SUPABASE_CONNECTION_OVERRIDES_ENABLED = false;
 
 export function getEnvValue(key) {
   return import.meta.env?.[key] || "";
@@ -54,11 +52,11 @@ export function normalizeDate(value) {
 }
 
 export function getConfiguredSupabaseUrl() {
-  return withoutTrailingSlash(getEnvValue("VITE_SUPABASE_URL") || DEFAULT_SUPABASE_URL);
+  return withoutTrailingSlash(getEnvValue("VITE_SUPABASE_URL"));
 }
 
 export function getConfiguredAnonKey() {
-  return cleanText(getEnvValue("VITE_SUPABASE_ANON_KEY") || DEFAULT_SUPABASE_ANON_KEY);
+  return cleanText(getEnvValue("VITE_SUPABASE_ANON_KEY"));
 }
 
 function getConnectionUrlOverride(connection = {}) {

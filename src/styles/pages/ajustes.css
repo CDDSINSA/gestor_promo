@@ -1,0 +1,108 @@
+.settings-layout {
+  grid-template-columns: minmax(13rem, 1fr) minmax(0, 2fr);
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.settings-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-tabs button {
+  border: 1px solid #dbe5ee;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #475569;
+  padding: 0.65rem 1rem;
+  font-size: 0.88rem;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.settings-tabs button.selected {
+  border-color: #006b3f;
+  background: #e8f5ee;
+  color: #004b2d;
+}
+
+.settings-section-card {
+  max-width: none;
+}
+
+.settings-page .settings-btn-save {
+  border-color: #006b3f;
+  background: #006b3f;
+  color: #ffffff;
+}
+
+.settings-page .settings-btn-save:hover {
+  border-color: #004b2d;
+  background: #004b2d;
+}
+
+.settings-page .settings-btn-add {
+  border-color: #00a6c8;
+  background: #e0f7fb;
+  color: #075985;
+}
+
+.settings-page .settings-btn-add:hover {
+  border-color: #0891b2;
+  background: #cffafe;
+}
+
+.settings-page .settings-btn-test,
+.settings-page .settings-btn-validate {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.settings-page .settings-btn-test:hover,
+.settings-page .settings-btn-validate:hover {
+  border-color: #94a3b8;
+  background: #e2e8f0;
+}
+
+.settings-page .settings-btn-warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.settings-page .settings-btn-warning:hover {
+  background: #fef3c7;
+}
+
+.settings-page .settings-btn-danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.settings-page .settings-btn-danger:hover {
+  border-color: #fca5a5;
+  background: #ffe4e6;
+}
+
+.buyer-manager {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.buyer-form {
+  display: grid;
+  gap: 0.75rem;
+}

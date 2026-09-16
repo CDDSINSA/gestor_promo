@@ -1,0 +1,17 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  font-weight: var(--weight-regular);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  font-weight: var(--weight-regular);
+}

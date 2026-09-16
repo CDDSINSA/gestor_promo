@@ -57,6 +57,7 @@ export function normalizeCatalogo(item) {
   const vigenciaInicio = item.vigencia_inicio || item.vigenciaInicio || "";
   const vigenciaFin = item.vigencia_fin || item.vigenciaFin || "";
   const divisiones = normalizeDivisionesCatalogo(item.divisiones || item.divisiones_catalogo || item.categorias || item.categorias_catalogo);
+  const liveNotificationsValue = item.notificaciones_envivo ?? item.notificacionesEnvivo ?? item.live_notifications;
   return {
     ...item,
     id,
@@ -71,6 +72,8 @@ export function normalizeCatalogo(item) {
     docId: item.docId || item.doc_id || "",
     tokenConexion: item.tokenConexion || item.token_conexion || "",
     notificaciones: normalizeBoolean(item.notificaciones),
+    notificacionesEnvivo: liveNotificationsValue === undefined || liveNotificationsValue === "" ? true : normalizeBoolean(liveNotificationsValue),
+    notificaciones_envivo: liveNotificationsValue === undefined || liveNotificationsValue === "" ? true : normalizeBoolean(liveNotificationsValue),
     correos: item.correos || item.correo || "",
     divisiones,
   };
@@ -111,6 +114,7 @@ export function toSheetCatalogo(item) {
     doc_id: catalogo.docId,
     token_conexion: catalogo.tokenConexion,
     notificaciones: catalogo.notificaciones,
+    notificaciones_envivo: catalogo.notificacionesEnvivo,
     correos: catalogo.correos,
     divisiones: catalogo.divisiones.join("; "),
   };
@@ -214,6 +218,8 @@ export function normalizeActividad(item) {
     tiempo_total_horas: numberFromHours(item.tiempo_total_horas),
     promo_ids: item.promo_ids || item.promoIds || "",
     oferta_ids: item.oferta_ids || item.ofertaIds || "",
+    solicitante_buyer_id: item.solicitante_buyer_id || item.solicitanteBuyerId || null,
+    solicitanteBuyerId: item.solicitanteBuyerId || item.solicitante_buyer_id || null,
   };
 }
 
@@ -254,6 +260,7 @@ export function toExcelActividad(item) {
     fecha_fin: activity.fecha_fin,
     comprador: activity.comprador,
     solicitante: activity.solicitante,
+    solicitante_buyer_id: activity.solicitante_buyer_id || null,
     estado: activity.estado,
     fecha_creacion: activity.fecha_creacion,
     motivo_solicitud: activity.motivo_solicitud,
@@ -460,7 +467,7 @@ export function isComboRewardRole(value) {
 }
 
 export function getPromotionStatus(row) {
-  const current = String(row.estado_registro || "").trim().toUpperCase();
+  const current = String(row.estado_registro || row.estadoRegistro || "").trim().toUpperCase();
   if (["CERRADO", "ANULADO"].includes(current)) return current;
   const promoType = normalizeValue(row.tipoPromo || row.tipo_promo);
   const isComplex = isComplexPromoType(promoType);
@@ -523,6 +530,8 @@ export function toAppRow(row) {
     alcance_tipo: normalizeAlcanceType(row.alcance_tipo || row.alcanceTipo),
     alcanceValor: row.alcanceValor || row.alcance_valor || "",
     alcance_valor: row.alcance_valor || row.alcanceValor || "",
+    estadoRegistro: row.estadoRegistro || row.estado_registro || "",
+    estado_registro: row.estado_registro || row.estadoRegistro || "",
     usuarioCrea,
     usuario_crea: usuarioCrea,
     usuarioEdita,
@@ -544,6 +553,7 @@ export function toExcelRow(row) {
     actividad_id: activityId,
     oferta_id: offerId,
     comprador_id: row.comprador_id || row.compradorId || "",
+    buyer_id: row.buyer_id || row.buyerId || null,
     comprador: row.comprador || "",
     division: row.division || "",
     tipo_promo: tipoPromo,

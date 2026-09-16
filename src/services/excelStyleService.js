@@ -1,8 +1,11 @@
 import { normalizeCanal } from "../utils/promoHelpers";
 import { complexPromoTypes } from "../promoTypes/promoTypeEngine";
+import { isAnulledPromotion } from "../features/promotions/application/promotionAnulation";
 
 const COMPLEX_PROMO_TYPES = new Set(complexPromoTypes.map((type) => normalizeCanal(type)));
 const COMPLEX_PROMO_BAND_COLORS = ["FFE2F0D9", "FFFCE4D6"];
+const ANULLED_ROW_COLOR = "FFFFE2E2";
+const ANULLED_FONT_COLOR = "FF991B1B";
 const EXCEL_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 async function loadExcelJS() {
@@ -61,6 +64,27 @@ function applyComplexPromoBanding(worksheet, dataRows = [], columnCount = 0) {
   });
 }
 
+function applyAnulledRowStyle(worksheet, dataRows = [], columnCount = 0) {
+  if (!worksheet || !dataRows.length || !columnCount) return;
+
+  dataRows.forEach((row, dataIndex) => {
+    if (!isAnulledPromotion(row)) return;
+    const worksheetRow = worksheet.getRow(dataIndex + 2);
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const cell = worksheetRow.getCell(columnIndex + 1);
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: ANULLED_ROW_COLOR },
+      };
+      cell.font = {
+        ...(cell.font || {}),
+        color: { argb: ANULLED_FONT_COLOR },
+      };
+    }
+  });
+}
+
 function downloadBuffer(buffer, fileName) {
   const blob = new Blob([buffer], { type: EXCEL_MIME_TYPE });
   const url = URL.createObjectURL(blob);
@@ -81,6 +105,7 @@ export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = []
 
   rows.forEach((row) => worksheet.addRow(row));
   applyComplexPromoBanding(worksheet, dataRows, columnCount);
+  applyAnulledRowStyle(worksheet, dataRows, columnCount);
 
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBuffer(buffer, fileName);

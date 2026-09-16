@@ -1,0 +1,242 @@
+.avance-mini-panel {
+  grid-column: 1 / -1;
+  padding: 0.75rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 0.75rem;
+  background: #f7fff9;
+}
+
+.avance-mini-panel .segment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.avance-layout {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.9fr) minmax(0, 1.6fr);
+  gap: 1.15rem;
+  align-items: start;
+}
+
+.avance-board-card > div,
+.avance-detail-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.avance-division-list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: 42rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.avance-division-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #f59e0b;
+  border-radius: 0.9rem;
+  color: #334155;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.avance-division-card:hover,
+.avance-division-card.selected {
+  border-color: #9fd8c4;
+  border-left-color: #00a6c8;
+  background: #f7fff9;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.avance-division-card.complete {
+  border-left-color: #006b3f;
+}
+
+.avance-division-card strong,
+.avance-division-card span {
+  display: block;
+}
+
+.avance-division-card strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: var(--weight-medium);
+}
+
+.avance-division-card div > span {
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.avance-division-card .avance-card-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.avance-division-card .avance-card-status .pill {
+  display: inline-flex;
+  margin-top: 0;
+}
+
+.avance-detail-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #dbe7e1;
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgba(232, 245, 238, 0.95), rgba(255, 255, 255, 0.95)),
+    #ffffff;
+}
+
+.avance-detail-hero h2,
+.avance-detail-hero p {
+  margin: 0;
+}
+
+.avance-detail-hero h2 {
+  margin-top: 0.35rem;
+  color: #0f172a;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: var(--weight-strong);
+}
+
+.avance-detail-hero p {
+  margin-top: 0.3rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.25rem;
+}
+
+.avance-detail-hero div > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #006b3f;
+  font-size: 0.78rem;
+  font-weight: var(--weight-medium);
+}
+
+.avance-buyer-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.avance-buyer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #ffffff;
+}
+
+.avance-buyer-row.complete {
+  border-color: #bbf7d0;
+  background: #f7fff9;
+}
+
+.avance-buyer-row strong,
+.avance-buyer-row span {
+  display: block;
+}
+
+.avance-buyer-row strong {
+  color: #0f172a;
+  font-weight: var(--weight-medium);
+}
+
+.avance-buyer-row div > span {
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.avance-unselected-hint {
+  padding: 1.25rem;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.avance-unselected-hint .hint-icon {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.avance-compact-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.avance-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.avance-progress-bar-wrap {
+  flex: 1;
+}
+
+.avance-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.avance-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00A6C8 0%, #006B3F 100%);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.avance-pill-stat {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.avance-pill-stat.pending {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.avance-pill-stat.complete {
+  background: #E8F5EE;
+  color: #006B3F;
+  border: 1px solid #b7e0ca;
+}

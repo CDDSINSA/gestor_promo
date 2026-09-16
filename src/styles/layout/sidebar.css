@@ -1,0 +1,226 @@
+.sidebar {
+  display: flex;
+  flex: 0 0 16rem;
+  flex-direction: column;
+  width: 16rem;
+  height: 100vh;
+  height: 100dvh;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.04);
+  transition: width 0.2s ease, flex-basis 0.2s ease;
+  z-index: 40;
+}
+
+.sidebar.collapsed {
+  flex-basis: 5rem;
+  width: 5rem;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0.75rem 0.5rem;
+}
+
+.brand {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border-radius: 1rem;
+  background: #006b3f;
+}
+
+.brand-logo {
+  flex: 0 0 2.35rem;
+  width: 2.35rem;
+  height: 2rem;
+  border-radius: 0.55rem;
+  object-fit: contain;
+  background: #1ca33a;
+}
+
+.brand-copy {
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, width 0.2s ease;
+}
+
+.brand-copy div {
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  line-height: 1.25rem;
+  font-weight: var(--weight-bold);
+  color: #ffffff;
+}
+
+.brand-copy span {
+  display: block;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.78);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  color: #475569;
+  background: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-toggle:hover {
+  color: #006b3f;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.sidebar.collapsed .sidebar-head {
+  flex-direction: column;
+}
+
+.sidebar.collapsed .brand {
+  width: 100%;
+  justify-content: center;
+  gap: 0;
+  padding: 0.55rem;
+}
+
+.sidebar.collapsed .brand-copy {
+  width: 0;
+  opacity: 0;
+}
+
+.sidebar.collapsed .sidebar-toggle {
+  width: 100%;
+  flex-basis: auto;
+}
+
+.sidebar nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sidebar nav button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0.75rem;
+  color: #475569;
+  background: transparent;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar nav button svg {
+  flex: 0 0 auto;
+}
+
+.sidebar nav button:hover {
+  color: #006b3f;
+  background: #f8fafc;
+}
+
+.sidebar nav button.active {
+  color: #004b2d;
+  background: #e8f5ee;
+  font-weight: var(--weight-medium);
+  box-shadow: inset 3px 0 0 #00a6c8;
+}
+
+.sidebar.collapsed nav {
+  padding-inline: 0.5rem;
+}
+
+.sidebar.collapsed nav button {
+  width: 2.75rem;
+  height: 2.75rem;
+  justify-content: center;
+  gap: 0;
+  padding: 0.7rem;
+}
+
+.sidebar.collapsed .nav-label {
+  width: 0;
+  opacity: 0;
+}
+
+.sidebar-session {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.sidebar-session > span {
+  overflow: hidden;
+  padding: 0 0.75rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-session button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0.75rem;
+  color: #475569;
+  background: transparent;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.sidebar-session button:hover {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.sidebar.collapsed .sidebar-session > span {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-session button {
+  width: 2.75rem;
+  height: 2.75rem;
+  justify-content: center;
+  gap: 0;
+  padding: 0.7rem;
+}

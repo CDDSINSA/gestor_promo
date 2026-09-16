@@ -1,0 +1,14 @@
+:root {
+  --font-body: "Aptos", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: "Segoe UI Variable Display", "Aptos Display", "Aptos", "Segoe UI", system-ui, sans-serif;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-strong: 650;
+  --weight-bold: 700;
+  color: #0f172a;
+  background: #f8fafc;
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}

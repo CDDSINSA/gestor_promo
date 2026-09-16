@@ -1,0 +1,63 @@
+.consulta-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(16rem, 0.7fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.consulta-panel > div,
+.consulta-summary-card > div {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.consulta-panel textarea {
+  min-height: 8.5rem;
+}
+
+.consulta-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.consulta-summary-card > div {
+  justify-content: center;
+}
+
+.consulta-kpi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+}
+
+.consulta-kpi span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.consulta-kpi strong {
+  color: #0f172a;
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: var(--weight-strong);
+}
+
+.consulta-kpi.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.consulta-status {
+  margin: 0;
+  color: #047857;
+  font-size: 0.82rem;
+  line-height: 1.2rem;
+}

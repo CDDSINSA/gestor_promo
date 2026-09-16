@@ -3,6 +3,7 @@ import {
   assertOk,
   cleanText,
   fetchWithTimeout,
+  getAnonKey,
   getHeaders,
   getSupabaseUrl,
 } from "./config";
@@ -10,6 +11,9 @@ import { ensureFreshAppSession } from "./session";
 
 async function getAuthenticatedSession(connection = {}) {
   const session = connection.session || connection.appSession || connection.authSession;
+  if (!session?.access_token) {
+    return { access_token: getAnonKey(connection) };
+  }
   return ensureFreshAppSession(connection, session);
 }
 
@@ -31,15 +35,16 @@ export function buildQuery(params = {}) {
   return text ? `?${text}` : "";
 }
 
-export async function selectAll(connection, table, params = {}) {
+export async function selectAll(connection, table, params = {}, { signal } = {}) {
   const queryParams = { select: "*", ...params };
   if (queryParams.limit) {
-    return supabaseRequest(connection, `/rest/v1/${table}${buildQuery(queryParams)}`);
+    return supabaseRequest(connection, `/rest/v1/${table}${buildQuery(queryParams)}`, { signal });
   }
 
   const results = [];
   for (let offset = 0; ; offset += SELECT_PAGE_SIZE) {
     const page = await supabaseRequest(connection, `/rest/v1/${table}${buildQuery(queryParams)}`, {
+      signal,
       headers: { Range: `${offset}-${offset + SELECT_PAGE_SIZE - 1}` },
     });
     if (!Array.isArray(page)) return page;

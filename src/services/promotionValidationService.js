@@ -7,6 +7,7 @@ import {
   MEGAPACK_PROMO_TYPE,
 } from "../constants";
 import { isComplexPromoType } from "../promoTypes/promoTypeEngine";
+import { isAnulledPromotion } from "../features/promotions/application/promotionAnulation";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -204,6 +205,7 @@ export function validatePromotions(promociones = [], options = {}) {
   };
 
   promociones.forEach((row, index) => {
+    if (isAnulledPromotion(row)) return;
     const inScope = rowInScope(row);
     const enriched = enrichRow(row, activityMap);
     const tipoPromo = getTipoPromo(row);
