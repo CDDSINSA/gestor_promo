@@ -70,6 +70,7 @@ function TimelineRow({ item, index, timeline }) {
     style={{
       gridTemplateColumns: `repeat(${timeline.totalDays}, minmax(0, 1fr))`,
       "--bar-color": color,
+      "--day-width": `${100 / timeline.totalDays}%`,
     }}
   >
     {timeline.todayOffset !== null && <span className="seguimiento-today-line" style={{ gridColumn: `${timeline.todayOffset + 1}` }} />}
@@ -105,7 +106,7 @@ export default function SeguimientoGanttPage({ actividades = [], rows = [], cata
   };
 
   return <div className="seguimiento-page">
-    <div className="toolbar">
+    <div className="toolbar page-header-toolbar">
       <Header title="Seguimiento Gantt" subtitle="Linea de tiempo operativa para revisar actividades, vigencias y alcance sin modificar promociones." />
       <div className="toolbar-actions seguimiento-actions">
         <label className="seguimiento-filter">

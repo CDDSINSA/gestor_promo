@@ -270,7 +270,7 @@ export default function GestionAvancesPage({
   };
 
   return <div>
-    <div className="toolbar">
+    <div className="toolbar page-header-toolbar">
       <Header title="Gestion de Avances" subtitle={`Cumplimiento de carga por comprador Senior para ${catalogo?.nombre || "catalogo planificado"}.`} />
       <div className="toolbar-actions">
         <Button variant="outline" onClick={onBack}><ArrowLeft size={16}/> Volver</Button>

@@ -1,5 +1,6 @@
-import React from "react";
-import { Bell, CheckCheck, RefreshCw, X } from "lucide-react";
+import React, { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import { Bell, CheckCheck, RefreshCw, Volume2, VolumeX, X } from "lucide-react";
 import { classNames } from "../utils/common";
 
 function formatNotificationTime(value) {
@@ -37,26 +38,58 @@ export default function LiveNotifications({
   onMarkRead,
   onMarkAllRead,
   onOpenItem,
+  soundEnabled = true,
+  onToggleSound,
 }) {
   const isLoading = status.type === "loading";
-  return <div className="live-notifications">
+  const containerRef = useRef(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    panelRef.current?.focus();
+    const onPointerDown = (event) => {
+      if (!containerRef.current?.contains(event.target)) closeRef.current?.();
+    };
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      closeRef.current?.();
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    const panel = panelRef.current;
+    panel?.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      panel?.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen]);
+  return createPortal(<div ref={containerRef} className="live-notifications live-notifications-floating">
     <button
+      ref={triggerRef}
       type="button"
       className={classNames("live-notifications-trigger", unreadCount > 0 && "has-unread", isOpen && "open")}
       onClick={onToggle}
       aria-label={`Notificaciones en vivo${unreadCount ? `, ${unreadCount} pendientes` : ""}`}
       aria-expanded={isOpen}
+      aria-controls="live-notifications-panel"
+      aria-haspopup="dialog"
+      title="Notificaciones"
     >
-      <Bell size={18}/>
+      <Bell size={22}/>
       {unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}
     </button>
-    {isOpen && <div className="live-notifications-panel" role="dialog" aria-label="Notificaciones en vivo">
+    {isOpen && <div ref={panelRef} id="live-notifications-panel" className="live-notifications-panel" role="dialog" aria-label="Notificaciones en vivo" tabIndex={-1}>
       <div className="live-notifications-head">
         <div>
           <strong>Notificaciones en vivo</strong>
           <span>{unreadCount ? `${unreadCount} pendiente(s)` : "Sin pendientes"}</span>
         </div>
         <div className="live-notifications-actions">
+          <button type="button" onClick={onToggleSound} aria-pressed={soundEnabled} title={soundEnabled ? "Silenciar notificaciones" : "Activar sonido"} aria-label="Sonido de notificaciones">{soundEnabled ? <Volume2 size={16}/> : <VolumeX size={16}/>}</button>
           <button type="button" onClick={onRefresh} disabled={isLoading} title="Actualizar" aria-label="Actualizar notificaciones"><RefreshCw size={16}/></button>
           <button type="button" onClick={onMarkAllRead} disabled={!unreadCount} title="Marcar todo como leido" aria-label="Marcar todo como leido"><CheckCheck size={16}/></button>
           <button type="button" onClick={onClose} title="Cerrar" aria-label="Cerrar notificaciones"><X size={16}/></button>
@@ -79,5 +112,5 @@ export default function LiveNotifications({
         </button>) : <div className="live-notifications-empty">No hay notificaciones recientes.</div>}
       </div>
     </div>}
-  </div>;
+  </div>, document.body);
 }

@@ -205,6 +205,8 @@ export function getPromotionSyncSnapshot(row) {
     signature: getPromotionSyncSignature(normalized),
     contextKey: getPromotionContextKey(normalized),
     version: getPromotionSyncVersion(row),
+    actividad_id: normalized.actividad_id,
+    estado_registro: normalized.estado_registro,
   };
 }
 

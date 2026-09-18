@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { classNames, makeId } from "../utils/common";
 import { exportStyledWorkbook } from "../services/excelStyleService";
+import { getModificationExcelDate, isModifiedPromotion, MODIFICATION_DATE_FORMAT } from "../features/consolidado/exportMetadata";
 import { isAnulledPromotion } from "../features/promotions/application/promotionAnulation";
 import {
   channelMatchesFilter,
@@ -236,7 +237,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     const row = rows.find((item) => getRowId(item) === rowId);
     const id = makeId("CMT");
     const activityId = row ? getActivityId(row) : "";
-    setComentarios((prev) => [{ id, comentario_id: id, actividadId, actividad_id: activityId, rowId, row_id: rowId, alcanceComentario: "LINEA", alcance_comentario: "LINEA", usuario: "Diseño Mercadeo", tipo_usuario: "Mercadeo", texto, comentario: texto, estado: "Abierto", fecha: new Date().toLocaleString(), prioridad: "MEDIA" }, ...prev]);
+    setComentarios((prev) => [{ id, comentario_id: id, actividadId: activityId, actividad_id: activityId, rowId, row_id: rowId, alcanceComentario: "LINEA", alcance_comentario: "LINEA", usuario: "Diseño Mercadeo", tipo_usuario: "Mercadeo", texto, comentario: texto, estado: "Abierto", fecha: new Date().toLocaleString(), prioridad: "MEDIA" }, ...prev]);
     setCommentDrafts((prev) => ({ ...prev, [rowId]: "" }));
   };
 
@@ -260,6 +261,7 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
     ["Estado", (row) => row.estado_registro || row.estadoRegistro || ""],
     ["Comentarios actividad", (row) => getActivityComments(getActivityId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
     ["Comentarios linea", (row) => getComentariosRow(getRowId(row)).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | ")],
+    ["Fecha de modificación", (row) => getModificationExcelDate(row)],
   ];
 
   const exportXlsx = async () => {
@@ -276,6 +278,8 @@ export default function ConsolidadoPage({ rows, actividades = [], catalogos = []
       rows: sheetRows,
       dataRows: rowsFiltradas,
       columnCount: exportColumns.length,
+      isModifiedRow: isModifiedPromotion,
+      columnFormats: [{ column: exportColumns.length, numFmt: MODIFICATION_DATE_FORMAT, width: 25 }],
       fileName: `consolidado_promociones_${new Date().toISOString().slice(0, 10)}.xlsx`,
     });
   };

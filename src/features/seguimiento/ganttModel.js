@@ -197,7 +197,7 @@ export function buildTimelineModel(items = [], today = new Date()) {
     const date = addDays(minDate, offset);
     ticks.push({
       key: date.toISOString(),
-      label: step === 1 ? String(date.getDate()).padStart(2, "0") : formatShortDate(date),
+      label: String(date.getDate()).padStart(2, "0"),
       month: new Intl.DateTimeFormat("es-NI", { month: "short" }).format(date),
       isMonthStart: date.getDate() === 1 || offset === 0,
       gridColumn: `${offset + 1} / span ${Math.min(step, totalDays - offset)}`,
@@ -212,7 +212,7 @@ export function buildTimelineModel(items = [], today = new Date()) {
     totalDays,
     ticks,
     todayOffset: todayOffset >= 0 && todayOffset < totalDays ? todayOffset : null,
-    minWidth: Math.max(760, totalDays * 30),
+    minWidth: Math.max(760, totalDays * 40),
   };
 }
 

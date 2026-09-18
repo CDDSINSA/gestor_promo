@@ -346,7 +346,7 @@ export default function FidelizacionPage({
 
   return (
     <div className="fidelizacion-page">
-      <div className="home-topbar">
+      <div className="toolbar page-header-toolbar">
         <Header
           title="Fidelización de Clientes"
           subtitle="Administración de canastos permanentes y matriz de descuentos por segmento para Comasa y Retail."
