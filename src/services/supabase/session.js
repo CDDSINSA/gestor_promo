@@ -18,17 +18,14 @@ import {
 export const SUPABASE_PROJECT_URL = getConfiguredSupabaseUrl();
 
 const SUPABASE_AUTH_STORAGE_KEY = "sinsaPromo.supabaseAuth";
+const RECOVERY_STORAGE_KEY = `${SUPABASE_AUTH_STORAGE_KEY}.recovery`;
 const authClients = new Map();
 const memoryAuthStorage = {};
 let currentAppSession = null;
-let refreshPromise = null;
+let sessionGeneration = 0;
 
 function getPkceStorageKey() {
   return `${SUPABASE_AUTH_STORAGE_KEY}-code-verifier`;
-}
-
-function isPkceVerifierKey(key) {
-  return key === getPkceStorageKey() || String(key || "").endsWith("-code-verifier");
 }
 
 function getBrowserSessionStorage() {
@@ -47,23 +44,21 @@ function getBrowserLocalStorage() {
   }
 }
 
-const pkceMemoryStorage = {
+const tabAuthStorage = {
   getItem(key) {
-    if (isPkceVerifierKey(key)) {
+    try {
       return getBrowserSessionStorage()?.getItem(key) ?? memoryAuthStorage[key] ?? null;
-    }
-    return memoryAuthStorage[key] ?? null;
+    } catch { return memoryAuthStorage[key] ?? null; }
   },
   setItem(key, value) {
-    if (isPkceVerifierKey(key)) {
-      getBrowserSessionStorage()?.setItem(key, value);
-      return;
-    }
     memoryAuthStorage[key] = value;
+    try {
+      getBrowserSessionStorage()?.setItem(key, value);
+    } catch { /* Storage may be blocked; keep this tab usable in memory. */ }
   },
   removeItem(key) {
     delete memoryAuthStorage[key];
-    if (isPkceVerifierKey(key)) getBrowserSessionStorage()?.removeItem(key);
+    try { getBrowserSessionStorage()?.removeItem(key); } catch { /* Unavailable storage. */ }
   },
 };
 
@@ -79,13 +74,20 @@ function getSupabaseAuthClient(connection = {}) {
         autoRefreshToken: true,
         detectSessionInUrl: true,
         flowType: "pkce",
-        // Custom storage keeps auth sessions in memory; only the PKCE verifier
-        // survives redirects in sessionStorage and cannot authorize requests.
+        // Persist SDK credentials across reloads in this browser tab.
         persistSession: true,
-        storage: pkceMemoryStorage,
+        storage: tabAuthStorage,
         storageKey: SUPABASE_AUTH_STORAGE_KEY,
       },
     }));
+    // Keep the application snapshot synchronized even when the SDK refreshes
+    // in the background. Never call asynchronous auth methods in this callback.
+    authClients.get(cacheKey).auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") tabAuthStorage.setItem(RECOVERY_STORAGE_KEY, "true");
+      if (event === "SIGNED_OUT") tabAuthStorage.removeItem(RECOVERY_STORAGE_KEY);
+      if (event === "SIGNED_OUT") sessionGeneration += 1;
+      rememberAppSession(session);
+    });
   }
   return authClients.get(cacheKey);
 }
@@ -120,7 +122,7 @@ function clearAuthMemory() {
     delete memoryAuthStorage[key];
   });
   currentAppSession = null;
-  refreshPromise = null;
+  sessionGeneration += 1;
 }
 
 function getSupabaseErrorMessage(error, fallbackMessage) {
@@ -128,15 +130,8 @@ function getSupabaseErrorMessage(error, fallbackMessage) {
   return detail ? `${fallbackMessage}: ${detail}` : fallbackMessage;
 }
 
-function isSessionExpired(session) {
-  return Boolean(session?.expires_at && Date.now() > Number(session.expires_at));
-}
-
-function isSessionExpiring(session, windowMs = 120000) {
-  return Boolean(session?.expires_at && Date.now() > Number(session.expires_at) - windowMs);
-}
-
 function hasRecoveryCallbackInUrl() {
+  if (tabAuthStorage.getItem(RECOVERY_STORAGE_KEY) === "true") return true;
   if (typeof window === "undefined") return false;
   const url = new URL(window.location.href);
   const hasPkceCode = Boolean(url.searchParams.get("code"));
@@ -212,34 +207,32 @@ export async function loadRecoverySessionFromUrl(connection = {}) {
   return rememberAppSession(data.session);
 }
 
-export async function refreshAppSession(connection, session) {
-  if (!session?.refresh_token) {
-    if (isSessionExpired(session)) throw new Error("La sesion expiro. Inicie sesion nuevamente.");
-    return session;
-  }
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    const client = getSupabaseAuthClient(connection);
-    const { data, error } = await client.auth.refreshSession({ refresh_token: session.refresh_token });
-    if (error) throw new Error(getSupabaseErrorMessage(error, "No se pudo renovar la sesion."));
-    const nextSession = rememberAppSession(data.session || session);
-    connection.onSessionRefresh?.(nextSession);
-    return nextSession;
-  })();
-
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
-  }
+export function subscribeAppSession(connection, listener) {
+  // Capture this before SDK initialization consumes the PKCE verifier.
+  const recoveryCallback = hasRecoveryCallbackInUrl();
+  const client = getSupabaseAuthClient(connection);
+  const { data } = client.auth.onAuthStateChange((event, session) => {
+    if (event === "INITIAL_SESSION" && (recoveryCallback || hasRecoveryCallbackInUrl())) return;
+    listener(event, normalizeSession(session));
+  });
+  return () => data.subscription.unsubscribe();
 }
 
-export async function ensureFreshAppSession(connection, session, windowMs = 120000) {
-  const activeSession = session || currentAppSession;
-  if (!activeSession?.access_token) throw new Error("No hay una sesion activa para consultar Supabase. Inicie sesion nuevamente.");
-  if (!isSessionExpiring(activeSession, windowMs)) return activeSession;
-  return refreshAppSession(connection, activeSession);
+export async function ensureFreshAppSession(connection, session) {
+  const generation = sessionGeneration;
+  const client = getSupabaseAuthClient(connection);
+  // getSession reads the SDK's latest credentials and coordinates renewal.
+  // Passing a captured refresh_token here would reintroduce token reuse.
+  const { data, error } = await client.auth.getSession();
+  if (error) throw error;
+  if (generation !== sessionGeneration || !data.session?.access_token) {
+    throw new Error("La sesion termino. Inicie sesion nuevamente.");
+  }
+  const expectedUser = session?.user?.id || session?.user_id;
+  if (expectedUser && expectedUser !== data.session.user?.id) {
+    throw new Error("La sesion cambio. Vuelva a intentar la operacion.");
+  }
+  return rememberAppSession(data.session);
 }
 
 export async function signInAppUser(connection, email, password) {
@@ -259,6 +252,7 @@ export async function signInAppUser(connection, email, password) {
     password: cleanPassword,
   });
   if (error) throw new Error(getSupabaseErrorMessage(error, "No se pudo iniciar sesion."));
+  tabAuthStorage.removeItem(RECOVERY_STORAGE_KEY);
   return rememberAppSession(data.session);
 }
 
@@ -288,7 +282,7 @@ export async function updateRecoveredPassword(connection, recoverySession, passw
   }
 
   const client = getSupabaseAuthClient(connection);
-  await ensureFreshAppSession(connection, recoverySession, 0);
+  await ensureFreshAppSession(connection, recoverySession);
   const { data, error } = await client.auth.updateUser({ password: cleanPassword });
   if (error) throw new Error(getSupabaseErrorMessage(error, "No se pudo actualizar la contrasena."));
   return data;
@@ -346,12 +340,14 @@ export async function signOutAppUser(connection = {}, session = null, options = 
 
   try {
     if (activeSession?.access_token && hasSupabaseConnection(connection)) {
-      const scope = cleanText(options.scope || "global").toLowerCase();
+      const scope = cleanText(options.scope || "local").toLowerCase();
       const client = getSupabaseAuthClient(connection);
       const { error } = await client.auth.signOut({ scope });
       if (error) throw new Error(getSupabaseErrorMessage(error, "No se pudo cerrar la sesion en Supabase."));
     }
   } finally {
+    tabAuthStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY);
+    tabAuthStorage.removeItem(RECOVERY_STORAGE_KEY);
     clearLegacyStoredAppSession();
     getBrowserSessionStorage()?.removeItem(getPkceStorageKey());
     clearAuthMemory();

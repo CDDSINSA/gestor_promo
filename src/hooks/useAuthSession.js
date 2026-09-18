@@ -9,9 +9,17 @@ import {
   saveStoredSupabaseConnection,
   signInAppUser,
   signOutAppUser,
+  subscribeAppSession,
+  hasSupabaseConnection,
   updateRecoveredPassword,
 } from "../services/supabaseService";
 import { clearAuthTokensFromUrl } from "../app/session/sessionHelpers";
+
+function isTemporaryAuthError(error) {
+  return error?.name === "TypeError" || error?.name === "AbortError"
+    || error?.name === "AuthRetryableFetchError"
+    || [408, 429].includes(error?.status) || error?.status >= 500;
+}
 
 export function useAuthSession({ supabaseSettings, setSupabaseSettings }) {
   const [appSession, setAppSession] = useState(loadStoredAppSession);
@@ -26,6 +34,28 @@ export function useAuthSession({ supabaseSettings, setSupabaseSettings }) {
   const handleSessionRefresh = useCallback((nextSession) => {
     setAppSession(nextSession);
   }, []);
+  useEffect(() => {
+    if (!hasSupabaseConnection(supabaseSettings)) return undefined;
+    return subscribeAppSession(supabaseSettings, (event, session) => {
+      if (event === "INITIAL_SESSION" && session) {
+        setAppSession((current) => current || session);
+      }
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        // Recovery credentials must not turn into a normal application login.
+        setAppSession((current) => current ? session : null);
+        setRecoverySession((current) => current ? session : null);
+      }
+      if (event === "SIGNED_OUT") {
+        abortActiveSupabaseRequests();
+        setAppSession(null);
+        setAppUser(null);
+        setRecoverySession(null);
+        setRecoveryUser(null);
+        setLoginStatus({ type: "error", message: "La sesion termino. Inicie sesion nuevamente." });
+      }
+    });
+  }, [supabaseSettings]);
+
   useEffect(() => {
     let cancelled = false;
     loadRecoverySessionFromUrl(supabaseSettings)
@@ -63,8 +93,10 @@ export function useAuthSession({ supabaseSettings, setSupabaseSettings }) {
       return;
     }
     let cancelled = false;
+    let retryTimer;
+    let retryDelay = 5000;
     setAuthStatus({ type: "loading", message: "Cargando permisos..." });
-    loadAppUserProfile({ ...supabaseSettings, onSessionRefresh: handleSessionRefresh }, appSession)
+    const loadProfile = () => loadAppUserProfile({ ...supabaseSettings, onSessionRefresh: handleSessionRefresh }, appSession)
       .then((profile) => {
         if (cancelled) return;
         setAppUser(profile);
@@ -72,14 +104,22 @@ export function useAuthSession({ supabaseSettings, setSupabaseSettings }) {
       })
       .catch((error) => {
         if (cancelled) return;
+        if (isTemporaryAuthError(error)) {
+          setAuthStatus({ type: "error", message: "No se pudieron verificar los permisos temporalmente. Reintentando..." });
+          retryTimer = setTimeout(loadProfile, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 30000);
+          return;
+        }
         void signOutAppUser(supabaseSettings, appSession).catch(() => null);
         setAppSession(null);
         setAppUser(null);
         setAuthStatus({ type: "error", message: error.message || "No se pudieron cargar los permisos." });
         setLoginStatus({ type: "error", message: error.message || "No se pudieron cargar los permisos." });
       });
+    void loadProfile();
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
     };
   }, [appSession, supabaseSettings, handleSessionRefresh]);
 
@@ -137,7 +177,7 @@ export function useAuthSession({ supabaseSettings, setSupabaseSettings }) {
     let signOutError = null;
     setAuthStatus({ type: "loading", message: "Cerrando sesion..." });
     try {
-      await signOutAppUser(supabaseSettings, appSession, { scope: "global" });
+      await signOutAppUser(supabaseSettings, appSession, { scope: "local" });
     } catch (error) {
       signOutError = error;
     }

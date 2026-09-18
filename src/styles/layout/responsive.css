@@ -67,6 +67,7 @@
   .top-status-bar {
     top: 1rem;
     right: 1rem;
+    height: auto;
   }
 
   .promo-page-head {
@@ -121,6 +122,20 @@
   .toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .page-header-toolbar,
+  .toolbar:has(.header),
+  .home-topbar:has(.header) {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-right: 0;
+  }
+
+  .page-header-toolbar .header,
+  .toolbar:has(.header) .header,
+  .home-topbar:has(.header) .header {
+    padding-right: 5.5rem;
   }
 
   .toolbar-actions {
@@ -248,6 +263,23 @@
     left: 0;
     z-index: 40;
     display: block;
+  }
+
+  .live-notifications-floating {
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+
+  .live-notifications-floating .live-notifications-panel {
+    max-height: calc(100dvh - 10rem - env(safe-area-inset-bottom));
+  }
+
+  .app > .success-toast {
+    bottom: calc(8.75rem + env(safe-area-inset-bottom));
+  }
+
+  .app > .live-notification-toast {
+    bottom: calc(12.75rem + env(safe-area-inset-bottom));
   }
 
   .mobile-nav {

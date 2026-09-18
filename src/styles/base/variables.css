@@ -1,11 +1,19 @@
 :root {
+  --color-sinsa-orange: #F18A00;
+  --color-ink: #0f172a;
+  --notification-fab-background: var(--color-sinsa-orange);
+  --notification-fab-background-hover: color-mix(in srgb, var(--color-sinsa-orange) 90%, var(--color-ink));
+  --notification-fab-foreground: var(--color-ink);
+  --notification-fab-border: color-mix(in srgb, var(--color-sinsa-orange) 70%, var(--color-ink));
+  --notification-fab-focus: var(--color-ink);
+  --notification-fab-shadow: color-mix(in srgb, var(--color-sinsa-orange) 25%, transparent);
   --font-body: "Aptos", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-heading: "Segoe UI Variable Display", "Aptos Display", "Aptos", "Segoe UI", system-ui, sans-serif;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-strong: 650;
   --weight-bold: 700;
-  color: #0f172a;
+  color: var(--color-ink);
   background: #f8fafc;
   font-family: var(--font-body);
   font-weight: var(--weight-regular);

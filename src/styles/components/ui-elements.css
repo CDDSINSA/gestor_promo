@@ -1413,6 +1413,58 @@ td b {
   z-index: 70;
 }
 
+.live-notifications-floating {
+  position: fixed;
+  right: max(1.25rem, env(safe-area-inset-right));
+  bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  z-index: 60;
+}
+
+.live-notifications-floating .live-notifications-trigger,
+.live-notifications-floating .live-notifications-trigger.has-unread {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  color: var(--notification-fab-foreground);
+  background: var(--notification-fab-background);
+  border-color: var(--notification-fab-border);
+  box-shadow: 0 6px 22px var(--notification-fab-shadow);
+}
+
+.live-notifications-floating .live-notifications-trigger:hover,
+.live-notifications-floating .live-notifications-trigger.open {
+  color: var(--notification-fab-foreground);
+  background: var(--notification-fab-background-hover);
+}
+
+.live-notifications-floating .live-notifications-trigger:focus-visible {
+  outline: 3px solid var(--notification-fab-focus);
+  outline-offset: 3px;
+}
+
+.live-notifications-floating .live-notifications-panel {
+  top: auto;
+  bottom: calc(100% + 0.75rem);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 7rem - env(safe-area-inset-bottom));
+}
+
+.live-notifications-floating .live-notifications-list {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.live-notifications-floating .live-notifications-head,
+.live-notifications-floating .live-notifications-actions {
+  flex-shrink: 0;
+}
+
+/* Keep transient messages above the always-visible notification button. */
+.app > .success-toast {
+  bottom: calc(5.25rem + env(safe-area-inset-bottom));
+}
+
 .live-notifications-trigger {
   position: relative;
   display: inline-flex;
@@ -1622,7 +1674,7 @@ td b {
 .live-notification-toast {
   position: fixed;
   right: 1.25rem;
-  bottom: 6.15rem;
+  bottom: calc(9.25rem + env(safe-area-inset-bottom));
   z-index: 80;
   display: flex;
   align-items: flex-start;

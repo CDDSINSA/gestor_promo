@@ -65,6 +65,7 @@ import { useNotifications } from "./hooks/useNotifications";
 import { usePromotionsData } from "./hooks/usePromotionsData";
 import { useLogsData } from "./hooks/useLogsData";
 import { useLiveNotifications } from "./hooks/useLiveNotifications";
+import { useNotificationSound } from "./hooks/useNotificationSound";
 import { useSkuMaster } from "./hooks/useSkuMaster";
 import { useSyncStatus } from "./hooks/useSyncStatus";
 import {
@@ -114,6 +115,7 @@ export default function PromoMVP() {
   } = useAuthSession({ supabaseSettings, setSupabaseSettings });
   const { pendingSaveAction, setPendingSaveAction, successToast, setSuccessToast } = useNotifications();
   const [liveNotificationToast, setLiveNotificationToast] = useState(null);
+  const { soundEnabled, toggleSound } = useNotificationSound(liveNotificationToast);
   const [promotionConflict, setPromotionConflict] = useState(null);
   const initialLoadSessionRef = React.useRef("");
   const specialRequestsRefreshRef = React.useRef(false);
@@ -631,6 +633,8 @@ export default function PromoMVP() {
           statuses={[supabaseStatus, skuMasterStatus, specialRequestsRefreshStatus, promotionScopeRefreshStatus]}
         />
         <LiveNotifications
+          soundEnabled={soundEnabled}
+          onToggleSound={toggleSound}
           items={liveNotifications.items}
           unreadCount={liveNotifications.unreadCount}
           status={liveNotifications.status}
@@ -682,7 +686,7 @@ export default function PromoMVP() {
     </main>
     <MobileNav active={active} setActive={navigate}/>
     <SuccessToast toast={successToast} onClose={() => setSuccessToast(null)}/>
-    <LiveNotificationsToast notification={liveNotificationToast} onClose={() => setLiveNotificationToast(null)}/>
+    <LiveNotificationsToast notification={liveNotifications.isOpen ? null : liveNotificationToast} onClose={() => setLiveNotificationToast(null)}/>
     <PromotionConflictModal
       conflict={promotionConflict}
       onReload={reloadAfterPromotionConflict}

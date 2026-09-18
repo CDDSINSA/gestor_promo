@@ -1,3 +1,5 @@
+import { buildCatalogNotificationEvents } from "../features/notifications/notificationEvents";
+import { deliverNotifications } from "../features/notifications/deliverNotifications";
 import {
   hasSupabaseConnection,
   createLiveNotification,
@@ -127,82 +129,17 @@ export function useCatalogSync({
     };
   };
 
-  const firstChangedPromotion = (payload = {}) => {
-    const changedIds = new Set(payload.sync_options?.promociones?.changed_row_ids || []);
-    return (payload.promociones || []).find((row) => changedIds.has(row.row_id)) || (payload.promociones || [])[0] || {};
-  };
-
-  const firstChangedComment = (payload = {}) => {
-    const changedIds = new Set(payload.sync_options?.comentarios?.changed_ids || []);
-    return (payload.comentarios || []).find((comment) => changedIds.has(comment.comentario_id)) || (payload.comentarios || [])[0] || {};
-  };
-
-  const findPromotionForComment = (payload = {}, comment = {}) => {
-    const rowId = comment.row_id || "";
-    if (rowId) return (payload.promociones || []).find((row) => row.row_id === rowId) || {};
-    return {};
-  };
-
-  const notifyAfterSave = async (payload = {}, operationType = "catalog") => {
+  const notifyAfterSave = async (payload = {}, operationType = "catalog", previousPromotions = new Map()) => {
     if (!hasSupabaseConnection(supabaseConnection)) return;
-    const promotionChanges = payload.sync_options?.promociones?.changed_row_ids?.length || 0;
-    const commentChanges = payload.sync_options?.comentarios?.changed_ids?.length || 0;
-    const activityChanges = payload.sync_options?.actividades?.changed_ids?.length || 0;
-    const events = [];
-
-    if (operationType === "catalog" && promotionChanges) {
-      const row = firstChangedPromotion(payload);
-      events.push({
-        tipoEvento: "PROMOCION_ACTUALIZADA",
-        titulo: "Promociones actualizadas",
-        mensaje: `${promotionChanges} cambio(s) de promociones requieren revision.`,
-        actividadId: row.actividad_id,
-        rowId: row.row_id,
-        destinatarioRoles: ["MARK"],
-        urlModulo: "consolidado",
-        metadata: { promotionChanges },
-      });
-    }
-
-    if (operationType === "catalog" && commentChanges) {
-      const comment = firstChangedComment(payload);
-      const commentPromotion = findPromotionForComment(payload, comment);
-      const targetBuyerIds = [commentPromotion.buyer_id].filter(Boolean);
-      events.push({
-        tipoEvento: "COMENTARIO_MERCADEO",
-        titulo: "Comentarios de Mercadeo actualizados",
-        mensaje: `${commentChanges} comentario(s) fueron creados o actualizados.`,
-        actividadId: comment.actividad_id,
-        rowId: comment.row_id,
-        comentarioId: comment.comentario_id,
-        destinatarioBuyerIds: targetBuyerIds,
-        destinatarioRoles: targetBuyerIds.length ? [] : ["BUYER"],
-        urlModulo: "home",
-        metadata: { commentChanges },
-      });
-    }
-
-    if (operationType === "settings" && activityChanges) {
-      const activity = (payload.actividades || [])[0] || {};
-      events.push({
-        tipoEvento: "CATALOGO_ACTUALIZADO",
-        titulo: "Catalogos actualizados",
-        mensaje: "La configuracion de catalogos fue actualizada.",
-        actividadId: activity.actividad_id,
-        destinatarioRoles: ["MARK", "BUYER"],
-        urlModulo: "home",
-        metadata: { activityChanges },
-      });
-    }
-
-    for (const event of events) {
-      try {
-        await createLiveNotification(supabaseConnection, event);
-      } catch (error) {
-        setSupabaseStatus((current) => current?.type === "error"
-          ? current
-          : { type: "ready", message: "Cambios guardados. No se pudo crear una notificacion en vivo." });
-      }
+    const events = buildCatalogNotificationEvents(payload, {
+      operationType, actorRole: supabaseConnection.appUser?.rol, buyers: compradores,
+      previousPromotions,
+    });
+    const warnings = await deliverNotifications(events, (event) => createLiveNotification(supabaseConnection, event));
+    if (warnings.length) {
+      const message = `Cambios guardados. Advertencias de notificacion: ${warnings.join(" ")}`;
+      setSupabaseStatus((current) => current?.type === "error" ? current : { type: "ready", message });
+      showSuccessToast(message, "Guardado con advertencias de notificacion");
     }
   };
 
@@ -266,7 +203,7 @@ export function useCatalogSync({
         setSaveSupabaseStatus("success");
         setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Estos cambios ya estaban guardados en el sistema." : "Cambios guardados en el sistema." });
         showSuccessToast("La información se sincronizó correctamente en el sistema.");
-        if (!data.idempotent_replay) void notifyAfterSave(fullPayload, "settings");
+        if (!data.idempotent_replay) await notifyAfterSave(fullPayload, "settings");
       } else {
         setSaveSupabaseStatus("error");
         setSupabaseStatus((current) => ({ type: "error", message: "No se pudieron guardar los cambios en el sistema. " + (current?.message || "Revise la conexión y vuelva a intentar.") }));
@@ -344,6 +281,8 @@ export function useCatalogSync({
     try {
       const operation = createSaveOperation("catalog");
       const payload = buildSupabasePayload(overrides, operation);
+      // Keep notification context before successful saves replace the sync snapshots.
+      const previousPromotions = new Map(syncedPromotionStateRef.current);
       const saveSummary = buildSaveOperationSummary(payload);
       if (!hasSupabaseDeltaChanges(payload)) {
         setSaveSupabaseStatus("success");
@@ -369,7 +308,7 @@ export function useCatalogSync({
         setSaveSupabaseStatus("success");
         setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Estos cambios ya estaban guardados en el sistema." : "Cambios guardados en el sistema." });
         showSuccessToast("La información se sincronizó correctamente en el sistema.");
-        if (!data.idempotent_replay) void notifyAfterSave(fullPayload, "catalog");
+        if (!data.idempotent_replay) await notifyAfterSave(fullPayload, "catalog", previousPromotions);
       } else {
         setSaveSupabaseStatus("error");
         setSupabaseStatus((current) => ({ type: "error", message: `No se pudieron guardar los cambios en el sistema. ${current?.message || "Revise la conexión y vuelva a intentar."}` }));

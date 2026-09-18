@@ -6,6 +6,7 @@ const COMPLEX_PROMO_TYPES = new Set(complexPromoTypes.map((type) => normalizeCan
 const COMPLEX_PROMO_BAND_COLORS = ["FFE2F0D9", "FFFCE4D6"];
 const ANULLED_ROW_COLOR = "FFFFE2E2";
 const ANULLED_FONT_COLOR = "FF991B1B";
+const MODIFIED_ROW_COLOR = "FFFFF2CC";
 const EXCEL_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 async function loadExcelJS() {
@@ -98,14 +99,30 @@ function downloadBuffer(buffer, fileName) {
   URL.revokeObjectURL(url);
 }
 
-export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = [], columnCount = 0, fileName }) {
+export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = [], columnCount = 0, fileName, isModifiedRow, columnFormats = [] }) {
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sheetName);
 
   rows.forEach((row) => worksheet.addRow(row));
   applyComplexPromoBanding(worksheet, dataRows, columnCount);
+  if (isModifiedRow) {
+    dataRows.forEach((row, index) => {
+      if (!isModifiedRow(row)) return;
+      for (let column = 1; column <= columnCount; column += 1) {
+        worksheet.getRow(index + 2).getCell(column).fill = {
+          type: "pattern", pattern: "solid", fgColor: { argb: MODIFIED_ROW_COLOR },
+        };
+      }
+    });
+  }
+  // Anulled promotions retain their existing red warning, even if also modified.
   applyAnulledRowStyle(worksheet, dataRows, columnCount);
+  columnFormats.forEach(({ column, numFmt, width }) => {
+    const target = worksheet.getColumn(column);
+    if (numFmt) target.numFmt = numFmt;
+    if (width) target.width = width;
+  });
 
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBuffer(buffer, fileName);

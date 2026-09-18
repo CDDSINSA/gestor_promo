@@ -16,6 +16,7 @@ export {
   saveStoredSupabaseConnection,
   signInAppUser,
   signOutAppUser,
+  subscribeAppSession,
   updateRecoveredPassword,
 } from "./session";
 export {

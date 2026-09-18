@@ -145,7 +145,7 @@ export async function loadCatalogDesignData(connection) {
   const [projects, pages, comments, finals, users, buyers] = await Promise.all([
     selectAll(connection, "catalogo_proyecto_diseno", { order: "fecha_creacion.desc" }),
     selectAll(connection, "catalogo_paginas_diseno", { order: "numero_pagina.asc" }),
-    selectAll(connection, "catalogo_pagina_comentarios", { order: "fecha_creacion.desc" }),
+    selectAll(connection, "catalogo_pagina_comentarios", { select: "*,respuestas:catalogo_pagina_respuestas(*)", order: "fecha_creacion.desc" }),
     selectAll(connection, "catalogo_consolidado_final", { order: "fecha_creacion.desc" }),
     selectAll(connection, "usuarios_app", { select: "id,auth_user_id,nombre,email,rol,buyer_id,activo", order: "nombre.asc" }),
     selectAll(connection, "compradores", { select: "id,comprador,categoria_comprador,division,correo,activo,senior_id", order: "comprador.asc" }),
@@ -284,6 +284,7 @@ export async function uploadCatalogDesignFinalPdf(connection, project, file, cur
 
 export async function loadCatalogDesignComments(connection, pageId) {
   return selectAll(connection, "catalogo_pagina_comentarios", {
+    select: "*,respuestas:catalogo_pagina_respuestas(*)",
     pagina_id: `eq.${pageId}`,
     order: "fecha_creacion.desc",
   });

@@ -537,6 +537,8 @@ export function toAppRow(row) {
     usuarioEdita,
     usuario_edita: usuarioEdita,
     ultima_modificacion_por: row.ultima_modificacion_por || usuarioEdita,
+    buyer_id: row.buyer_id || row.buyerId || null,
+    buyerId: row.buyerId || row.buyer_id || null,
   };
 }
 
