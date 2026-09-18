@@ -169,6 +169,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [isDraftingComment, setIsDraftingComment] = useState(false);
   const [sideRailCollapsed, setSideRailCollapsed] = useState(false);
   const [annotationMode, setAnnotationMode] = useState(false);
+  const [annotationsHidden, setAnnotationsHidden] = useState(false);
   const [annotationTool, setAnnotationTool] = useState("rect");
   const [draftAnnotations, setDraftAnnotations] = useState([]);
   const [activeAnnotation, setActiveAnnotation] = useState(null);
@@ -760,13 +761,21 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
 
   const toggleAnnotationMode = () => {
     if (!canUseAnnotations) return;
-    setAnnotationMode((prev) => {
-      const next = !prev;
-      if (next) {
-        openReviewPanel();
-      }
-      return next;
-    });
+    if (!annotationMode) {
+      setAnnotationsHidden(false);
+      openReviewPanel();
+    }
+    setAnnotationMode(!annotationMode);
+  };
+
+  const toggleAnnotationsVisibility = () => {
+    if (!canUseAnnotations) return;
+    setAnnotationsHidden(!annotationsHidden);
+    setHoveredAnnotation(null);
+    if (!annotationsHidden) {
+      setAnnotationMode(false);
+      setActiveAnnotation(null);
+    }
   };
 
   const copyToClipboard = (text, label) => {
@@ -955,6 +964,8 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                 viewerZoom={viewerZoom}
                 annotationMode={annotationMode}
                 toggleAnnotationMode={toggleAnnotationMode}
+                annotationsHidden={annotationsHidden}
+                toggleAnnotationsVisibility={toggleAnnotationsVisibility}
                 canUseAnnotations={canUseAnnotations}
                 annotationTool={annotationTool}
                 setAnnotationTool={setAnnotationTool}
@@ -1136,6 +1147,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
 
                 {/* Superficie del Visor con soporte Drag & Drop nativo */}
                 <DesignImageViewer
+                  annotationsHidden={annotationsHidden}
                   viewerZoom={viewerZoom}
                   isSpacePressed={isSpacePressed}
                   annotationMode={annotationMode}

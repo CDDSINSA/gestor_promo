@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, ZoomOut, ZoomIn, Pencil, Square, Circle, Undo2, Minimize2, Maximize2, Search, MessageSquare, ImageUp, CheckCircle2, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, ZoomOut, ZoomIn, Pencil, Square, Circle, Undo2, Minimize2, Maximize2, Search, MessageSquare, ImageUp, CheckCircle2, XCircle, Eye, EyeOff } from "lucide-react";
 import { classNames } from "../../utils/common";
 import { Button } from "../../components/ui";
 import { PAGE_STATES, StateBadge } from "./designPresentation";
@@ -21,6 +21,8 @@ export default function DesignViewerToolbar({
   viewerZoom,
   annotationMode,
   toggleAnnotationMode,
+  annotationsHidden,
+  toggleAnnotationsVisibility,
   canUseAnnotations,
   annotationTool,
   setAnnotationTool,
@@ -91,6 +93,19 @@ export default function DesignViewerToolbar({
           title={canUseAnnotations ? (annotationMode ? "Desactivar modo señalar" : "Señalar sobre la imagen (dibujar)") : "Cargue una imagen para poder señalar"}
         >
           <Pencil size={15}/> <span>Señalar</span>
+        </button>
+
+        <button
+          type="button"
+          className={classNames("catalog-design-tool-action-btn", annotationsHidden && "active")}
+          onClick={toggleAnnotationsVisibility}
+          disabled={!canUseAnnotations}
+          aria-label="Ocultar pines y áreas sombreadas"
+          aria-pressed={annotationsHidden}
+          title={!canUseAnnotations ? "Cargue una imagen para ver sus marcas" : annotationsHidden ? "Mostrar pines y áreas sombreadas" : "Ocultar pines y áreas sombreadas sin borrar las anotaciones"}
+        >
+          {annotationsHidden ? <EyeOff size={15} aria-hidden="true"/> : <Eye size={15} aria-hidden="true"/>}
+          <span>{annotationsHidden ? "Mostrar marcas" : "Ocultar marcas"}</span>
         </button>
     
         {annotationMode && (

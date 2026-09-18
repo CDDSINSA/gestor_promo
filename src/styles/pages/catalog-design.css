@@ -634,6 +634,10 @@
   min-width: 0;
 }
 
+.catalog-design-toolbar-center {
+  flex-wrap: wrap;
+}
+
 .catalog-design-page-nav-pill {
   display: inline-flex;
   align-items: center;

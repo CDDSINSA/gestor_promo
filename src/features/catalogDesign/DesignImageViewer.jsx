@@ -7,6 +7,7 @@ export default function DesignImageViewer({
   viewerZoom,
   isSpacePressed,
   annotationMode,
+  annotationsHidden,
   isPanning,
   isDraggingOverStage,
   viewerStageRef,
@@ -63,7 +64,7 @@ export default function DesignImageViewer({
         {selectedImageUrl ? (
           <div className="catalog-design-image-shell" ref={imageShellRef} style={{ width: `${viewerZoom}%` }}>
             <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Página de catálogo"} draggable={false} />
-            <DesignAnnotationLayer
+            {!annotationsHidden && <DesignAnnotationLayer
               annotationMode={annotationMode}
               beginAnnotation={beginAnnotation}
               moveAnnotation={moveAnnotation}
@@ -76,8 +77,8 @@ export default function DesignImageViewer({
               setActiveCommentId={setActiveCommentId}
               draftAnnotations={draftAnnotations}
               activeAnnotation={activeAnnotation}
-            />
-            {hoveredAnnotation && hoveredAnnotationAnchor && (
+            />}
+            {!annotationsHidden && hoveredAnnotation && hoveredAnnotationAnchor && (
               <div className="catalog-design-annotation-tooltip" style={{ left: `${hoveredAnnotationAnchor.x * 100}%`, top: `${hoveredAnnotationAnchor.y * 100}%` }}>
                 <strong>{hoveredAnnotation.commentIndex ? `#${hoveredAnnotation.commentIndex} ` : ""}{hoveredAnnotation.commentType || "comentario"} · {hoveredAnnotation.commentUser || "Usuario"}</strong>
                 <p>{hoveredAnnotation.commentText}</p>
