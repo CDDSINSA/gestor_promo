@@ -122,7 +122,7 @@ Archivos clave:
 - `src/components/ConsolidadoPage.jsx`: consolidado y comentarios de Mercadeo.
 - `src/components/ExportPageV2.jsx`: exportaciones `.xlsx`.
 - `src/components/AjustesPage.jsx`: catalogos base, compradores, conexion y maestro SKU.
-- `src/components/CatalogDesignPage.jsx`: flujo de diseno de catalogos.
+- `src/components/CatalogDesignPage.jsx`: coordina el flujo de diseno y revision de catalogos, estados, permisos y acciones. El panel de comentarios, lista de paginas, formularios, visor y anotaciones se encuentran en `src/features/catalogDesign/`; ver [componentes de Diseño](diseno_componentes.md).
 - `src/components/FidelizacionPage.jsx`: flujo de fidelizacion.
 - `src/services/excelService.js`: importacion/exportacion Excel.
 - `src/services/supabase/catalog.js`: lectura operativa desde Supabase.
@@ -290,6 +290,9 @@ Paleta base:
 - Verde claro: `#E8F5EE`
 - Celeste: `#00A6C8`
 - Amarillo: `#FFC72C`
+- Naranja SINSA: `#F18A00`, definido por `--color-sinsa-orange` en `src/styles/base/variables.css`.
+
+La campana flotante utiliza el naranja mediante los tokens semanticos `--notification-fab-*`, con icono oscuro y estados hover, abierto, borde, sombra y foco derivados. No repetir el hexadecimal en componentes. Consultar [el flujo de notificaciones](notificaciones_envivo_flujo.md) para arquitectura, sonido, destinatarios, contraste y pruebas.
 
 Evitar redisenos grandes o decoracion innecesaria. Priorizar cambios pequenos, localizados y consistentes con los estilos existentes.
 

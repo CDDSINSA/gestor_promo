@@ -69,9 +69,12 @@ Notas:
 - `Promocion especial`: creacion de promociones fuera del flujo regular de catalogo.
 - `Seguimiento`: vista Gantt/seguimiento de actividades.
 - `Avances`: control de avances por catalogo, comprador y division.
-- `Diseno Catalogos`: carga, revision y comentarios de paginas de catalogo.
+- `Diseno Catalogos`: mesa de trabajo para disenadores y revisores (visualizacion de artes con zoom/paneo, drag & drop de imagenes, senalizaciones y anotaciones en lienzo, checklist interactivo de observaciones y consulta/copiado de SKUs promocionales).
 - `Logs`: consulta paginada bajo demanda de auditoria.
 - `Consolidado`: vista unificada con comentarios de Mercadeo.
+  - Su exportacion XLSX agrega al final la columna `Fecha de modificación`, con fecha/hora de Nicaragua (`dd/mm/yyyy hh:mm`) como valor de fecha ordenable en Excel. Si falta una fecha valida, la celda queda vacia.
+  - Las promociones modificadas se resaltan en amarillo: version guardada mayor a 1 o, para datos sin version, fecha de modificacion posterior a la creacion. El criterio es historico, no desde la ultima exportacion. Las anuladas conservan el rojo y las promociones complejas sin modificaciones conservan sus bandas.
+  - Aplica al archivo descargado desde este modulo y respeta los filtros seleccionados; no cambia las hojas de respaldo ni las otras exportaciones. Para validar, exportar una promocion nueva, una modificada y una anulada, y revisar fecha, amarillo y rojo respectivamente.
 - `Exportar`: exportaciones de Pricing, Mercadeo, Planimetria y Consolidado.
 - `Ajustes`: catalogos base, compradores, conexion y carga administrativa de maestro SKU.
 
@@ -179,10 +182,14 @@ Documentos SQL relevantes en `docs/`:
 - `supabase_sku_master.sql`: maestro SKU.
 - `supabase_fidelizacion_schema.sql`: tablas y RPC de fidelizacion.
 - `supabase_catalogo_diseno.sql`: flujo de diseno de catalogos.
+- `supabase_catalogo_respuestas.sql`: hasta dos respuestas por observación de Diseño. Ejecutar antes de publicar el frontend; ver [instalación y pruebas](docs/diseno_respuestas.md).
+- [Componentes de Diseño](docs/diseno_componentes.md): separación de comentarios, lista, formularios, visor y anotaciones; responsabilidades y verificación.
 - `supabase_delta_operativo_2026_06_22.sql`: delta operativo historico.
 - Hotfixes y deltas puntuales: `supabase_hotfix_estado_registro_delta_rpc.sql`, `supabase_special_request_status_cleanup.sql`, `supabase_add_catalog_status_preliminar.sql`, `supabase_require_activity_id.sql`, `supabase_catalogo_diseno_fix_fecha_actualizacion.sql`.
 
 Guia de autenticacion y RLS: `docs/supabase_auth_rls_setup.md`.
+
+Guia de [notificaciones en vivo](docs/notificaciones_envivo_flujo.md): destinatarios, campana flotante, sonido configurable, tokens del naranja SINSA, validacion y limites de entrega.
 
 ## Sincronizacion y Guardado
 
