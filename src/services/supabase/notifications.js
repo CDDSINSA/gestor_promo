@@ -53,14 +53,31 @@ export function createNotificationsRealtimeClient(connection = {}) {
   return client;
 }
 
-export async function loadLiveNotifications(connection, { limit = 30 } = {}) {
-  const pageSize = Math.max(1, Math.min(50, Number(limit || 30)));
+export const LIVE_NOTIFICATIONS_PAGE_SIZE = 20;
+export const LIVE_NOTIFICATIONS_UNREAD_CAP = 100;
+
+// RLS limits rows to the current user. Pages are ordered by created_at desc and
+// continue with the createdAt of the last loaded item (keyset pagination).
+export async function loadLiveNotifications(connection, { limit = LIVE_NOTIFICATIONS_PAGE_SIZE, unreadOnly = false, before = "" } = {}) {
+  const pageSize = Math.max(1, Math.min(50, Number(limit || LIVE_NOTIFICATIONS_PAGE_SIZE)));
   const rows = await supabaseRequest(connection, `/rest/v1/notificaciones_envivo${buildQuery({
     select: "id,tipo_evento,titulo,mensaje,actor_nombre,actor_rol,destinatario_usuario_id,destinatario_rol,campana_id,promocion_id,comentario_id,url_modulo,metadata,leida,leida_en,created_at",
+    leida: unreadOnly ? "eq.false" : undefined,
+    created_at: cleanText(before) ? `lt.${cleanText(before)}` : undefined,
     order: "created_at.desc",
     limit: pageSize,
   })}`);
   return Array.isArray(rows) ? rows.map(normalizeNotification) : [];
+}
+
+// Lightweight unread counter: only ids, capped (the badge shows "99+").
+export async function countUnreadLiveNotifications(connection) {
+  const rows = await supabaseRequest(connection, `/rest/v1/notificaciones_envivo${buildQuery({
+    select: "id",
+    leida: "eq.false",
+    limit: LIVE_NOTIFICATIONS_UNREAD_CAP,
+  })}`);
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 export async function markLiveNotificationRead(connection, notificationId) {

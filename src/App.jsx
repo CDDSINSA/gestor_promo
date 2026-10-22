@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import DatabaseStatus from "./app/shell/DatabaseStatus";
 import { SkuLookupContext } from "./features/skuMaster/SkuLookupContext";
+import { AiresWeightsContext } from "./features/promotions/application/AiresWeightsContext";
+import { loadAiresCostWeightsFromSupabase } from "./services/supabase/skuMaster";
 import { useExcelBackup } from "./hooks/useExcelBackup";
 import { useCatalogLoader } from "./hooks/useCatalogLoader";
 import { useCatalogSync } from "./hooks/useCatalogSync";
 import {
   hasSupabaseConnection,
   loadActivityIdsByPrefixFromSupabase,
+  loadCampaignsFromSupabase,
+  loadSeguimientoResumenFromSupabase,
   pingSupabaseConnection,
   saveStoredSupabaseConnection,
 } from "./services/supabaseService";
@@ -97,6 +101,17 @@ import {
 import {
   normalizePromotionConflict,
 } from "./app/sync/savePayload";
+import { pruneSyncedIds, pruneSyncedPromotionsForActivities } from "./app/sync/deleteGuard";
+import {
+  collectActivityIds,
+  getModuleCampaignScope,
+  describeCampaignTypes,
+  getPendingCampaignIds,
+  getRowActivityId,
+  isCampaignLoadingEnabled,
+  replaceActivityItems,
+} from "./app/sync/campaignLoading";
+import CampaignScopeStatus from "./app/shell/CampaignScopeStatus";
 
 const SKU_MASTER_FLOW_MODULES = new Set(["promos", "especial", "solicitudes", "fidelizacion"]);
 const USE_DEMO_SEED_DATA = Boolean(import.meta.env.DEV && import.meta.env.VITE_USE_DEMO_DATA === "true");
@@ -136,6 +151,17 @@ export default function PromoMVP() {
   const rowsRef = React.useRef(rows);
   const comentariosRef = React.useRef(comentarios);
   const promocionesDetalleRef = React.useRef(promocionesDetalle);
+  // Carga por campaña (bandera VITE_CARGA_POR_CAMPANA). Apagada = comportamiento anterior.
+  const campaignLoadingEnabled = useMemo(() => isCampaignLoadingEnabled(), []);
+  const loadedCampaignIdsRef = React.useRef(new Set());
+  const campaignLoadsInFlightRef = React.useRef(new Map());
+  const campaignLoadGenerationRef = React.useRef(0);
+  const [campaignLoad, setCampaignLoad] = useState({ status: "idle", ids: [], message: "", version: 0 });
+  const [especialesRequested, setEspecialesRequested] = useState(false);
+  const [comentariosActividadAbiertos, setComentariosActividadAbiertos] = useState([]);
+  const [seguimientoResumen, setSeguimientoResumen] = useState([]);
+  const [excelExportPending, setExcelExportPending] = useState(false);
+  const bumpCampaignLoadVersion = () => setCampaignLoad((current) => ({ ...current, version: current.version + 1 }));
 
   function resetSyncedState() {
     syncedPromotionStateRef.current = new Map();
@@ -166,6 +192,8 @@ export default function PromoMVP() {
     skuMaster, skuMasterCount, skuMasterStatus, resetSkuMaster,
     loadSkuMasterFromRemote, cancelSkuMasterLoad, ensureSkuMasterLoaded,
   } = useSkuMaster(supabaseConnection);
+  // AIRES: pesos de reparto por costo (la RPC no expone costos).
+  const loadAiresCostWeights = React.useCallback((combos) => loadAiresCostWeightsFromSupabase(supabaseConnection, combos), [supabaseConnection]);
 
   const liveNotifications = useLiveNotifications({
     connection: supabaseConnection,
@@ -194,6 +222,14 @@ export default function PromoMVP() {
     promotionScopeRefreshRef.current = "";
     saveOperationInFlightRef.current = false;
     pendingSaveConfirmRef.current = false;
+    loadedCampaignIdsRef.current = new Set();
+    campaignLoadsInFlightRef.current = new Map();
+    campaignLoadGenerationRef.current += 1;
+    setCampaignLoad({ status: "idle", ids: [], message: "", version: 0 });
+    setEspecialesRequested(false);
+    setComentariosActividadAbiertos([]);
+    setSeguimientoResumen([]);
+    setExcelExportPending(false);
   }, [
     resetCatalogData,
     resetPromotionsData,
@@ -271,14 +307,21 @@ export default function PromoMVP() {
     setConfig(nextConfig);
     setCatalogos(nextCatalogos);
     setActividades(mergeCatalogActivities(nextCatalogos, Array.from(activityMap.values())));
-    setCatalogoActivo((current) => nextCatalogos.find((cat) => cat.id === current?.id) || nextCatalogos[0] || current);
+    setCatalogoActivo((current) => nextCatalogos.find((cat) => cat.id === current?.id) || null);
     setCatalogoAvanceActivo((current) => nextCatalogos.find((cat) => cat.id === current?.id) || nextCatalogos[0] || current);
     setSegmentosClientes(readSegmentosClientesFromData(data));
     setCompradores((data.compradores || []).map(normalizeCompradorData));
     setResponsablesSolicitudes(readResponsablesSolicitudesFromData(data));
     setJerarquiaCategorias(readJerarquiaCategoriasFromData(data));
     setCatalogoResumen(data.catalogo_resumen || data.catalogoResumen || []);
-    if (Array.isArray(data.promociones)) setRows(data.promociones.map(toAppRow));
+    if (Array.isArray(data.promociones)) {
+      setRows(data.promociones.map(toAppRow));
+      // Una carga completa (o la inicial con carga por campaña, que llega vacia) define que hay en memoria.
+      loadedCampaignIdsRef.current = collectActivityIds(data.promociones);
+      if (campaignLoadingEnabled) setEspecialesRequested(false);
+      bumpCampaignLoadVersion();
+    }
+    if (Array.isArray(data.comentarios_actividad_abiertos)) setComentariosActividadAbiertos(data.comentarios_actividad_abiertos);
     if (Array.isArray(data.promociones_detalle)) setPromocionesDetalle(data.promociones_detalle);
     if (Array.isArray(data.comentarios)) setComentarios(data.comentarios.map(toAppComment));
     if (Array.isArray(data.logs)) setLogs(data.logs.map(toAppLog));
@@ -307,6 +350,20 @@ export default function PromoMVP() {
     });
 
     const nextRows = (data.promociones || []).map(toAppRow);
+    // Las lineas de estas actividades que no llegaron en el refresco salen tambien de
+    // la copia sincronizada; si no, el siguiente guardado las mandaria a borrar.
+    pruneSyncedPromotionsForActivities(
+      syncedPromotionStateRef.current,
+      nextActivityIds,
+      (data.promociones || []).map((row) => getPromotionSyncId(toExcelRow(row))),
+    );
+    pruneSyncedIds(
+      syncedCommentStateRef.current,
+      (comentariosRef.current || [])
+        .filter((comment) => nextActivityIds.has(comment.actividadId || comment.actividad_id || ""))
+        .map(getCommentSyncId),
+      (data.comentarios || []).map(getCommentSyncId),
+    );
     setRows((prev) => [
       ...(prev || []).filter((row) => !nextActivityIds.has(row.actividadId || row.actividad_id || row.catalogo_id || row.catalogoId || "")),
       ...nextRows,
@@ -328,6 +385,8 @@ export default function PromoMVP() {
       setResponsablesSolicitudes(data.responsables_solicitudes.map(normalizeResponsableSolicitud));
     }
 
+    nextActivityIds.forEach((activityId) => loadedCampaignIdsRef.current.add(activityId));
+    bumpCampaignLoadVersion();
     return { count: nextActivities.length };
   };
 
@@ -344,6 +403,15 @@ export default function PromoMVP() {
     if (!rowId) return true;
     return getSyncedPromotionSignature(syncedPromotionStateRef.current.get(rowId)) !== getPromotionSyncSignature(normalized);
   });
+
+  // Estado de guardado de una linea en la grilla: "saved" (igual que en BD), "modified" o "new".
+  const getPromotionSaveStatus = (row) => {
+    const normalized = toExcelRow(row);
+    const rowId = getPromotionSyncId(normalized);
+    const snapshot = rowId ? syncedPromotionStateRef.current.get(rowId) : null;
+    if (!snapshot) return "new";
+    return getSyncedPromotionSignature(snapshot) === getPromotionSyncSignature(normalized) ? "saved" : "modified";
+  };
 
   const applyPromotionScopeData = (scope = {}, data = {}) => {
     const currentRows = rowsRef.current || [];
@@ -404,6 +472,106 @@ export default function PromoMVP() {
 
     return { skipped: false, count: nextRows.length };
   };
+
+  // Una actividad con cambios locales sin guardar no se reemplaza al cargarla.
+  const hasUnsavedActivityRows = (activityId) => {
+    const localIds = new Set();
+    for (const row of rowsRef.current || []) {
+      if (getRowActivityId(row) !== activityId) continue;
+      const normalized = toExcelRow(row);
+      const rowId = getPromotionSyncId(normalized);
+      if (!rowId) return true;
+      localIds.add(rowId);
+      if (getSyncedPromotionSignature(syncedPromotionStateRef.current.get(rowId)) !== getPromotionSyncSignature(normalized)) return true;
+    }
+    for (const [rowId, snapshot] of syncedPromotionStateRef.current) {
+      if (String(snapshot?.actividad_id || "").trim() === activityId && !localIds.has(rowId)) return true;
+    }
+    return false;
+  };
+
+  const applyCampaignData = (requestedIds, data = {}) => {
+    const existing = new Set((data.actividades || []).map((id) => String(id || "").trim()));
+    // Solo se reemplazan actividades que existen en Supabase y no tienen cambios sin guardar.
+    const replaceIds = new Set(requestedIds.filter((id) => existing.has(id) && !hasUnsavedActivityRows(id)));
+    if (replaceIds.size) {
+      const byActivity = (item) => replaceIds.has(String(item?.actividad_id || item?.actividadId || "").trim());
+      const nextPromos = (data.promociones || []).filter(byActivity);
+      const nextDetails = (data.promociones_detalle || []).filter(byActivity);
+      const nextComments = (data.comentarios || []).filter(byActivity);
+      pruneSyncedPromotionsForActivities(
+        syncedPromotionStateRef.current,
+        replaceIds,
+        nextPromos.map((row) => getPromotionSyncId(toExcelRow(row))),
+      );
+      pruneSyncedIds(
+        syncedCommentStateRef.current,
+        (comentariosRef.current || []).filter(byActivity).map(getCommentSyncId),
+        nextComments.map(getCommentSyncId),
+      );
+      const appRows = nextPromos.map(toAppRow);
+      const appComments = nextComments.map(toAppComment);
+      const activityOf = (item) => String(item?.actividadId || item?.actividad_id || "").trim();
+      rowsRef.current = replaceActivityItems(rowsRef.current, replaceIds, appRows);
+      comentariosRef.current = replaceActivityItems(comentariosRef.current, replaceIds, appComments, activityOf);
+      setRows((prev) => replaceActivityItems(prev, replaceIds, appRows));
+      setPromocionesDetalle((prev) => replaceActivityItems(prev, replaceIds, nextDetails, activityOf));
+      setComentarios((prev) => replaceActivityItems(prev, replaceIds, appComments, activityOf));
+      rememberSyncedOperationalRows({ promociones: nextPromos, comentarios: nextComments });
+    }
+    requestedIds.forEach((id) => loadedCampaignIdsRef.current.add(id));
+  };
+
+  const getAllActivityIds = () => Array.from(new Set([
+    ...(actividades || []).map((item) => String(item?.actividad_id || item?.actividadId || "").trim()),
+    ...(catalogos || []).map((item) => String(item?.id || item?.catalogo_id || "").trim()),
+  ].filter(Boolean)));
+
+  const ensureCampaignsLoaded = async (ids = []) => {
+    if (!campaignLoadingEnabled) return true;
+    const pending = getPendingCampaignIds(ids, loadedCampaignIdsRef.current);
+    if (!pending.length) return true;
+    const key = [...pending].sort().join("|");
+    const inFlight = campaignLoadsInFlightRef.current;
+    if (inFlight.has(key)) return inFlight.get(key);
+    const generation = campaignLoadGenerationRef.current;
+    const task = (async () => {
+      setCampaignLoad((current) => ({
+        ...current,
+        status: "loading",
+        ids: pending,
+        message: pending.length === 1
+          ? `Cargando promociones de ${pending[0]}...`
+          : `Cargando promociones de ${describeCampaignTypes(pending, actividades) || `${pending.length} actividades`}...`,
+      }));
+      try {
+        const data = await loadCampaignsFromSupabase(supabaseConnection, pending);
+        if (generation !== campaignLoadGenerationRef.current) return false;
+        applyCampaignData(pending, data);
+        setCampaignLoad((current) => ({ status: "ready", ids: [], message: "", version: current.version + 1 }));
+        return true;
+      } catch (error) {
+        if (generation !== campaignLoadGenerationRef.current) return false;
+        setCampaignLoad((current) => ({
+          status: "error",
+          ids: pending,
+          message: error?.message || "No se pudieron cargar las promociones de la campaña.",
+          version: current.version + 1,
+        }));
+        return false;
+      } finally {
+        inFlight.delete(key);
+      }
+    })();
+    inFlight.set(key, task);
+    return task;
+  };
+
+  const ensureAllCampaignsLoaded = () => ensureCampaignsLoaded(getAllActivityIds());
+  // Referencia estable para las pantallas (evita recargas en cada render).
+  const ensureCampaignsLoadedRef = React.useRef(ensureCampaignsLoaded);
+  ensureCampaignsLoadedRef.current = ensureCampaignsLoaded;
+  const ensureCampaignsLoadedStable = React.useCallback((ids) => ensureCampaignsLoadedRef.current(ids), []);
 
   const buildCatalogPayload = (overrides = {}) => {
     const nextCatalogos = overrides.catalogos || catalogos;
@@ -521,7 +689,7 @@ export default function PromoMVP() {
   const onDeleteCatalogo = (catalogoId) => {
     setCatalogos((prev) => {
       const remaining = prev.filter((cat) => cat.id !== catalogoId);
-      setCatalogoActivo((current) => current?.id === catalogoId ? remaining[0] || current : current);
+      setCatalogoActivo((current) => current?.id === catalogoId ? null : current);
       setCatalogoAvanceActivo((current) => current?.id === catalogoId ? remaining[0] || current : current);
       return remaining.length ? remaining : prev;
     });
@@ -542,6 +710,7 @@ export default function PromoMVP() {
     resetDomainState, runSupabaseOperation, applyCatalogData,
     rememberSyncedPromotions, rememberSyncedSettings, rememberSyncedOperations,
     applySpecialRequestsData, rememberSyncedOperationalRows, applyPromotionScopeData,
+    campaignLoadingEnabled,
   });
 
   const {
@@ -581,6 +750,62 @@ export default function PromoMVP() {
     if (!currentRole || canAccessModule(currentRole, active)) return;
     setActive(getFirstAllowedModule(currentRole, SIDEBAR_NAV_ITEMS));
   }, [active, currentRole]);
+
+  // Carga por campaña: cada modulo pide solo las campañas que necesita.
+  useEffect(() => {
+    if (!campaignLoadingEnabled || dataState.status !== "ready") return;
+    const scope = getModuleCampaignScope(active, { catalogoActivo, catalogoAvanceActivo });
+    if (scope.type === "especiales") {
+      if (!especialesRequested) {
+        setEspecialesRequested(true);
+        void refreshSpecialRequestsFromSupabase();
+      }
+      return;
+    }
+    const ids = scope.type === "campaigns" ? scope.ids : scope.type === "all" ? getAllActivityIds() : [];
+    const pending = getPendingCampaignIds(ids, loadedCampaignIdsRef.current);
+    if (!pending.length) return;
+    // Tras un error se reintenta solo con el boton, salvo que se pida otra campaña.
+    const failedKey = campaignLoad.status === "error" ? [...campaignLoad.ids].sort().join("|") : "";
+    if (failedKey && failedKey === [...pending].sort().join("|")) return;
+    void ensureCampaignsLoaded(pending);
+  }, [active, catalogoActivo?.id, catalogoAvanceActivo?.id, dataState.status, campaignLoad.version, campaignLoad.status, actividades, catalogos, especialesRequested]);
+
+  // Seguimiento: totales del servidor para las campañas que no estan en memoria.
+  useEffect(() => {
+    if (!campaignLoadingEnabled || dataState.status !== "ready" || active !== "seguimiento") return;
+    let cancelled = false;
+    loadSeguimientoResumenFromSupabase(supabaseConnection)
+      .then((data) => { if (!cancelled) setSeguimientoResumen(Array.isArray(data) ? data : []); })
+      .catch(() => { if (!cancelled) setSeguimientoResumen([]); });
+    return () => { cancelled = true; };
+  }, [active, dataState.status, supabaseConnection]);
+
+  // Respaldo a Excel con carga por campaña: primero se cargan todas las campañas.
+  useEffect(() => {
+    if (!excelExportPending) return;
+    if (campaignLoad.status === "error") {
+      setExcelExportPending(false);
+      setSupabaseStatus({ type: "error", message: `No se pudo preparar el respaldo Excel: ${campaignLoad.message}` });
+      return;
+    }
+    if (getPendingCampaignIds(getAllActivityIds(), loadedCampaignIdsRef.current).length) return;
+    setExcelExportPending(false);
+    void onSaveExcel();
+  }, [excelExportPending, campaignLoad.version, campaignLoad.status, rows]);
+
+  const onSaveExcelSafe = () => {
+    if (!campaignLoadingEnabled) return onSaveExcel();
+    setSupabaseStatus({ type: "loading", message: "Cargando todas las campañas para el respaldo Excel..." });
+    setExcelExportPending(true);
+    void ensureAllCampaignsLoaded();
+    return undefined;
+  };
+
+  const loadedCampaignIds = useMemo(
+    () => (campaignLoadingEnabled ? new Set(loadedCampaignIdsRef.current) : null),
+    [campaignLoadingEnabled, campaignLoad.version],
+  );
 
   if (!appSession?.access_token) {
     if (authScreen === "forgot") {
@@ -622,8 +847,16 @@ export default function PromoMVP() {
     setActive(nextActive);
     if (nextActive === "solicitudes") void refreshSpecialRequestsFromSupabase();
   };
+  const moduleScope = campaignLoadingEnabled
+    ? getModuleCampaignScope(active, { catalogoActivo, catalogoAvanceActivo })
+    : { type: "none" };
+  const moduleScopeIds = moduleScope.type === "campaigns" ? moduleScope.ids : moduleScope.type === "all" ? getAllActivityIds() : [];
+  const moduleScopeReady = moduleScope.type === "none"
+    || (moduleScope.type === "especiales"
+      ? especialesRequested && specialRequestsRefreshStatus?.type !== "loading"
+      : getPendingCampaignIds(moduleScopeIds, loadedCampaignIdsRef.current).length === 0);
 
-  return <AuthProvider value={authValue}><SkuLookupContext.Provider value={ensureSkuMasterLoaded}><div className="app">
+  return <AuthProvider value={authValue}><SkuLookupContext.Provider value={ensureSkuMasterLoaded}><AiresWeightsContext.Provider value={loadAiresCostWeights}><div className="app">
     <AppShell active={active} setActive={navigate} currentUser={currentUser} currentRole={currentRole} onLogout={onLogout}/>
     <main>
       <div className="top-status-bar">
@@ -644,6 +877,10 @@ export default function PromoMVP() {
           onRefresh={liveNotifications.refresh}
           onMarkRead={liveNotifications.markRead}
           onMarkAllRead={liveNotifications.markAllRead}
+          view={liveNotifications.view}
+          onChangeView={liveNotifications.setView}
+          hasMore={liveNotifications.hasMore}
+          onLoadMore={liveNotifications.loadMore}
           onOpenItem={(notification) => {
             void liveNotifications.markRead(notification.id);
             if (notification.urlModulo) navigate(notification.urlModulo);
@@ -651,15 +888,27 @@ export default function PromoMVP() {
           }}
         />
       </div>
-      <AppContent
+      {!moduleScopeReady ? <CampaignScopeStatus
+        status={moduleScope.type === "especiales" ? specialRequestsRefreshStatus : campaignLoad}
+        onRetry={() => {
+          if (moduleScope.type === "especiales") {
+            void refreshSpecialRequestsFromSupabase();
+            return;
+          }
+          void ensureCampaignsLoaded(moduleScope.type === "all" ? getAllActivityIds() : moduleScope.ids);
+        }}
+        onGoHome={() => setActive("home")}
+      /> : <AppContent
         active={active}
         catalogData={{
           catalogos, setCatalogos, catalogoActivo, setCatalogoActivo, catalogoAvanceActivo,
           actividades, setActividades, compradores, setCompradores, jerarquiaCategorias,
-          segmentosClientes, catalogoResumen, responsablesSolicitudes
+          segmentosClientes, catalogoResumen, responsablesSolicitudes,
+          comentariosActividadAbiertos, seguimientoResumen, loadedCampaignIds, campaignLoadingEnabled
         }}
         promotionData={{
-          rows, setRows, comentarios, setComentarios, avanceCatalogos, setAvanceCatalogos, setLogs
+          rows, setRows, comentarios, setComentarios, avanceCatalogos, setAvanceCatalogos, setLogs,
+          getPromotionSaveStatus
         }}
         masterData={{
           skuMaster, skuMasterCount, skuMasterStatus, loadSkuMasterFromRemote, cancelSkuMasterLoad
@@ -677,12 +926,13 @@ export default function PromoMVP() {
           setActive, navigate, openAvances
         }}
         actions={{
-          onLoadExcel, onSaveExcel, fileInputRef, onLoadSupabase,
+          onLoadExcel, onSaveExcel: onSaveExcelSafe, fileInputRef, onLoadSupabase,
           onRequestSaveSupabase, onSaveSupabase, refreshPromotionScopeFromSupabase,
           onRequestSaveSupabaseSettings, onRequestSaveCatalogSettings, onDeleteCatalogo,
-          onTestSupabaseConnection, onValidateSupabaseSession, resolveSpecialActivityIds
+          onTestSupabaseConnection, onValidateSupabaseSession, resolveSpecialActivityIds,
+          ensureCampaignsLoaded: ensureCampaignsLoadedStable
         }}
-      />
+      />}
     </main>
     <MobileNav active={active} setActive={navigate}/>
     <SuccessToast toast={successToast} onClose={() => setSuccessToast(null)}/>
@@ -694,6 +944,9 @@ export default function PromoMVP() {
       onDiscard={discardLocalPromotionConflict}
     />
     {pendingSaveAction && <ConfirmModal
+      key={`${pendingSaveAction.title || ""}-${pendingSaveAction.confirmLabel || ""}`}
+      tone={pendingSaveAction.tone}
+      requireAck={pendingSaveAction.requireAck}
       title={pendingSaveAction.title || "Confirmar guardado"}
       description={pendingSaveAction.description || "Vas a guardar cambios en Supabase."}
       note={pendingSaveAction.note || "Este paso sincroniza los cambios con la base de datos y puede tardar unos segundos."}
@@ -705,7 +958,7 @@ export default function PromoMVP() {
         setPendingSaveAction(null);
       }}
     />}
-  </div></SkuLookupContext.Provider></AuthProvider>;
+  </div></AiresWeightsContext.Provider></SkuLookupContext.Provider></AuthProvider>;
 }
 
 

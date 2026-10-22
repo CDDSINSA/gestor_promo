@@ -1,0 +1,102 @@
+/* Estilos cargados solo con: CatalogDesignPage, ExportPageV2.
+   Generado al separar el CSS global por página (oct-2026). Mantener aquí solo
+   reglas cuyas clases se usan exclusivamente en esas páginas. */
+
+/* --- desde pages/catalog-design.css --- */
+.catalog-design-state-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  line-height: 1;
+}
+
+.catalog-design-state-chip.state-planificacion {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.catalog-design-state-chip.state-revision,
+.catalog-design-state-chip.state-en_proceso {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.catalog-design-state-chip.state-aprobada,
+.catalog-design-state-chip.state-aprobado,
+.catalog-design-state-chip.state-lista,
+.catalog-design-state-chip.state-listas,
+.catalog-design-state-chip.state-finalizado {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.catalog-design-state-chip.state-ajustes {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.catalog-design-badge {
+  display: inline-flex;
+  min-width: 6.2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  color: #334155;
+  background: #f1f5f9;
+  font-size: 0.72rem;
+  line-height: 1rem;
+  text-transform: capitalize;
+}
+
+.catalog-design-state-pendiente {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.catalog-design-state-en-diseno {
+  color: #0369a1;
+  background: #e0f2fe;
+}
+
+.catalog-design-state-en-revision {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.catalog-design-state-ajustes,
+.catalog-design-state-rechazada {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.catalog-design-state-aprobada,
+.catalog-design-state-lista-consolidar {
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.catalog-design-badge {
+  text-transform: none;
+}
+
+.catalog-design-state-chip {
+  text-transform: none;
+}
+
+.catalog-design-filmstrip-card-head .catalog-design-badge {
+  min-width: 0;
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

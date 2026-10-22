@@ -17,12 +17,16 @@ async function getAuthenticatedSession(connection = {}) {
   return ensureFreshAppSession(connection, session);
 }
 
-export async function supabaseRequest(connection, path, options = {}) {
+async function sendSupabaseRequest(connection, path, options = {}) {
   const session = await getAuthenticatedSession(connection);
-  const response = await fetchWithTimeout(`${getSupabaseUrl(connection)}${path}`, {
+  return fetchWithTimeout(`${getSupabaseUrl(connection)}${path}`, {
     ...options,
     headers: getHeaders(connection, session.access_token, options.headers || {}),
   });
+}
+
+export async function supabaseRequest(connection, path, options = {}) {
+  const response = await sendSupabaseRequest(connection, path, options);
   return assertOk(response, "No se pudo completar la operacion en Supabase.");
 }
 
@@ -35,17 +39,71 @@ export function buildQuery(params = {}) {
   return text ? `?${text}` : "";
 }
 
-export async function selectAll(connection, table, params = {}, { signal } = {}) {
+// Ejecuta tareas con un maximo de peticiones simultaneas y conserva el orden.
+export async function runWithConcurrency(tasks = [], limit = 4) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), tasks.length) }, async () => {
+    while (next < tasks.length) {
+      const index = next;
+      next += 1;
+      results[index] = await tasks[index]();
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function parseTotalFromContentRange(value) {
+  const match = /\/(\d+)\s*$/.exec(String(value || ""));
+  return match ? Number(match[1]) : null;
+}
+
+export async function selectAll(connection, table, params = {}, { signal, parallelPages = false } = {}) {
   const queryParams = { select: "*", ...params };
   if (queryParams.limit) {
     return supabaseRequest(connection, `/rest/v1/${table}${buildQuery(queryParams)}`, { signal });
   }
+  const path = `/rest/v1/${table}${buildQuery(queryParams)}`;
+  const pageRange = (offset) => `${offset}-${offset + SELECT_PAGE_SIZE - 1}`;
+
+  // Con orden estable y conteo exacto, las paginas restantes se piden en paralelo.
+  if (parallelPages && queryParams.order) {
+    const response = await sendSupabaseRequest(connection, path, {
+      signal,
+      headers: { Range: pageRange(0), Prefer: "count=exact" },
+    });
+    const total = parseTotalFromContentRange(response.headers?.get?.("content-range"));
+    const firstPage = await assertOk(response, "No se pudo completar la operacion en Supabase.");
+    if (!Array.isArray(firstPage)) return firstPage;
+    if (total !== null && firstPage.length < total && firstPage.length === SELECT_PAGE_SIZE) {
+      const offsets = [];
+      for (let offset = SELECT_PAGE_SIZE; offset < total; offset += SELECT_PAGE_SIZE) offsets.push(offset);
+      const pages = await runWithConcurrency(offsets.map((offset) => () => supabaseRequest(connection, path, {
+        signal,
+        headers: { Range: pageRange(offset) },
+      })), 4);
+      return [firstPage, ...pages].flatMap((page) => (Array.isArray(page) ? page : []));
+    }
+    if (total === null && firstPage.length === SELECT_PAGE_SIZE) {
+      // Sin conteo disponible: continuar en serie desde la segunda pagina.
+      const results = [...firstPage];
+      for (let offset = SELECT_PAGE_SIZE; ; offset += SELECT_PAGE_SIZE) {
+        const page = await supabaseRequest(connection, path, { signal, headers: { Range: pageRange(offset) } });
+        if (!Array.isArray(page)) break;
+        results.push(...page);
+        if (page.length < SELECT_PAGE_SIZE) break;
+      }
+      return results;
+    }
+    return firstPage;
+  }
 
   const results = [];
   for (let offset = 0; ; offset += SELECT_PAGE_SIZE) {
-    const page = await supabaseRequest(connection, `/rest/v1/${table}${buildQuery(queryParams)}`, {
+    const page = await supabaseRequest(connection, path, {
       signal,
-      headers: { Range: `${offset}-${offset + SELECT_PAGE_SIZE - 1}` },
+      headers: { Range: pageRange(offset) },
     });
     if (!Array.isArray(page)) return page;
     results.push(...page);
@@ -72,10 +130,11 @@ export async function upsertRows(connection, table, rows, onConflict) {
   return results;
 }
 
-export async function callRpc(connection, functionName, params = {}) {
+export async function callRpc(connection, functionName, params = {}, { headers } = {}) {
   return supabaseRequest(connection, `/rest/v1/rpc/${functionName}`, {
     method: "POST",
     body: JSON.stringify(params),
+    ...(headers ? { headers } : {}),
   });
 }
 
@@ -85,17 +144,23 @@ export function toPostgrestIn(values = []) {
   return `in.(${uniqueValues.map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
 }
 
-export async function selectRowsByValues(connection, table, field, values, select = "*") {
+export async function selectRowsByValues(connection, table, field, values, select = "*", options = {}) {
   const uniqueValues = Array.from(new Set(values.map(cleanText).filter(Boolean)));
-  const results = [];
+  const { order, extraParams = {}, concurrency = 1 } = options || {};
+  const tasks = [];
   for (let index = 0; index < uniqueValues.length; index += 400) {
     const chunk = uniqueValues.slice(index, index + 400);
     const filter = toPostgrestIn(chunk);
     if (!filter) continue;
-    const rows = await selectAll(connection, table, { select, [field]: filter });
-    if (Array.isArray(rows)) results.push(...rows);
+    tasks.push(() => selectAll(
+      connection,
+      table,
+      { select, ...extraParams, [field]: filter, ...(order ? { order } : {}) },
+      { parallelPages: Boolean(order) && concurrency > 1 },
+    ));
   }
-  return results;
+  const pages = await runWithConcurrency(tasks, concurrency);
+  return pages.flatMap((rows) => (Array.isArray(rows) ? rows : []));
 }
 
 export async function deleteRowsByValues(connection, table, field, values) {

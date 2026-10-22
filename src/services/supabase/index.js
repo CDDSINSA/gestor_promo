@@ -21,6 +21,8 @@ export {
 } from "./session";
 export {
   loadActivityIdsByPrefixFromSupabase,
+  loadCampaignsFromSupabase,
+  loadSeguimientoResumenFromSupabase,
   loadCatalogFromSupabase,
   loadLogsFromSupabase,
   loadPromotionScopeFromSupabase,

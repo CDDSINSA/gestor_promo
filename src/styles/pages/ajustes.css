@@ -9,17 +9,6 @@
   min-width: 0;
 }
 
-.settings-page {
-  display: grid;
-  gap: 1rem;
-}
-
-.settings-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .settings-tabs button {
   border: 1px solid #dbe5ee;
   border-radius: 0.75rem;
@@ -36,73 +25,107 @@
   background: #e8f5ee;
   color: #004b2d;
 }
+.broadcast-form .btn { justify-self: start; max-width: 100%; white-space: normal; }
+.broadcast-preview small { color: #64748b; }
+.broadcast-status.success { color: #004b2d; background: #e8f5ee; }
+.broadcast-status.error { color: #991b1b; background: #fff1f2; }
+.broadcast-status.warning { color: #854d0e; background: #fffbeb; }
 
-.settings-section-card {
-  max-width: none;
+
+/* Ajustes > Notificaciones: destinatarios por evento y grupos */
+
+.notif-routing-heading p {
+  margin-top: 0.2rem;
+  color: var(--design-text-muted);
+  font-size: 0.84rem;
 }
 
-.settings-page .settings-btn-save {
-  border-color: #006b3f;
-  background: #006b3f;
-  color: #ffffff;
+.notif-event.is-dirty {
+  border-color: var(--design-state-revision);
+  box-shadow: 0 0 0 2px var(--design-pending-soft);
 }
 
-.settings-page .settings-btn-save:hover {
-  border-color: #004b2d;
-  background: #004b2d;
+.notif-event header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
-.settings-page .settings-btn-add {
-  border-color: #00a6c8;
-  background: #e0f7fb;
-  color: #075985;
+.notif-chip input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--design-brand);
 }
 
-.settings-page .settings-btn-add:hover {
-  border-color: #0891b2;
-  background: #cffafe;
+.notif-chip.selected {
+  border-color: var(--design-brand);
+  background: var(--design-brand-soft);
+  color: var(--design-brand);
+  font-weight: var(--weight-medium);
 }
 
-.settings-page .settings-btn-test,
-.settings-page .settings-btn-validate {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #334155;
+.notif-chip.inactive {
+  opacity: 0.6;
 }
 
-.settings-page .settings-btn-test:hover,
-.settings-page .settings-btn-validate:hover {
-  border-color: #94a3b8;
-  background: #e2e8f0;
+.notif-chip small {
+  color: var(--design-text-muted);
 }
 
-.settings-page .settings-btn-warning {
-  border-color: #f59e0b;
-  background: #fffbeb;
-  color: #92400e;
+.notif-group-item strong {
+  color: var(--color-ink);
+  font-size: 0.86rem;
 }
 
-.settings-page .settings-btn-warning:hover {
-  background: #fef3c7;
+.notif-group-item span {
+  color: var(--design-text-muted);
+  font-size: 0.74rem;
 }
 
-.settings-page .settings-btn-danger {
-  border-color: #fecaca;
-  background: #fff1f2;
-  color: #b91c1c;
+.notif-group-item.selected {
+  border-color: var(--design-brand);
+  background: var(--design-brand-soft);
 }
 
-.settings-page .settings-btn-danger:hover {
-  border-color: #fca5a5;
-  background: #ffe4e6;
+.notif-group-item.inactive {
+  opacity: 0.65;
 }
 
-.buyer-manager {
+.notif-inline-check input,
+.notif-member input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--design-brand);
+}
+
+.notif-search input {
+  min-height: 2rem;
+  padding: 0.3rem 0;
+  border: none;
+  background: transparent;
+  font-size: 0.82rem;
+}
+
+.notif-member span {
   display: grid;
-  gap: 0.85rem;
 }
 
-.buyer-form {
-  display: grid;
-  gap: 0.75rem;
+.notif-member strong {
+  color: var(--color-ink);
+  font-size: 0.84rem;
+}
+
+.notif-member small {
+  color: var(--design-text-muted);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 900px) {
+
+  .notif-event header {
+    flex-direction: column;
+  }
 }

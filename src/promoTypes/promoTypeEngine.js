@@ -1,9 +1,10 @@
-﻿const segmentColumns = ["aplicaSegmento", "segmento"];
+const segmentColumns = ["aplicaSegmento", "segmento"];
 
 const commonSimpleColumns = [
   "tipoPromo",
   ...segmentColumns,
   "sku",
+  "numPagina",
   "numParte",
   "descripcion",
   "tipoCantidad",
@@ -19,6 +20,7 @@ const commonComplexColumns = [
   "tipoSku",
   ...segmentColumns,
   "sku",
+  "numPagina",
   "numParte",
   "descripcion",
   "tipoCantidad",
@@ -29,12 +31,29 @@ const commonComplexColumns = [
   "comentario",
 ];
 
+// AIRES: sin "Rol" (todas las piezas son componente), con el precio del aire editable
+// y el precio por pieza calculado.
+const airesColumns = [
+  "grupoOferta",
+  ...segmentColumns,
+  "sku",
+  "numPagina",
+  "numParte",
+  "descripcion",
+  "cantidadMinima",
+  "precioAntes",
+  "precioAire",
+  "precioAhora",
+  "comentario",
+];
+
 const buyXGetXColumns = [
   "grupoOferta",
   "tipoSku",
   "variante",
   ...segmentColumns,
   "sku",
+  "numPagina",
   "numParte",
   "descripcion",
   "tipoCantidad",
@@ -53,12 +72,14 @@ export const promoLabels = {
   aplicaSegmento: "Segmenta",
   segmento: "Segmentos",
   sku: "SKU",
+  numPagina: "N° Pág.",
   numParte: "Núm. parte",
   descripcion: "Descripción",
   tipoCantidad: "Tipo cantidad",
   cantidadMinima: "Cantidad mínima",
   precioAntes: "Precio antes c/IVA",
   precioAhora: "Precio ahora c/IVA",
+  precioAire: "Precio aire c/IVA",
   descuento: "Descuento",
   comentario: "Comentario adicional",
   tablaMegapack: "Tabla Megapack",
@@ -101,6 +122,12 @@ function validateComplexBase(row) {
 function validateBuyXGetX(row) {
   const errors = validateComplexBase(row);
   if (!row.variante) errors.push("variante");
+  return errors;
+}
+
+function validateAires(row) {
+  const errors = validateComplexBase(row);
+  if (!hasValue(row.precioAhora) && !hasValue(row.precio_ahora)) errors.push("precio_ahora");
   return errors;
 }
 
@@ -163,6 +190,11 @@ export const promoTypeEngines = {
   }),
   Megapack: complexEngine("Megapack", {
     createGroup: createUniqueGroup,
+  }),
+  AIRES: complexEngine("AIRES", {
+    columns: airesColumns,
+    createGroup: createUniqueGroup,
+    validateRow: validateAires,
   }),
 };
 

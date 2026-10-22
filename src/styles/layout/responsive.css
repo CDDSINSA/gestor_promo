@@ -9,10 +9,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .special-request-top {
-    grid-template-columns: 1fr;
-  }
-
   .catalog-grid,
   .export-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -24,20 +20,12 @@
     grid-template-columns: 1fr;
   }
 
-  .consolidado-top {
-    grid-template-columns: 1fr;
-  }
-
   .promo-controls-card > div {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .promo-controls-card .promo-action-row {
     grid-column: 1 / -1;
-  }
-
-  .bulk-box {
-    align-items: stretch;
   }
 
   .bulk-box p,
@@ -70,11 +58,6 @@
     height: auto;
   }
 
-  .promo-page-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .sku-master-status {
     width: 100%;
     max-width: none;
@@ -87,10 +70,6 @@
 
   .wide {
     grid-column: auto;
-  }
-
-  .home-topbar {
-    grid-template-columns: 1fr;
   }
 
   .home-sync {
@@ -112,11 +91,6 @@
   .home-catalog-title {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .buyer-comment-alert {
-    width: 100%;
-    max-width: none;
   }
 
   .toolbar {
@@ -148,25 +122,11 @@
     flex-direction: column;
   }
 
-  .avance-buyer-row,
-  .avance-detail-hero {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .catalog-design-layout,
   .catalog-design-project-edit,
   .catalog-design-page-form,
   .catalog-design-viewer {
     grid-template-columns: 1fr;
-  }
-
-  .catalog-design-sidebar {
-    position: static;
-  }
-
-  .catalog-design-viewer {
-    padding-inline: 1rem;
   }
 
   .catalog-design-viewer-actions,
@@ -175,11 +135,6 @@
   .catalog-design-review-quickbar,
   .catalog-design-review-workspace {
     grid-template-columns: 1fr;
-  }
-
-  .catalog-design-comment-rail {
-    min-height: auto;
-    max-height: 18rem;
   }
 
   .catalog-design-sku-btn:last-child {
@@ -194,25 +149,6 @@
     box-shadow: 0 16px 35px rgba(15, 23, 42, 0.12);
   }
 
-  .catalog-design-sku-search,
-  .catalog-design-sku-data {
-    grid-template-columns: 1fr;
-  }
-
-  .catalog-design-viewer-stage,
-  .catalog-design-viewer-empty {
-    min-height: 20rem;
-  }
-
-  .catalog-design-header-actions {
-    margin-left: 0;
-  }
-
-  .catalog-design-header-actions .catalog-design-status {
-    width: 100%;
-    max-width: 100%;
-  }
-
   .catalog-design-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -222,38 +158,6 @@
   .search,
   .search input {
     width: 100%;
-  }
-
-  .seguimiento-actions,
-  .seguimiento-filter,
-  .seguimiento-filter select {
-    width: 100%;
-  }
-
-  .seguimiento-board {
-    min-width: 58rem;
-  }
-
-  .seguimiento-corner,
-  .seguimiento-name-cell {
-    width: 16rem;
-  }
-
-  .seguimiento-tooltip {
-    left: 0.75rem !important;
-    right: 0.75rem;
-    width: auto;
-  }
-
-  .special-request-buyer-filter,
-  .special-request-buyer-filter select {
-    width: 100%;
-    max-width: none;
-  }
-
-  .special-edit-summary {
-    grid-template-columns: 1fr;
-    align-items: stretch;
   }
 
   .mobile-nav-wrap {
@@ -363,27 +267,7 @@
     grid-template-columns: 1fr;
   }
 
-  .combo-line {
-    grid-template-columns: 1fr;
-  }
-
-  .combo-role-panel {
-    min-height: 0;
-  }
-
-  .combo-line-list {
-    max-height: 22rem;
-  }
-
   .promo-controls-card .promo-action-row {
-    grid-template-columns: 1fr;
-  }
-
-  .simple-promo-form {
-    grid-template-columns: 1fr;
-  }
-
-  .catalog-actions {
     grid-template-columns: 1fr;
   }
 
@@ -396,25 +280,9 @@
     min-height: 5.25rem;
   }
 
-  .seguimiento-time-row {
-    background:
-      repeating-linear-gradient(
-        to right,
-        rgba(148, 163, 184, 0.14) 0,
-        rgba(148, 163, 184, 0.14) 1px,
-        transparent 1px,
-        transparent 34px
-      ),
-      linear-gradient(180deg, #ffffff, #fbfdff);
-  }
-
   .conflict-summary,
   .conflict-field {
     grid-template-columns: 1fr;
-  }
-
-  .bulk-box {
-    flex-direction: column;
   }
 
   .success-toast {
@@ -429,23 +297,5 @@
     bottom: 8rem;
     left: 0.75rem;
     width: auto;
-  }
-}
-
-@media (max-width: 1024px) {
-  .promo-header-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .promo-context-fields {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .promo-guide-steps {
-    grid-template-columns: 1fr;
   }
 }

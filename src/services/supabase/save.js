@@ -2,6 +2,8 @@ import { normalizeRole, ROLES } from "../../constants/permissions";
 import { formatPromotionValidationErrors, validatePromotions } from "../promotionValidationService";
 import { cleanText } from "./config";
 import { callRpc } from "./http";
+import { mergeCatalogSaveResponses, splitCatalogSavePayload } from "./saveChunks";
+import { BULK_DELETE_HEADER } from "../../app/sync/deleteGuard";
 
 function getPromotionSyncOptions(data = {}) {
   return data.sync_options?.promociones || data.sync_options?.promotions || null;
@@ -92,17 +94,32 @@ function normalizeConcurrencyConflict(error) {
   return conflictError;
 }
 
-export async function saveCatalogToSupabase(connection, data = {}) {
-  assertCanSave(connection);
-  assertValidPromotions(data);
-  const payload = withOperationId(data);
+function normalizeBulkDeleteBlocked(error) {
+  const message = error?.message || "";
+  const details = parseConflictDetails(error);
+  if (!message.includes("PROMO_BULK_DELETE_BLOCKED") && details?.type !== "PROMO_BULK_DELETE_BLOCKED") return null;
+  const actividad = details?.actividad_id ? ` de la actividad ${details.actividad_id}` : "";
+  const counts = details?.eliminadas ? ` (${details.eliminadas} de ${details.total} promociones)` : "";
+  const blocked = new Error(
+    `Supabase bloqueó el borrado masivo de promociones${actividad}${counts}. No se guardó nada. `
+    + "Si el borrado es intencional, vuelva a guardar y confírmelo; si no, recargue los datos antes de guardar.",
+  );
+  blocked.code = "PROMO_BULK_DELETE_BLOCKED";
+  blocked.details = details;
+  blocked.cause = error;
+  return blocked;
+}
 
+async function callSaveRpc(connection, payload, { allowBulkDelete = false } = {}) {
+  const rpcOptions = allowBulkDelete ? { headers: { [BULK_DELETE_HEADER]: "true" } } : undefined;
   try {
-    return await callRpc(connection, "save_catalog_transactional", { p_payload: payload });
+    return await callRpc(connection, "save_catalog_transactional", { p_payload: payload }, rpcOptions);
   } catch (error) {
     const message = error?.message || "";
+    const bulkDeleteBlocked = normalizeBulkDeleteBlocked(error);
+    if (bulkDeleteBlocked) throw bulkDeleteBlocked;
     if (isMissingDigestFunction(error)) {
-      return callRpc(connection, "save_catalog_transactional", { p_payload: withoutOperationId(payload) });
+      return callRpc(connection, "save_catalog_transactional", { p_payload: withoutOperationId(payload) }, rpcOptions);
     }
     if (message.includes("save_catalog_transactional") || message.includes("PGRST202") || message.includes("Could not find the function")) {
       throw new Error("No se encontro la funcion RPC transaccional save_catalog_transactional en Supabase. Ejecute docs/supabase_transactional_save_rpc.sql antes de guardar.");
@@ -111,6 +128,52 @@ export async function saveCatalogToSupabase(connection, data = {}) {
   }
 }
 
-export function saveSettingsToSupabase(connection, data = {}) {
-  return saveCatalogToSupabase(connection, data);
+function withChunkOperationId(payload, index, total) {
+  if (total === 1) return payload;
+  const baseId = payload.operation_id || payload.operationId || payload.client_operation_id;
+  if (!baseId) return payload;
+  return { ...payload, operation_id: `${baseId}-parte-${index + 1}-de-${total}` };
+}
+
+/**
+ * Guarda en Supabase. Los guardados grandes (p. ej. una plantilla con miles de SKU) se envian
+ * en varias partes para no superar el statement_timeout. Cada parte es transaccional; si una
+ * parte falla, las anteriores ya quedaron guardadas y el error trae `partialSave` con lo guardado
+ * para que la app marque esas filas como sincronizadas y el reintento envie solo lo pendiente.
+ */
+export async function saveCatalogToSupabase(connection, data = {}, options = {}) {
+  assertCanSave(connection);
+  assertValidPromotions(data);
+  const payload = withOperationId(data);
+  const chunks = splitCatalogSavePayload(payload, options.chunkSize);
+  const responses = [];
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    options.onProgress?.({ part: index + 1, total: chunks.length });
+    try {
+      responses.push(await callSaveRpc(connection, withChunkOperationId(chunks[index], index, chunks.length), {
+        allowBulkDelete: Boolean(options.allowBulkDelete),
+      }));
+    } catch (error) {
+      if (index > 0) {
+        const saved = mergeCatalogSaveResponses(responses);
+        const savedDeleted = getPromotionSyncOptions(chunks[0])?.deleted_row_ids || [];
+        error.partialSave = {
+          promociones: saved.promociones || [],
+          deletedRowIds: savedDeleted,
+          completedParts: index,
+          totalParts: chunks.length,
+        };
+        error.message = `Se guardaron ${index} de ${chunks.length} partes (${(saved.promociones || []).length} promociones). `
+          + `La parte ${index + 1} fallo: ${error.message} Vuelva a guardar para enviar solo lo pendiente.`;
+      }
+      throw error;
+    }
+  }
+
+  return mergeCatalogSaveResponses(responses);
+}
+
+export function saveSettingsToSupabase(connection, data = {}, options = {}) {
+  return saveCatalogToSupabase(connection, data, options);
 }

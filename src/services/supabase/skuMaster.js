@@ -1,6 +1,7 @@
 import { callRpc, selectAll, supabaseRequest, toPostgrestIn } from "./http";
 
-export const SKU_MASTER_BATCH_SIZE = 1500;
+export const SKU_MASTER_BATCH_SIZE = 1000;
+export const PROMOTION_COST_COMPLETION_LIMIT = 1000;
 
 /**
  * Obtiene métricas del maestro de SKU (total registros y última actualización).
@@ -38,10 +39,14 @@ export async function clearSkuMasterInSupabase(connection) {
   try {
     return await callRpc(connection, "clear_sku_master");
   } catch (error) {
-    // Fallback directo con DELETE si la RPC no está instalada
+    // Si el error es de permisos o timeout de sentencia, propagar inmediatamente
+    if (error?.status === 401 || error?.status === 403 || error?.message?.includes("57014")) {
+      throw error;
+    }
+    // Fallback ligero con DELETE solo si la RPC no estuviera creada en la BD
     return await supabaseRequest(connection, "/rest/v1/sku_master?sku=neq.__never__", {
       method: "DELETE",
-      headers: { Prefer: "return=representation" },
+      headers: { Prefer: "return=minimal" },
     });
   }
 }
@@ -54,6 +59,9 @@ export async function insertSkuMasterBatch(connection, batch = []) {
   try {
     return await callRpc(connection, "insert_sku_master_batch", { p_rows: batch });
   } catch (error) {
+    // Con costos en el lote no hay respaldo por REST: el costo solo se guarda por la
+    // RPC (sku_costos no es accesible por REST) y nunca debe terminar en sku_master.
+    if (batch.some(hasCostFields)) throw error;
     // Fallback a POST estándar en REST con merge-duplicates
     return await supabaseRequest(connection, "/rest/v1/sku_master?on_conflict=sku", {
       method: "POST",
@@ -63,6 +71,25 @@ export async function insertSkuMasterBatch(connection, batch = []) {
       body: JSON.stringify(batch),
     });
   }
+}
+
+function hasCostFields(row = {}) {
+  return row.av_cost !== null && row.av_cost !== undefined;
+}
+
+/**
+ * Llama completar_costos_promociones por tramos hasta que no queden líneas por completar.
+ */
+export async function completePromotionCostsInSupabase(connection, onStep = null, maxRounds = 500) {
+  let total = 0;
+  for (let round = 0; round < maxRounds; round += 1) {
+    const result = await callRpc(connection, "completar_costos_promociones", { p_limit: PROMOTION_COST_COMPLETION_LIMIT });
+    const completed = Number(result?.completed) || 0;
+    total += completed;
+    onStep?.(total);
+    if (completed < PROMOTION_COST_COMPLETION_LIMIT) break;
+  }
+  return total;
 }
 
 /**
@@ -81,6 +108,8 @@ export async function replaceSkuMasterInSupabase(connection, rows = [], onProgre
   const total = rows.length;
   const totalBatches = Math.ceil(total / SKU_MASTER_BATCH_SIZE);
   let totalInserted = 0;
+  let totalCosts = 0;
+  let promotionsCompleted = 0;
 
   for (let i = 0; i < totalBatches; i++) {
     const start = i * SKU_MASTER_BATCH_SIZE;
@@ -98,8 +127,26 @@ export async function replaceSkuMasterInSupabase(connection, rows = [], onProgre
       message: `Cargando lote ${i + 1} de ${totalBatches} (${end.toLocaleString()} de ${total.toLocaleString()} SKU)...`,
     });
 
-    await insertSkuMasterBatch(connection, chunk);
+    const result = await insertSkuMasterBatch(connection, chunk);
     totalInserted += chunk.length;
+    totalCosts += Number(result?.costs) || 0;
+  }
+
+  // Al final (no por lote): completa el costo de promociones que estaban sin costo.
+  // Si falla, el maestro ya quedó cargado; se reintenta en la próxima carga.
+  let completionError = "";
+  if (totalCosts > 0) {
+    try {
+      promotionsCompleted = await completePromotionCostsInSupabase(connection, (completed) => {
+        onProgress?.({
+          phase: "completing",
+          percent: 97,
+          message: `Completando costo de promociones existentes (${completed.toLocaleString()} líneas)...`,
+        });
+      });
+    } catch (error) {
+      completionError = error.message || "No se pudo completar el costo de promociones.";
+    }
   }
 
   onProgress?.({
@@ -109,7 +156,63 @@ export async function replaceSkuMasterInSupabase(connection, rows = [], onProgre
     message: `¡Carga completada! Se registraron ${totalInserted.toLocaleString()} artículos.`,
   });
 
-  return { ok: true, total: totalInserted };
+  return { ok: true, total: totalInserted, costs: totalCosts, promotionsCompleted, completionError };
+}
+
+export const SKU_CLASSIFICATION_BATCH_SIZE = 2000;
+
+/**
+ * Resumen de la clasificación ABC (paso 35). Devuelve null si el script aún no se
+ * ejecutó, para que Ajustes siga funcionando sin la clasificación.
+ */
+export async function getSkuClassificationSummaryFromSupabase(connection) {
+  try {
+    const summary = await callRpc(connection, "get_clasificacion_abc_resumen");
+    return summary && typeof summary.total_clasificados === "number" ? summary : null;
+  } catch {
+    return null;
+  }
+}
+
+function newLoadId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  // Respaldo para navegadores sin randomUUID (contexto no seguro).
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+    (Number(c) ^ (Math.random() * 16) >> (Number(c) / 4)).toString(16));
+}
+
+/**
+ * Actualización PARCIAL del maestro: solo la clasificación ABC. No borra ni modifica
+ * sku_master ni costos. Sube los lotes con un mismo id de carga y al final aplica:
+ * los SKU que no vinieron en el archivo quedan como 8 (Nuevo). Si un lote
+ * falla, no se aplica y la clasificación anterior se conserva.
+ */
+export async function updateSkuClassificationInSupabase(connection, rows = [], onProgress = null) {
+  const valid = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ sku: String(row?.sku ?? "").trim(), clasificacion_abc: Number(row?.clasificacion_abc) }))
+    .filter((row) => row.sku && Number.isInteger(row.clasificacion_abc) && row.clasificacion_abc >= 1 && row.clasificacion_abc <= 11);
+  if (!valid.length) throw new Error("No hay clasificaciones válidas para cargar.");
+
+  const loadId = newLoadId();
+  const total = valid.length;
+  const totalBatches = Math.ceil(total / SKU_CLASSIFICATION_BATCH_SIZE);
+  for (let i = 0; i < totalBatches; i++) {
+    const end = Math.min((i + 1) * SKU_CLASSIFICATION_BATCH_SIZE, total);
+    onProgress?.({
+      phase: "uploading",
+      percent: Math.round(5 + ((i + 1) / totalBatches) * 85),
+      message: `Cargando clasificación ABC, lote ${i + 1} de ${totalBatches} (${end.toLocaleString()} de ${total.toLocaleString()} SKU)...`,
+    });
+    await callRpc(connection, "cargar_clasificacion_abc_lote", {
+      p_carga_id: loadId,
+      p_rows: valid.slice(i * SKU_CLASSIFICATION_BATCH_SIZE, end),
+    });
+  }
+
+  onProgress?.({ phase: "applying", percent: 95, message: "Aplicando clasificación y marcando el resto como Nuevo..." });
+  const summary = await callRpc(connection, "aplicar_clasificacion_abc", { p_carga_id: loadId });
+  onProgress?.({ phase: "completed", percent: 100, message: "Clasificación ABC actualizada." });
+  return { ok: true, total, summary: summary || null };
 }
 
 /**
@@ -170,4 +273,16 @@ function skuVariants(sku) {
   if (!/^\d+$/.test(sku)) return [sku];
   const numeric = sku.replace(/^0+(?=\d)/, "");
   return [...new Set([sku, numeric, ...[5, 6, 7, 8].map((length) => numeric.padStart(length, "0"))])];
+}
+
+/**
+ * AIRES: pesos de reparto por costo (AV_COST) de cada pieza de cada aire.
+ * La RPC no devuelve costos, solo la proporción; si a una pieza le falta costo el aire
+ * viene con fuente SIN_COSTO y el frontend reparte por precio regular.
+ * combos: [{ combo, items: [{ sku, cantidad }] }]
+ */
+export async function loadAiresCostWeightsFromSupabase(connection, combos = []) {
+  if (!Array.isArray(combos) || !combos.length) return [];
+  const result = await callRpc(connection, "calcular_pesos_aires", { p_combos: combos });
+  return Array.isArray(result) ? result : [];
 }

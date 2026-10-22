@@ -1,5 +1,6 @@
 import {
   ACTIVITY_TYPES,
+  AIRES_PROMO_TYPE,
   ALCANCE_TYPES,
   COMMENT_SCOPE_ACTIVITY,
   COMMENT_SCOPE_LINE,
@@ -104,7 +105,7 @@ function normalizeHeader(value) {
 }
 
 function isComplexType(value) {
-  return ["Combo", "Umbral", "Compra X lleva X", "Compra X Lleva X V2", MEGAPACK_PROMO_TYPE].map(normalizeHeader).includes(normalizeHeader(value));
+  return ["Combo", "Umbral", "Compra X lleva X", "Compra X Lleva X V2", MEGAPACK_PROMO_TYPE, AIRES_PROMO_TYPE].map(normalizeHeader).includes(normalizeHeader(value));
 }
 
 function getOfferOwnerKey({ usuarioId, compradorId } = {}) {
@@ -236,6 +237,9 @@ function normalizePromocion(row) {
     tipo_sku: row.tipo_sku || "",
     variante: row.variante || "",
     sku: String(row.sku || "").trim(),
+    numero_pagina: normalizeNumber(row.numero_pagina || row.num_pagina || row.numPagina || row["Numero de pagina"] || row["Numero de Pagina"] || row["Número de pagina"] || row["Número de Página"] || row["numero de pagina"] || row.pagina || row.página || row.Pagina || row.Página || ""),
+    num_pagina: normalizeNumber(row.numero_pagina || row.num_pagina || row.numPagina || row["Numero de pagina"] || row["Numero de Pagina"] || row["Número de pagina"] || row["Número de Página"] || row["numero de pagina"] || row.pagina || row.página || row.Pagina || row.Página || ""),
+    numPagina: normalizeNumber(row.numero_pagina || row.num_pagina || row.numPagina || row["Numero de pagina"] || row["Numero de Pagina"] || row["Número de pagina"] || row["Número de Página"] || row["numero de pagina"] || row.pagina || row.página || row.Pagina || row.Página || ""),
     num_parte: row.num_parte || "",
     descripcion: row.descripcion || "",
     tipo_cantidad: row.tipo_cantidad || "Exacta",
@@ -430,6 +434,7 @@ export function buildConsolidado(promociones, comentarios = [], actividades = []
       tipo_sku: promo.tipo_sku,
       variante: promo.variante,
       sku: promo.sku,
+      numero_pagina: promo.numero_pagina || promo.num_pagina || promo.numPagina || "",
       num_parte: promo.num_parte,
       descripcion: promo.descripcion,
       tipo_cantidad: promo.tipo_cantidad,
@@ -480,6 +485,7 @@ export function buildMercadeoExport(promociones, comentarios = [], actividades =
       grupo_oferta: promo.grupo_oferta,
       variante: promo.variante,
       sku: promo.sku,
+      numero_pagina: promo.numero_pagina || promo.num_pagina || promo.numPagina || "",
       num_parte: promo.num_parte,
       descripcion: promo.descripcion,
       precio_antes: promo.precio_antes,
@@ -560,7 +566,7 @@ export async function saveCatalogToExcel(data) {
   XLSX.utils.book_append_sheet(workbook, jsonToSheet(avances_catalogo.map(normalizeAvanceCatalogo)), SHEETS.AVANCES_CATALOGO);
   XLSX.utils.book_append_sheet(workbook, jsonToSheet(buildConsolidado(normalizedPromociones, normalizedComentarios, actividades)), SHEETS.CONSOLIDADO);
   XLSX.utils.book_append_sheet(workbook, jsonToSheet(notificaciones), SHEETS.NOTIFICACIONES);
-  XLSX.utils.book_append_sheet(workbook, jsonToSheet(normalizedPromociones), SHEETS.PROMOCIONES);
+  XLSX.utils.book_append_sheet(workbook, jsonToSheet(normalizedPromociones.map(({ num_pagina, numPagina, ...promo }) => promo)), SHEETS.PROMOCIONES);
   XLSX.utils.book_append_sheet(workbook, jsonToSheet(promocionesDetalleNormalizadas), SHEETS.PROMOCIONES_DETALLE);
   XLSX.utils.book_append_sheet(workbook, jsonToSheet(logs), SHEETS.LOGS);
   XLSX.writeFile(workbook, "Catalogo_Promociones_Actualizado.xlsx");

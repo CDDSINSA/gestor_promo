@@ -1,0 +1,372 @@
+/* Estilos cargados solo con: AjustesPage.
+   Generado al separar el CSS global por página (oct-2026). Mantener aquí solo
+   reglas cuyas clases se usan exclusivamente en esas páginas. */
+
+/* --- desde components/ui-elements.css --- */
+.connection-panel {
+  align-items: stretch;
+  flex-direction: column;
+  margin-bottom: 0;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.division-picker {
+  padding: 0.85rem;
+  border: 1px solid #dbe7e1;
+  border-radius: 1rem;
+  background: #f8fafc;
+}
+
+.buyer-list {
+  max-height: 13rem;
+  overflow: auto;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: #f8fafc;
+}
+
+.switch {
+  width: 3rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  padding: 0.125rem;
+  border: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  cursor: pointer;
+}
+
+/* --- desde pages/promos.css --- */
+.segment-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* --- desde pages/ajustes.css --- */
+.settings-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-section-card {
+  max-width: none;
+}
+
+.settings-page .settings-btn-save {
+  border-color: #006b3f;
+  background: #006b3f;
+  color: #ffffff;
+}
+
+.settings-page .settings-btn-save:hover {
+  border-color: #004b2d;
+  background: #004b2d;
+}
+
+.settings-page .settings-btn-add {
+  border-color: #00a6c8;
+  background: #e0f7fb;
+  color: #075985;
+}
+
+.settings-page .settings-btn-add:hover {
+  border-color: #0891b2;
+  background: #cffafe;
+}
+
+.settings-page .settings-btn-test,
+.settings-page .settings-btn-validate {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.settings-page .settings-btn-test:hover,
+.settings-page .settings-btn-validate:hover {
+  border-color: #94a3b8;
+  background: #e2e8f0;
+}
+
+.settings-page .settings-btn-warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.settings-page .settings-btn-warning:hover {
+  background: #fef3c7;
+}
+
+.settings-page .settings-btn-danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.settings-page .settings-btn-danger:hover {
+  border-color: #fca5a5;
+  background: #ffe4e6;
+}
+
+.buyer-manager {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.buyer-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.broadcast-settings { padding: 1.25rem; max-width: 52rem; }
+
+.broadcast-heading { display: flex; align-items: flex-start; gap: 0.75rem; color: #004b2d; }
+
+.broadcast-heading > svg { flex-shrink: 0; margin-top: 0.25rem; }
+
+.broadcast-heading h2 { margin: 0; }
+
+.broadcast-settings p { line-height: 1.55; }
+
+.broadcast-form { display: grid; gap: 1rem; }
+
+.broadcast-form textarea { resize: vertical; min-height: 8rem; }
+
+.broadcast-preview { display: grid; gap: 0.5rem; padding: 1rem; background: #f8fafc; border: 1px solid #dbe5ee; border-left: 3px solid #006b3f; border-radius: 0.65rem; overflow-wrap: anywhere; }
+
+.broadcast-preview p { margin: 0; white-space: pre-wrap; }
+
+.broadcast-status { padding: 0.8rem; border-radius: 0.6rem; overflow-wrap: anywhere; }
+
+.notif-routing-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.notif-routing {
+  display: grid;
+  gap: 1rem;
+}
+
+.notif-routing-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  color: var(--design-brand);
+}
+
+.notif-routing-heading h2,
+.notif-routing-heading p {
+  margin: 0;
+}
+
+.notif-event {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--design-border);
+  border-radius: 0.85rem;
+  background: #ffffff;
+}
+
+.notif-event header strong {
+  display: block;
+  color: var(--color-ink);
+  font-size: 0.95rem;
+}
+
+.notif-event header span {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--design-text-muted);
+  font-size: 0.78rem;
+}
+
+.notif-event-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+}
+
+.notif-event-label {
+  padding-top: 0.35rem;
+  color: var(--design-text-muted);
+  font-size: 0.74rem;
+  font-weight: var(--weight-medium);
+}
+
+.notif-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.notif-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--design-border);
+  border-radius: 999px;
+  background: var(--design-surface-muted);
+  color: #334155;
+  font-size: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.notif-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--design-surface-muted);
+  color: #334155;
+  font-size: 0.78rem;
+  line-height: 1.15rem;
+}
+
+.notif-preview svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+
+.notif-muted {
+  margin: 0;
+  color: var(--design-text-muted);
+  font-size: 0.8rem;
+}
+
+.notif-groups {
+  display: grid;
+  grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.notif-group-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.notif-group-item {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--design-border);
+  border-radius: 0.7rem;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notif-group-editor {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--design-border);
+  border-radius: 0.85rem;
+}
+
+.notif-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+}
+
+.notif-members {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.notif-members-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.notif-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--design-border);
+  border-radius: 0.6rem;
+  color: var(--design-text-muted);
+}
+
+.notif-search input:focus {
+  outline: none;
+}
+
+.notif-member-list {
+  display: grid;
+  max-height: 18rem;
+  overflow: auto;
+  border: 1px solid var(--design-border);
+  border-radius: 0.7rem;
+}
+
+.notif-member {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+
+.notif-member:last-child {
+  border-bottom: none;
+}
+
+.notif-group-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.notif-group-empty {
+  padding: 1rem;
+}
+
+@media (max-width: 900px) {
+  .notif-groups {
+      grid-template-columns: 1fr;
+    }
+
+  .notif-event-row {
+      grid-template-columns: 1fr;
+    }
+
+}
+
+/* --- desde pages/margenes.css --- */
+.margin-settings-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+

@@ -99,7 +99,7 @@ function downloadBuffer(buffer, fileName) {
   URL.revokeObjectURL(url);
 }
 
-export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = [], columnCount = 0, fileName, isModifiedRow, columnFormats = [] }) {
+export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = [], columnCount = 0, fileName, isModifiedRow, columnFormats = [], additionalSheets = [] }) {
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sheetName);
@@ -124,6 +124,14 @@ export async function exportStyledWorkbook({ sheetName, rows = [], dataRows = []
     if (width) target.width = width;
   });
 
+  additionalSheets.forEach(({ name, rows: sheetRows, columns = [] }) => {
+    const sheet = workbook.addWorksheet(name);
+    sheet.columns = columns;
+    sheetRows.forEach((row) => sheet.addRow(row));
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    if (sheetRows.length) sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: sheetRows.length, column: sheetRows[0].length } };
+    sheet.getRow(1).font = { bold: true };
+  });
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBuffer(buffer, fileName);
 }

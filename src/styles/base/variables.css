@@ -1,12 +1,91 @@
 :root {
   --color-sinsa-orange: #F18A00;
   --color-ink: #0f172a;
+  /* Acciones destructivas (p. ej. confirmar borrado masivo de promociones) */
+  --color-danger: #b91c1c;
+  --color-danger-hover: #991b1b;
+  --color-danger-soft: #fef2f2;
+  --color-danger-border: #fecaca;
   --notification-fab-background: var(--color-sinsa-orange);
   --notification-fab-background-hover: color-mix(in srgb, var(--color-sinsa-orange) 90%, var(--color-ink));
   --notification-fab-foreground: var(--color-ink);
   --notification-fab-border: color-mix(in srgb, var(--color-sinsa-orange) 70%, var(--color-ink));
   --notification-fab-focus: var(--color-ink);
   --notification-fab-shadow: color-mix(in srgb, var(--color-sinsa-orange) 25%, transparent);
+  /* Diseño de catálogos: colores por estado de página (barra de avance y leyenda) */
+  --design-state-listas: #065f46;
+  --design-state-aprobadas: #10b981;
+  --design-state-revision: #f59e0b;
+  --design-state-ajustes: #ef4444;
+  --design-state-diseno: #0ea5e9;
+  --design-state-pendientes: #cbd5e1;
+  --design-surface-muted: #f8fafc;
+  --design-border: #dbe7e1;
+  --design-text-muted: #64748b;
+  --design-brand: #006b3f;
+  --design-brand-soft: #e8f5ee;
+  --design-page-current-bg: #dcfce7;
+  --design-page-current-fg: #15803d;
+  --design-page-current-border: #86efac;
+  --design-page-other-bg: #e0f2fe;
+  --design-page-other-fg: #0369a1;
+  --design-page-other-border: #bae6fd;
+  /* Panel de SKU: card de oferta compleja (combo, umbral…) */
+  --design-offer-line-bg: #f8fafc;
+  --design-offer-line-border: #e2e8f0;
+  --design-offer-match-border: #86efac;
+  --design-offer-match-bg: #f0fdf4;
+  --design-offer-role-bg: #eef2ff;
+  --design-offer-role-fg: #3730a3;
+  --design-offer-discount-fg: #b91c1c;
+  --design-offer-gift-fg: #7e22ce;
+  --design-pending: #c2410c;
+  --design-pending-soft: #ffedd5;
+  --design-toast-bg: #0f172a;
+  --design-toast-fg: #f8fafc;
+  --design-toast-error-bg: #7f1d1d;
+  /* Carga de promociones: estado de guardado por línea (filtro y marca junto al SKU) */
+  --promo-save-new: #1d4ed8;
+  --promo-save-new-soft: #eff6ff;
+  --promo-save-new-border: #bfdbfe;
+  --promo-save-modified: #b45309;
+  --promo-save-modified-soft: #fffbeb;
+  --promo-save-modified-border: #fde68a;
+  --promo-save-active: #006b3f;
+  --promo-save-active-soft: #e8f5ee;
+  /* Monitoreo de márgenes: semáforo (texto, punto y fondo suave por estado) */
+  --margin-verde: #047857;
+  --margin-verde-dot: #10b981;
+  --margin-verde-soft: #ecfdf5;
+  --margin-naranja: #c2410c;
+  --margin-naranja-dot: var(--color-sinsa-orange);
+  --margin-naranja-soft: #fff1e0;
+  --margin-amarillo: #a16207;
+  --margin-amarillo-dot: #eab308;
+  --margin-amarillo-soft: #fef9c3;
+  --margin-rojo: #b91c1c;
+  --margin-rojo-dot: #dc2626;
+  --margin-rojo-soft: #fee2e2;
+  --margin-neutral: #64748b;
+  --margin-neutral-dot: #94a3b8;
+  --margin-neutral-soft: #f1f5f9;
+  /* Clasificación ABC: rampa ordinal azul AA→C (validada; no compite con el verde del
+     semáforo de margen) + neutros cálidos para lo que no es ranking */
+  --abc-aa: #0a2c5e;
+  --abc-a: #1b5bab;
+  --abc-b: #4a8fdb;
+  --abc-c: #8ab9ec;
+  --abc-desc: #57534e;
+  --abc-otras: #c4c0bb;
+  /* Celdas del mapa de calor: tinte del color de estado, más marcado que el fondo suave */
+  --margin-verde-cell: color-mix(in srgb, var(--margin-verde-dot) 26%, #ffffff);
+  --margin-naranja-cell: color-mix(in srgb, var(--margin-naranja-dot) 30%, #ffffff);
+  --margin-amarillo-cell: color-mix(in srgb, var(--margin-amarillo-dot) 34%, #ffffff);
+  --margin-rojo-cell: color-mix(in srgb, var(--margin-rojo-dot) 26%, #ffffff);
+  --chart-grid: #e2e8f0;
+  --chart-track: #f1f5f9;
+  --chart-tooltip-bg: #0f172a;
+  --chart-tooltip-fg: #f8fafc;
   --font-body: "Aptos", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-heading: "Segoe UI Variable Display", "Aptos Display", "Aptos", "Segoe UI", system-ui, sans-serif;
   --weight-regular: 400;

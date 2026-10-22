@@ -509,6 +509,9 @@ export function toAppRow(row) {
     variante: row.variante || "",
     depId: row.depId || row.dep_id || row.dept || row.DEPT || "",
     dep_id: row.dep_id || row.depId || row.dept || row.DEPT || "",
+    numero_pagina: row.numero_pagina || row.num_pagina || row.numPagina || row["Numero de pagina"] || row["Número de página"] || "",
+    num_pagina: row.num_pagina || row.numero_pagina || row.numPagina || row["Numero de pagina"] || row["Número de página"] || "",
+    numPagina: row.numPagina || row.numero_pagina || row.num_pagina || row["Numero de pagina"] || row["Número de página"] || "",
     numParte: row.numParte || row.num_parte || "",
     num_parte: row.num_parte || row.numParte || "",
     tipoCantidad: row.tipoCantidad || row.tipo_cantidad || "Exacta",
@@ -564,6 +567,7 @@ export function toExcelRow(row) {
     variante: row.variante || "",
     dep_id: row.depId || row.dep_id || row.dept || "",
     sku: row.sku || "",
+    numero_pagina: row.numero_pagina || row.num_pagina || row.numPagina || row["Numero de pagina"] || row["Número de página"] || "",
     num_parte: row.numParte || row.num_parte || "",
     descripcion: row.descripcion || "",
     tipo_cantidad: row.tipoCantidad || row.tipo_cantidad || "Exacta",
@@ -586,6 +590,24 @@ export function toExcelRow(row) {
   };
 }
 
+// Convierte la fecha de un comentario a ISO para Supabase (timestamptz).
+// Comentarios creados con toLocaleString() ("15/10/2026, 11:45:11 a. m.") hacian fallar el guardado
+// con 'time zone "a." not recognized'.
+function normalizeCommentTimestamp(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return new Date().toISOString();
+  const local = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?$/i);
+  if (local) {
+    const [, day, month, year, hour, minute, second = "0", meridiem] = local;
+    let hours = Number(hour) % 12;
+    if (meridiem.toLowerCase() === "p") hours += 12;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), hours, Number(minute), Number(second));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw) && !Number.isNaN(new Date(raw).getTime())) return raw;
+  return "";
+}
+
 export function toExcelComment(item, rowById = new Map()) {
   const rowId = item.row_id || item.rowId;
   const row = rowById.get(rowId) || {};
@@ -600,7 +622,7 @@ export function toExcelComment(item, rowById = new Map()) {
     tipo_usuario: item.tipo_usuario || "Mercadeo",
     comentario: item.comentario || item.texto || "",
     estado: String(item.estado || "ABIERTO").toUpperCase(),
-    fecha: item.fecha || new Date().toISOString(),
+    fecha: normalizeCommentTimestamp(item.fecha),
     resuelto_por: item.resuelto_por || "",
     fecha_resolucion: item.fecha_resolucion || "",
   };

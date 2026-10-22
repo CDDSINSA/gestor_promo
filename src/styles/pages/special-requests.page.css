@@ -1,0 +1,154 @@
+/* Estilos cargados solo con: SolicitudesEspecialesPage.
+   Generado al separar el CSS global por página (oct-2026). Mantener aquí solo
+   reglas cuyas clases se usan exclusivamente en esas páginas. */
+
+/* --- desde pages/special-requests.css --- */
+.special-request-top {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 1.4fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: stretch;
+}
+
+.special-request-list-card,
+.special-request-detail-card {
+  height: 24rem;
+  max-height: 24rem;
+  min-height: 24rem;
+}
+
+.special-request-list-card > div {
+  overflow: hidden;
+}
+
+.special-request-detail-card > div {
+  overflow: auto;
+}
+
+.special-request-list {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.special-request-buyer-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.special-request-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  color: #334155;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.special-request-row small {
+  grid-column: 1 / -1;
+}
+
+.special-detail-grid textarea {
+  min-height: 4.5rem;
+}
+
+.special-edit-summary {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) minmax(10rem, auto) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #dbe7e1;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+}
+
+.special-request-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.special-board-column {
+  display: flex;
+  max-height: 34rem;
+  min-height: 20rem;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-top: 4px solid #94a3b8;
+  border-radius: 1rem;
+  background: #f8fafc;
+}
+
+.special-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.special-board-list {
+  display: grid;
+  gap: 0.7rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.special-task-card {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, padding 0.15s ease;
+}
+
+.special-task-meta {
+  display: none;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.special-board-empty {
+  padding: 0.85rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.75rem;
+  color: #64748b;
+  background: #ffffff;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .special-request-top {
+      grid-template-columns: 1fr;
+    }
+
+}
+
+@media (max-width: 900px) {
+  .special-request-buyer-filter,
+    .special-request-buyer-filter select {
+      width: 100%;
+      max-width: none;
+    }
+
+  .special-edit-summary {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+}

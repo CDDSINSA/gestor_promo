@@ -70,16 +70,6 @@
   font-size: 0.78rem;
 }
 
-.validation-list {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.75rem;
-  border: 1px solid #fde68a;
-  border-radius: 0.75rem;
-  color: #92400e;
-  background: #fffbeb;
-}
-
 .validation-list strong {
   color: #78350f;
   font-size: 0.9rem;
@@ -93,4 +83,51 @@
 .modal-actions {
   justify-content: flex-end;
   border-top: 1px solid #e5e7eb;
+}
+
+/* Confirmacion de acciones destructivas */
+.modal-card-danger {
+  border-color: var(--color-danger-border);
+}
+
+.modal-card-danger .modal-head h2 {
+  color: var(--color-danger);
+}
+
+.modal-note-danger {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-danger-border);
+  border-radius: 0.75rem;
+  color: var(--color-danger-hover);
+  background: var(--color-danger-soft);
+}
+
+.modal-note-danger svg {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+}
+
+.modal-ack {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  color: var(--color-ink);
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.modal-ack input {
+  margin-top: 0.15rem;
+}
+
+.btn.btn-danger {
+  color: #ffffff;
+  background: var(--color-danger);
+}
+
+.btn.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger-hover);
 }

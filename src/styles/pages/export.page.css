@@ -1,0 +1,43 @@
+/* Estilos cargados solo con: ExportPageV2.
+   Generado al separar el CSS global por página (oct-2026). Mantener aquí solo
+   reglas cuyas clases se usan exclusivamente en esas páginas. */
+
+/* --- desde pages/consolidado.css --- */
+.export-filter-card {
+  margin-bottom: 1rem;
+}
+
+.export-section {
+  margin-top: 2rem;
+}
+
+.export-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+.export-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.15rem;
+  flex-wrap: wrap;
+}
+
+.export-card-filter-summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.5rem;
+  background: #e8f5ee;
+  color: #006b3f;
+  font-size: 0.775rem;
+  font-weight: 500;
+  width: 100%;
+}
+

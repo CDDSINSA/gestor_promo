@@ -10,20 +10,14 @@
   margin-bottom: 1.25rem;
 }
 
-.consolidado-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1rem;
-  align-items: stretch;
-}
-
 .consolidado-summary-card,
 .consolidado-filter-card {
   min-height: 13.75rem;
   max-height: 13.75rem;
 }
 
-.consolidado-filter-card {
+.consolidado-filter-card,
+.consolidado-filter-card .filter-grid {
   overflow: visible;
 }
 
@@ -79,10 +73,6 @@
   gap: 1rem;
 }
 
-.export-filter-card {
-  margin-bottom: 1rem;
-}
-
 .export-grid .card > div {
   padding: 1.5rem;
 }
@@ -106,3 +96,40 @@
   font-size: 0.875rem;
   line-height: 1.25rem;
 }
+
+.export-section-head h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  font-weight: var(--weight-strong);
+  color: #0f172a;
+}
+
+.export-section-head span {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.export-card-actions .btn {
+  flex: 1 1 auto;
+}
+
+.export-card-filter-summary button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #006b3f;
+  font-size: 1.1rem;
+  line-height: 1;
+  font-weight: bold;
+}
+
+.export-card-filter-summary button:hover {
+  color: #004b2d;
+}
+
+.design-export-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
+}
+

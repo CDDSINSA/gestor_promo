@@ -6,6 +6,7 @@ import {
   toBoolean,
   toNumber,
 } from "./config";
+import { normalizeTipoCantidad } from "../../features/promotions/application/tipoCantidad.js";
 
 function normalizeKey(value) {
   return String(value || "")
@@ -93,6 +94,9 @@ export function toPromotionRow(row, campanaById = {}, compradorById = {}, hierar
     tipo_sku: row.tipo_sku,
     variante: row.variante,
     sku: row.sku,
+    numero_pagina: row.numero_pagina ?? "",
+    num_pagina: row.numero_pagina ?? "",
+    numPagina: row.numero_pagina ?? "",
     num_parte: row.num_parte,
     descripcion: row.descripcion,
     tipo_cantidad: row.tipo_cantidad,
@@ -184,9 +188,10 @@ export function toDbPromocion(row, campanaByLegacy = {}, compradorByName = {}) {
     tipo_sku: cleanText(row.tipo_sku) || "simple",
     variante: cleanText(row.variante),
     sku: cleanText(row.sku),
+    numero_pagina: toNumber(row.numero_pagina || row.num_pagina || row.numPagina),
     num_parte: cleanText(row.num_parte),
     descripcion: cleanText(row.descripcion),
-    tipo_cantidad: cleanText(row.tipo_cantidad) || "Exacta",
+    tipo_cantidad: normalizeTipoCantidad(cleanText(row.tipo_cantidad)) || "Exacta",
     cantidad_minima: toNumber(row.cantidad_minima) ?? 1,
     precio_antes: toNumber(row.precio_antes),
     precio_ahora: toNumber(row.precio_ahora),

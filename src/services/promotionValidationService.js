@@ -1,4 +1,5 @@
 import {
+  AIRES_PROMO_TYPE,
   ACTIVITY_TYPES,
   ALCANCE_TYPES,
   BUY_X_GET_X_PROMO_TYPE,
@@ -23,6 +24,13 @@ function hasValue(value) {
 
 function hasPriceOrDiscount(row) {
   return hasValue(row.precioAhora) || hasValue(row.precio_ahora) || hasValue(row.descuento);
+}
+
+function discountOverLimit(value) {
+  const match = text(value).replace(/\s+/g, "").match(/-?\d+(?:[.,]\d+)?/);
+  if (!match) return false;
+  const percent = Math.abs(Number(match[0].replace(",", ".")));
+  return Number.isFinite(percent) && percent > 100;
 }
 
 function positiveNumber(value) {
@@ -184,6 +192,7 @@ export function validatePromotions(promociones = [], options = {}) {
   const comboGroups = new Map();
   const buyXGetYGroups = new Map();
   const megapackGroups = new Map();
+  const airesGroups = new Map();
   const simplePricePromotionGroups = new Map();
 
   const rowInScope = (row) => !scope || scope.has(getRowId(row));
@@ -248,6 +257,12 @@ export function validatePromotions(promociones = [], options = {}) {
     if (!isComplexPromoType(tipoPromo) && getSku(row) && !hasPriceOrDiscount(row)) {
       rowErrors.push(["beneficio", "promoción simple sin precio ahora ni descuento."]);
     }
+    if (hasValue(row.descuento) && discountOverLimit(row.descuento)) {
+      rowErrors.push(["descuento", "descuento mayor a 100%."]);
+    }
+    if (tipoPromo === "Precio fijo" && getSku(row) && !positiveNumber(row.precio_ahora ?? row.precioAhora)) {
+      rowErrors.push(["precio_ahora", "Precio fijo sin Ahora c/iva valido."]);
+    }
     if (tipoPromo === "Umbral" && getSku(row) && !hasPriceOrDiscount(row)) {
       rowErrors.push(["beneficio", "Umbral sin precio ahora ni descuento."]);
     }
@@ -258,6 +273,10 @@ export function validatePromotions(promociones = [], options = {}) {
     if (tipoPromo === MEGAPACK_PROMO_TYPE && !positiveNumber(getCantidadMinima(row))) {
       rowErrors.push(["cantidad_minima", "Megapack sin cantidad válida."]);
     }
+    if (tipoPromo === AIRES_PROMO_TYPE) {
+      if (getSku(row) && !positiveNumber(row.precio_ahora ?? row.precioAhora)) rowErrors.push(["precio_ahora", "Pieza de aire sin precio (vuelva a cargar el precio del aire)."]);
+      if (!positiveNumber(getCantidadMinima(row))) rowErrors.push(["cantidad_minima", "Pieza de aire sin cantidad válida."]);
+    }
 
     if (inScope) {
       rowErrors.forEach(([field, message]) => errors.push(createIssue("error", row, index, message, { field, code: field })));
@@ -267,6 +286,7 @@ export function validatePromotions(promociones = [], options = {}) {
     if (tipoPromo === "Combo" && enriched.ofertaId) registerGroup(comboGroups, offerGroupKey, row, inScope);
     if (tipoPromo === BUY_X_GET_X_PROMO_TYPE && enriched.ofertaId) registerGroup(buyXGetYGroups, offerGroupKey, row, inScope);
     if (tipoPromo === MEGAPACK_PROMO_TYPE && enriched.ofertaId) registerGroup(megapackGroups, offerGroupKey, row, inScope);
+    if (tipoPromo === AIRES_PROMO_TYPE && enriched.ofertaId) registerGroup(airesGroups, offerGroupKey, row, inScope);
     registerSimplePricePromotion(row, index, actividadId, inScope);
   });
 
@@ -301,6 +321,20 @@ export function validatePromotions(promociones = [], options = {}) {
   validateRoleGroup(comboGroups, "Combo", "combo sin SKU principal.", "combo sin regalía.");
   validateRoleGroup(buyXGetYGroups, BUY_X_GET_X_PROMO_TYPE, "Compra X lleva X sin principal.", "Compra X lleva X sin regalía.");
   validateRoleGroup(megapackGroups, MEGAPACK_PROMO_TYPE, "Megapack sin SKU principal.", "Megapack sin regalía.");
+
+  // AIRES: un aire tiene al menos 2 piezas distintas, una sola página y una sola descripción.
+  airesGroups.forEach((group) => {
+    if (!group.touched) return;
+    const rowIds = group.items.map(getRowId).filter(Boolean);
+    const base = { groupKey: group.key, rowIds, tipoPromo: AIRES_PROMO_TYPE };
+    const skus = group.items.map((item) => text(getSku(item)));
+    if (group.items.length < 2) errors.push({ type: "error", severity: "error", ...base, message: "aire con una sola pieza (necesita condensador y evaporador).", code: "aires_single_piece" });
+    if (new Set(skus).size !== skus.length) errors.push({ type: "error", severity: "error", ...base, message: "aire con SKU repetido; use la cantidad.", code: "aires_duplicate_sku" });
+    const pages = new Set(group.items.map((item) => text(item.numPagina ?? item.numero_pagina ?? item.num_pagina)).filter(Boolean));
+    if (pages.size > 1) errors.push({ type: "error", severity: "error", ...base, message: `aire con páginas distintas (${Array.from(pages).join(" / ")}).`, code: "aires_pages" });
+    const descriptions = new Set(group.items.map((item) => text(item.descripcion)).filter(Boolean));
+    if (descriptions.size > 1) warnings.push({ type: "warning", severity: "warning", ...base, message: "aire con descripciones distintas entre piezas.", code: "aires_descriptions" });
+  });
 
   return {
     valid: errors.length === 0,
