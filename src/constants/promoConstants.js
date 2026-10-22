@@ -15,3 +15,8 @@ export const SPECIAL_REQUEST_ARCHIVED_STATUS = "Archivado";
 export const COMBO_REWARD_ROLES = ["regalia", "regalía", "recompensa", "reward"];
 export const COMMENT_SCOPE_ACTIVITY = "ACTIVIDAD";
 export const COMMENT_SCOPE_LINE = "LINEA";
+// Aires acondicionados: un aire = varias piezas (condensador, evaporador…) facturadas
+// por SKU separado. La compradora da un solo precio c/IVA y la app lo reparte.
+export const AIRES_PROMO_TYPE = "AIRES";
+export const AIRES_COMPONENT_ROLE = "componente";
+export const BULK_COLUMN_AIRES_TABLE = "tablaAires";

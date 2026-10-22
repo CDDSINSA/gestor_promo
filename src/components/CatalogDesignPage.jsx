@@ -1,21 +1,33 @@
+import useDesignImageUrls from "../features/catalogDesign/useDesignImageUrls";
 import DesignImageViewer from "../features/catalogDesign/DesignImageViewer";
+import { getDesignCatalogPromotions, getDesignPageOffers, getDesignPromoPage } from "../features/catalogDesign/designPromotions";
+import DesignSkuOfferCard from "../features/catalogDesign/DesignSkuOfferCard";
 import DesignViewerToolbar from "../features/catalogDesign/DesignViewerToolbar";
 import { clampRatio, stripDraftCoordinates, buildBoxAnnotation, isUsefulAnnotation, getAnnotationAnchor } from "../features/catalogDesign/annotationGeometry";
 import DesignCommentsPanel from "../features/catalogDesign/DesignCommentsPanel";
 import DesignProjectSettings from "../features/catalogDesign/DesignProjectSettings";
 import DesignPageList from "../features/catalogDesign/DesignPageList";
+import DesignPageFilters from "../features/catalogDesign/DesignPageFilters";
+import DesignProgressBar from "../features/catalogDesign/DesignProgressBar";
 import CreateDesignProjectModal from "../features/catalogDesign/CreateDesignProjectModal";
-import { PAGE_STATES, ANNOTATION_COLOR, CATEGORY_COLORS, formatDate, getUserLabel, getBuyerLabel, getCommentStatus, normalizeCommentAnnotations } from "../features/catalogDesign/designPresentation";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import DesignToast from "../features/catalogDesign/DesignToast";
+import UploadConfirmModal from "../features/catalogDesign/UploadConfirmModal";
+import { ANNOTATION_COLOR, CATEGORY_COLORS, CONFIRM_PAGE_STATES, formatDate, getUserLabel, getBuyerLabel, getCommentStatus, getPageStateLabel, getProjectStateLabel, normalizeCommentAnnotations } from "../features/catalogDesign/designPresentation";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
   MessageSquare,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RefreshCw,
   Search,
+  Settings2,
+  ShoppingCart,
   X,
 } from "lucide-react";
 import { PERMISSIONS, normalizeRole, ROLES } from "../constants/permissions";
@@ -24,111 +36,32 @@ import { usePermissions } from "../hooks/usePermissions";
 import { buildDesignNotificationEvent } from "../features/notifications/notificationEvents";
 import { deliverNotifications } from "../features/notifications/deliverNotifications";
 import {
-  CATALOG_DESIGN_WORK_BUCKET,
   createLiveNotification,
   addCatalogDesignPageComment,
-  createCatalogDesignPage,
-  createCatalogDesignProject,
-  deleteCatalogDesignPages,
-  getCatalogDesignSignedUrl,
+  saveCatalogDesignProjectWithPages,
   loadCatalogDesignData,
   reviewCatalogDesignPage,
   updateCatalogDesignPageCommentStatus,
   updateCatalogDesignPage,
-  updateCatalogDesignProject,
   uploadCatalogDesignPageImage,
 } from "../services/supabaseService";
 import { isCompradorJunior } from "../utils/avanceHelpers";
 import { classNames, normalizeValue } from "../utils/common";
 import { Button, Card, CardContent, Header } from "./ui";
+import {
+  getCatalogoId,
+  isCatalogoTrabajable,
+  buildPageTitle,
+  buildInitialProject,
+  getPromoField,
+  formatSkuInfoValue,
+  ZOOM_STEP,
+  clampZoom,
+} from "../features/catalogDesign/catalogDesignProject";
+import "../styles/pages/catalog-design-export-compartido.page.css";
+import "../styles/pages/catalog-design.page.css";
 
-function getCatalogoId(catalogo) {
-  return String(catalogo?.id || catalogo?.catalogo_id || "").trim();
-}
-
-function isCatalogoTrabajable(catalogo) {
-  return Boolean(getCatalogoId(catalogo)) && String(catalogo?.estado || "").toLowerCase() !== "cerrado";
-}
-
-function normalizeTextKey(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getMonthCode(value) {
-  const text = normalizeTextKey(value);
-  const months = [
-    ["ENERO", "ENE"],
-    ["FEBRERO", "FEB"],
-    ["MARZO", "MAR"],
-    ["ABRIL", "ABR"],
-    ["MAYO", "MAY"],
-    ["JUNIO", "JUN"],
-    ["JULIO", "JUL"],
-    ["AGOSTO", "AGO"],
-    ["SEPTIEMBRE", "SEP"],
-    ["SETIEMBRE", "SEP"],
-    ["OCTUBRE", "OCT"],
-    ["NOVIEMBRE", "NOV"],
-    ["DICIEMBRE", "DIC"],
-  ];
-  return months.find(([month]) => text.includes(month))?.[1] || "";
-}
-
-function getYearCode(value) {
-  const match = String(value || "").match(/\b(20\d{2}|\d{2})\b/);
-  return match ? match[1].slice(-2) : "";
-}
-
-function getCatalogDesignSuffix(catalogo) {
-  const name = normalizeTextKey(catalogo?.nombre || catalogo?.nombre_actividad || catalogo?.catalogo_id || catalogo?.id);
-  const words = name.split(" ").filter(Boolean);
-  const prefix = words.find((word) => word.startsWith("BIF")) ? "BIF" : (words[0] || "CAT").slice(0, 3);
-  const dateText = `${catalogo?.nombre || ""} ${catalogo?.vigencia_inicio || ""} ${catalogo?.fecha_inicio || ""}`;
-  const monthFromDate = catalogo?.vigencia_inicio ? new Date(catalogo.vigencia_inicio).toLocaleString("es-NI", { month: "short" }).slice(0, 3).toUpperCase() : "";
-  const month = getMonthCode(dateText) || normalizeTextKey(monthFromDate).slice(0, 3) || "MES";
-  const year = getYearCode(`${catalogo?.nombre || ""} ${catalogo?.vigencia_inicio || ""} ${catalogo?.fecha_inicio || ""}`) || "00";
-  return `${prefix}_${month}_${year}`;
-}
-
-function buildPageTitle(pageNumber, catalogo) {
-  return `Pag-${pageNumber}_${getCatalogDesignSuffix(catalogo)}`;
-}
-
-function buildInitialProject(catalogos = []) {
-  const first = catalogos.find(isCatalogoTrabajable);
-  return {
-    catalogo_id: getCatalogoId(first),
-    nombre_proyecto: first?.nombre ? `Diseño ${first.nombre}` : "",
-    estado: "planificacion",
-    fecha_inicio: "",
-    fecha_entrega: "",
-    cantidad_paginas: 1,
-  };
-}
-
-function getPromoField(row = {}, ...fields) {
-  for (const field of fields) {
-    const value = normalizeValue(row[field]);
-    if (value) return value;
-  }
-  return "";
-}
-
-function normalizeSkuKey(value) {
-  return normalizeValue(value).toLowerCase();
-}
-
-function formatSkuInfoValue(value) {
-  return normalizeValue(value) || "Sin dato";
-}
-
-export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseConnection, supabaseReady }) {
+export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseConnection, supabaseReady, onEnsureCampaigns }) {
   const { appUser, role } = useAuth();
   const { can } = usePermissions();
   const currentRole = normalizeRole(role || appUser?.rol);
@@ -143,9 +76,11 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const catalogosTrabajables = useMemo(() => catalogos.filter(isCatalogoTrabajable), [catalogos]);
   const catalogoById = useMemo(() => Object.fromEntries(catalogosTrabajables.map((catalogo) => [getCatalogoId(catalogo), catalogo])), [catalogosTrabajables]);
   const catalogoIdsTrabajables = useMemo(() => new Set(catalogosTrabajables.map(getCatalogoId)), [catalogosTrabajables]);
+  const actionInFlight = useRef(false);
   const imageShellRef = useRef(null);
   const viewerStageRef = useRef(null);
   const filmstripTrackRef = useRef(null);
+  const zoomAnchorRef = useRef(null);
 
   const [projects, setProjects] = useState([]);
   const [pages, setPages] = useState([]);
@@ -158,7 +93,8 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [filters, setFilters] = useState({ designer: "", buyer: "", state: "" });
   const [commentText, setCommentText] = useState("");
   const [commentCategory, setCommentCategory] = useState("ajuste");
-  const [signedUrls, setSignedUrls] = useState({});
+  const [pageVersionsList, setPageVersionsList] = useState([]);
+  const [selectedVersionByPage, setSelectedVersionByPage] = useState({});
   const [viewerZoom, setViewerZoom] = useState(100);
   const [pageViewMode, setPageViewMode] = useState("filmstrip");
   const [focusMode, setFocusMode] = useState(false);
@@ -179,13 +115,18 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false);
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
-  const [configCollapsed, setConfigCollapsed] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSnapshot, setSettingsSnapshot] = useState(null);
   const [skuQuery, setSkuQuery] = useState("");
   const [skuSearchTerm, setSkuSearchTerm] = useState("");
+  const [skuDisplayLimit, setSkuDisplayLimit] = useState(50);
   const [isDraggingOverStage, setIsDraggingOverStage] = useState(false);
   const [commentFilter, setCommentFilter] = useState("all");
   const [copiedSkuText, setCopiedSkuText] = useState("");
   const [status, setStatus] = useState({ type: "idle", message: "" });
+  const [pendingUpload, setPendingUpload] = useState(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const dismissStatus = useCallback(() => setStatus({ type: "idle", message: "" }), []);
 
   const scopedProjectIds = useMemo(() => new Set(pages
     .filter((page) => {
@@ -226,6 +167,12 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       return acc;
     }, {});
   }, [comments]);
+  const pendingCommentCountByPageId = useMemo(() => {
+    return comments.reduce((acc, comment) => {
+      if (getCommentStatus(comment) === "abierto") acc[comment.pagina_id] = (acc[comment.pagina_id] || 0) + 1;
+      return acc;
+    }, {});
+  }, [comments]);
 
   const designerOptions = useMemo(() => {
     const allowedRoles = new Set([ROLES.DESIGNER, ROLES.MARK, ROLES.ADMIN]);
@@ -255,6 +202,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     return {
       total,
       pendientes: count(["pendiente"]),
+      enDiseno: count(["en_diseno"]),
       revision: count(["en_revision"]),
       aprobadas,
       ajustes: count(["ajustes", "rechazada"]),
@@ -278,6 +226,48 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       return new Date(b.fecha_creacion || 0) - new Date(a.fecha_creacion || 0);
     }), [comments, selectedPage]);
 
+  const currentPageVersions = useMemo(() => {
+    if (!selectedPage?.id) return [];
+    const list = pageVersionsList.filter((v) => v.pagina_id === selectedPage.id);
+    const map = new Map();
+    list.forEach((v) => {
+      const num = Number(v.numero_version);
+      if (num > 0) map.set(num, v);
+    });
+    if (selectedPage.archivo_path) {
+      const currentVerNum = Number(selectedPage.version_actual) || (map.size > 0 ? Math.max(...map.keys()) : 1);
+      if (!map.has(currentVerNum)) {
+        map.set(currentVerNum, {
+          pagina_id: selectedPage.id,
+          numero_version: currentVerNum,
+          archivo_path: selectedPage.archivo_path,
+          fecha_creacion: selectedPage.fecha_ultima_carga || selectedPage.fecha_creacion,
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => Number(a.numero_version) - Number(b.numero_version));
+  }, [selectedPage, pageVersionsList]);
+
+  const latestVersionNumber = useMemo(() => {
+    if (!currentPageVersions.length) return Number(selectedPage?.version_actual) || 1;
+    return Math.max(...currentPageVersions.map((v) => Number(v.numero_version) || 1));
+  }, [currentPageVersions, selectedPage]);
+
+  const activeVersionNumber = useMemo(() => {
+    const userSelected = selectedVersionByPage[selectedPage?.id];
+    if (userSelected && currentPageVersions.some((v) => Number(v.numero_version) === Number(userSelected))) {
+      return Number(userSelected);
+    }
+    return latestVersionNumber;
+  }, [selectedVersionByPage, selectedPage?.id, currentPageVersions, latestVersionNumber]);
+
+  const activeVersionObj = useMemo(() => {
+    return currentPageVersions.find((v) => Number(v.numero_version) === activeVersionNumber) || null;
+  }, [currentPageVersions, activeVersionNumber]);
+
+  const activeImagePath = activeVersionObj?.archivo_path || selectedPage?.archivo_path || "";
+  const isHistoricalVersion = Boolean(currentPageVersions.length > 0 && activeVersionNumber < latestVersionNumber);
+
   const pendingCommentsCount = useMemo(() => {
     return selectedComments.filter((c) => getCommentStatus(c) === "abierto").length;
   }, [selectedComments]);
@@ -286,6 +276,13 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     return selectedComments.filter((c) => getCommentStatus(c) === "resuelto").length;
   }, [selectedComments]);
 
+  const currentVersionCommentsCount = useMemo(() => {
+    return selectedComments.filter((c) => {
+      if (c.numero_version) return Number(c.numero_version) === activeVersionNumber;
+      return activeVersionNumber === 1;
+    }).length;
+  }, [selectedComments, activeVersionNumber]);
+
   const filteredSelectedComments = useMemo(() => {
     if (commentFilter === "pending") {
       return selectedComments.filter((c) => getCommentStatus(c) === "abierto");
@@ -293,47 +290,80 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     if (commentFilter === "resolved") {
       return selectedComments.filter((c) => getCommentStatus(c) === "resuelto");
     }
+    if (commentFilter === "version") {
+      return selectedComments.filter((c) => {
+        if (c.numero_version) return Number(c.numero_version) === activeVersionNumber;
+        return activeVersionNumber === 1;
+      });
+    }
     return selectedComments;
-  }, [selectedComments, commentFilter]);
+  }, [selectedComments, commentFilter, activeVersionNumber]);
 
-  const selectedAnnotations = useMemo(() => selectedComments.flatMap((comment) => {
-    const commentNumber = chronologicalOrder.get(comment.id) || 1;
-    const catColor = CATEGORY_COLORS[comment.tipo] || ANNOTATION_COLOR;
-    return normalizeCommentAnnotations(comment).map((annotation) => ({
-      ...annotation,
-      color: annotation.color || catColor,
-      commentId: comment.id,
-      commentIndex: commentNumber,
-      commentType: comment.tipo || "comentario",
-      commentText: comment.comentario || "",
-      commentUser: getUserLabel(userById[comment.usuario_id]),
-      commentDate: formatDate(comment.fecha_creacion),
-    }));
-  }), [selectedComments, chronologicalOrder, userById]);
+  const selectedAnnotations = useMemo(() => selectedComments
+    .filter((comment) => {
+      if (comment.numero_version) {
+        return Number(comment.numero_version) === activeVersionNumber;
+      }
+      return activeVersionNumber === 1 || currentPageVersions.length <= 1;
+    })
+    .flatMap((comment) => {
+      const commentNumber = chronologicalOrder.get(comment.id) || 1;
+      const catColor = CATEGORY_COLORS[comment.tipo] || ANNOTATION_COLOR;
+      return normalizeCommentAnnotations(comment).map((annotation) => ({
+        ...annotation,
+        color: annotation.color || catColor,
+        commentId: comment.id,
+        commentIndex: commentNumber,
+        commentType: comment.tipo || "comentario",
+        commentText: comment.comentario || "",
+        commentUser: getUserLabel(userById[comment.usuario_id]),
+        commentDate: formatDate(comment.fecha_creacion),
+        versionNumber: comment.numero_version,
+      }));
+    }), [selectedComments, chronologicalOrder, userById, activeVersionNumber, currentPageVersions.length]);
+  const imageUrls = useDesignImageUrls(supabaseConnection, supabaseReady,
+    [...visiblePages.map((page) => page.archivo_path), activeImagePath]);
+  const signedUrlsByPath = imageUrls.urls;
+  const signedUrls = useMemo(() => Object.fromEntries(visiblePages.map((page) => [page.id, signedUrlsByPath[page.archivo_path] || ""])), [visiblePages, signedUrlsByPath]);
+  const imageUrlError = imageUrls.errors[activeImagePath] || "";
   const selectedPageIndex = visiblePages.findIndex((page) => page.id === selectedPage?.id);
-  const selectedImageUrl = selectedPage ? signedUrls[selectedPage.id] || "" : "";
-  const selectedProjectPromoRows = useMemo(() => {
-    const projectCatalogId = normalizeValue(selectedProject?.catalogo_id);
-    const sourceRows = rows || [];
-    if (!projectCatalogId) return sourceRows;
-    const relatedRows = sourceRows.filter((row) => {
-      const rowCatalogIds = [
-        row.catalogo_id,
-        row.actividad_id,
-        row.actividadId,
-        row.catalogoId,
-      ].map(normalizeValue).filter(Boolean);
-      return rowCatalogIds.includes(projectCatalogId);
-    });
-    return relatedRows.length ? relatedRows : sourceRows;
-  }, [rows, selectedProject]);
-  const skuSearchResults = useMemo(() => {
-    const term = normalizeSkuKey(skuSearchTerm);
-    if (!term) return [];
-    const exactMatches = selectedProjectPromoRows.filter((row) => normalizeSkuKey(row.sku) === term);
-    if (exactMatches.length) return exactMatches;
-    return selectedProjectPromoRows.filter((row) => normalizeSkuKey(row.sku).includes(term));
-  }, [selectedProjectPromoRows, skuSearchTerm]);
+  const selectedImageUrl = useMemo(() => {
+    if (!activeImagePath) return "";
+    if (activeImagePath.startsWith("http://") || activeImagePath.startsWith("https://") || activeImagePath.startsWith("blob:") || activeImagePath.startsWith("data:")) {
+      return activeImagePath;
+    }
+    if (signedUrlsByPath[activeImagePath]) return signedUrlsByPath[activeImagePath];
+    if (activeImagePath === selectedPage?.archivo_path && signedUrls[selectedPage?.id]) {
+      return signedUrls[selectedPage?.id];
+    }
+    return "";
+  }, [activeImagePath, signedUrlsByPath, selectedPage?.archivo_path, selectedPage?.id, signedUrls]);
+  const isImageLoading = Boolean(activeImagePath && !selectedImageUrl && !imageUrlError);
+  const selectedProjectCatalogId = selectedProject?.catalogo_id || selectedProjectCatalogo?.id || selectedProjectCatalogo?.catalogo_id || "";
+  const selectedProjectPromoRows = useMemo(
+    () => getDesignCatalogPromotions(rows || [], selectedProjectCatalogId),
+    [rows, selectedProjectCatalogId],
+  );
+  // Carga por campaña: al abrir un proyecto se cargan las promociones de su catalogo.
+  useEffect(() => {
+    if (selectedProjectCatalogId) void onEnsureCampaigns?.([selectedProjectCatalogId]);
+  }, [selectedProjectCatalogId, onEnsureCampaigns]);
+
+  const pagePromosCount = useMemo(() => {
+    if (!selectedPage?.numero_pagina) return 0;
+    const p = Number(selectedPage.numero_pagina);
+    return selectedProjectPromoRows.filter((r) => getDesignPromoPage(r) === p).length;
+  }, [selectedProjectPromoRows, selectedPage?.numero_pagina]);
+
+  // Resultados agrupados por oferta: las promos complejas muestran todas sus líneas en una card.
+  const { offers: skuSearchResults, total: skuOffersTotal } = useMemo(() =>
+    getDesignPageOffers(selectedProjectPromoRows, selectedPage?.numero_pagina, skuSearchTerm, skuDisplayLimit),
+    [selectedProjectPromoRows, selectedPage?.numero_pagina, skuSearchTerm, skuDisplayLimit]
+  );
+
+  useEffect(() => {
+    setSkuDisplayLimit(50);
+  }, [selectedPageId]);
 
   const submitSkuSearch = (event) => {
     event.preventDefault();
@@ -353,13 +383,69 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     selectViewerPage(visiblePages[nextIndex]);
   };
 
+  // Zoom que conserva bajo el cursor (o en el centro) el punto que se estaba mirando.
+  const zoomTo = (getNextZoom, anchorEvent = null) => {
+    const stage = viewerStageRef.current;
+    if (stage) {
+      const rect = stage.getBoundingClientRect();
+      const offsetX = anchorEvent ? anchorEvent.clientX - rect.left : stage.clientWidth / 2;
+      const offsetY = anchorEvent ? anchorEvent.clientY - rect.top : stage.clientHeight / 2;
+      zoomAnchorRef.current = {
+        offsetX,
+        offsetY,
+        ratioX: (stage.scrollLeft + offsetX) / Math.max(stage.scrollWidth, 1),
+        ratioY: (stage.scrollTop + offsetY) / Math.max(stage.scrollHeight, 1),
+      };
+    }
+    setViewerZoom((prev) => clampZoom(typeof getNextZoom === "function" ? getNextZoom(prev) : getNextZoom));
+  };
+
+  useLayoutEffect(() => {
+    const stage = viewerStageRef.current;
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    if (!stage || !anchor) return;
+    stage.scrollLeft = anchor.ratioX * stage.scrollWidth - anchor.offsetX;
+    stage.scrollTop = anchor.ratioY * stage.scrollHeight - anchor.offsetY;
+  }, [viewerZoom]);
+
+  // Ajusta el zoom para que la página completa quepa en la altura del visor.
+  const fitViewerToHeight = () => {
+    const stage = viewerStageRef.current;
+    const image = imageShellRef.current?.querySelector("img");
+    if (!stage || !image?.naturalWidth || !image?.naturalHeight) return;
+    const aspect = image.naturalHeight / image.naturalWidth;
+    const availableHeight = stage.clientHeight - 16;
+    zoomAnchorRef.current = null;
+    setViewerZoom(clampZoom((availableHeight / (stage.clientWidth * aspect)) * 100));
+    stage.scrollTo({ top: 0, left: 0 });
+  };
+
+  const isModalOpen = Boolean(pendingUpload || isSettingsOpen || isCreateProjectModalOpen);
+
   useEffect(() => {
     const handleKeyDown = (event) => {
       const tag = event.target?.tagName;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || event.target?.isContentEditable) {
+      if (isModalOpen || ["INPUT", "TEXTAREA", "SELECT"].includes(tag) || event.target?.isContentEditable) {
         return;
       }
-      if (event.code === "Space" && !event.repeat) {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        zoomTo((prev) => prev + ZOOM_STEP);
+      } else if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        zoomTo((prev) => prev - ZOOM_STEP);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        zoomTo(100);
+      } else if (event.key === "h" || event.key === "H") {
+        event.preventDefault();
+        fitViewerToHeight();
+      } else if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen((prev) => !prev);
+      } else if (event.code === "Space" && !event.repeat) {
         event.preventDefault();
         setIsSpacePressed(true);
       } else if (event.key === "ArrowLeft") {
@@ -373,6 +459,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
         setFocusMode((prev) => !prev);
       } else if (event.key === "Escape") {
         setFocusMode(false);
+        setShortcutsOpen(false);
       }
     };
 
@@ -389,7 +476,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [visiblePages, selectedPageIndex, focusMode]);
+  }, [visiblePages, selectedPageIndex, focusMode, isModalOpen]);
 
   useEffect(() => {
     const stage = viewerStageRef.current;
@@ -397,8 +484,8 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     const handleWheel = (event) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
-        const delta = event.deltaY < 0 ? 15 : -15;
-        setViewerZoom((prev) => Math.max(50, Math.min(220, prev + delta)));
+        const delta = event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+        zoomTo((prev) => prev + delta, event);
       }
     };
     stage.addEventListener("wheel", handleWheel, { passive: false });
@@ -408,8 +495,10 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   useEffect(() => {
     if (!selectedPage || pageViewMode !== "filmstrip") return;
     const card = document.getElementById(`filmstrip-card-${selectedPage.id}`);
-    if (card) {
-      card.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const track = filmstripTrackRef.current;
+    if (card && track) {
+      // Solo desplaza la tira horizontalmente; scrollIntoView también movía la página hacia abajo.
+      track.scrollTo({ left: card.offsetLeft - track.clientWidth / 2 + card.clientWidth / 2, behavior: "smooth" });
     }
   }, [selectedPage?.id, pageViewMode]);
 
@@ -469,15 +558,22 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       setComments(data.comments || []);
       setUsers(data.users || []);
       setBuyers(data.buyers || []);
-      setStatus({ type: "ready", message: "Información de diseño cargada." });
+      setPageVersionsList(data.versions || []);
+      setStatus({ type: "idle", message: "" });
+      return true;
     } catch (error) {
       setStatus({ type: "error", message: error.message || "No se pudo cargar el módulo de diseño." });
+      return false;
     }
   };
 
   useEffect(() => {
     refreshData();
   }, [supabaseReady, supabaseConnection]);
+
+  const handleManualRefresh = async () => {
+    if (await refreshData()) setStatus({ type: "ready", message: "Información actualizada." });
+  };
 
   useEffect(() => {
     setSelectedProjectId((current) => visibleProjects.some((project) => project.id === current) ? current : visibleProjects[0]?.id || "");
@@ -509,33 +605,15 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   }, [visiblePages]);
 
   useEffect(() => {
+    setCommentText("");
+    setCommentCategory("ajuste");
     setIsDraftingComment(false);
     setAnnotationMode(false);
     setDraftAnnotations([]);
     setActiveAnnotation(null);
     setActiveCommentId("");
     setHoveredAnnotation(null);
-  }, [selectedPage?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadUrls = async () => {
-      const pairs = await Promise.all(visiblePages.filter((page) => page.archivo_path).map(async (page) => {
-        try {
-          const url = await getCatalogDesignSignedUrl(supabaseConnection, CATALOG_DESIGN_WORK_BUCKET, page.archivo_path);
-          return [page.id, url];
-        } catch {
-          return [page.id, ""];
-        }
-      }));
-      if (!cancelled) setSignedUrls(Object.fromEntries(pairs));
-    };
-    if (visiblePages.length && supabaseReady) loadUrls();
-    else setSignedUrls({});
-    return () => {
-      cancelled = true;
-    };
-  }, [visiblePages, supabaseReady, supabaseConnection]);
+  }, [selectedPage?.id, activeVersionNumber]);
 
   const designEvent = (page, action, details = {}) => buildDesignNotificationEvent({
     page, project: projects.find((project) => project.id === page?.proyecto_id),
@@ -543,14 +621,23 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   });
 
   const runAction = async (loadingMessage, action, successMessage, notificationEvent = null) => {
+    if (actionInFlight.current) return false;
+    actionInFlight.current = true;
     setStatus({ type: "loading", message: loadingMessage });
     try {
       await action();
       const warnings = await deliverNotifications([notificationEvent], (event) => createLiveNotification(supabaseConnection, event));
-      await refreshData();
-      setStatus({ type: "ready", message: warnings.length ? `${successMessage} Advertencias de notificacion: ${warnings.join(" ")}` : successMessage });
+      if (!await refreshData()) {
+        setStatus({ type: "error", message: `${successMessage} El guardado se confirmó, pero no se pudo actualizar la vista. Pulse Actualizar; no repita la operación.` });
+        return true;
+      }
+      setStatus({ type: "ready", message: warnings.length ? `${successMessage} Advertencias de notificación: ${warnings.join(" ")}` : successMessage });
+      return true;
     } catch (error) {
-      setStatus({ type: "error", message: error.message || "No se pudo completar la accion." });
+      setStatus({ type: "error", message: error.message || "No se pudo completar la acción." });
+      return false;
+    } finally {
+      actionInFlight.current = false;
     }
   };
 
@@ -561,21 +648,13 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
       if (!catalogoIdsTrabajables.has(catalogoId)) {
         throw new Error("El proyecto debe estar ligado a un catalogo creado en Ajustes y visible en Inicio.");
       }
-      const pageCount = Math.max(1, Math.min(120, Number(projectForm.cantidad_paginas || 0)));
-      if (!pageCount) {
+      const pageCount = Number(projectForm.cantidad_paginas);
+      if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > 120) {
         throw new Error("Defina la cantidad de paginas del catalogo.");
       }
       const catalogo = catalogoById[catalogoId];
-      const created = await createCatalogDesignProject(supabaseConnection, projectForm, currentUserId, Array.from(catalogoIdsTrabajables));
-      await Promise.all(Array.from({ length: pageCount }, (_, index) => {
-        const numeroPagina = index + 1;
-        return createCatalogDesignPage(supabaseConnection, {
-          proyecto_id: created.id,
-          numero_pagina: numeroPagina,
-          titulo_pagina: buildPageTitle(numeroPagina, catalogo),
-          estado: "pendiente",
-        });
-      }));
+      const created = await saveCatalogDesignProjectWithPages(supabaseConnection, projectForm,
+        Array.from({ length: pageCount }, (_, index) => buildPageTitle(index + 1, catalogo)), Array.from(catalogoIdsTrabajables));
       setSelectedProjectId(created?.id || "");
       setProjectForm(buildInitialProject(catalogosTrabajables));
       setIsCreateProjectModalOpen(false);
@@ -588,48 +667,36 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     setIsCreateProjectModalOpen(true);
   };
 
-  const saveSelectedProject = () => {
+  const openSettings = () => {
     if (!selectedProject) return;
-    runAction("Guardando proyecto...", async () => {
-      const nextPageCount = Math.max(1, Math.min(120, Number(targetPageCount || selectedProjectPageCount || 1)));
-      if (!nextPageCount) {
-        throw new Error("Defina una cantidad valida de paginas.");
-      }
+    setSettingsSnapshot(selectedProject);
+    setTargetPageCount(String(selectedProjectPages.length || ""));
+    setIsSettingsOpen(true);
+  };
 
-      await updateCatalogDesignProject(supabaseConnection, selectedProject.id, {
-        nombre_proyecto: selectedProject.nombre_proyecto,
-        estado: selectedProject.estado,
-        fecha_inicio: selectedProject.fecha_inicio || null,
-        fecha_entrega: selectedProject.fecha_entrega || null,
-      });
+  const cancelSettings = () => {
+    // Descarta los cambios no guardados devolviendo el proyecto a como estaba al abrir el modal.
+    if (settingsSnapshot) {
+      setProjects((current) => current.map((project) => project.id === settingsSnapshot.id ? settingsSnapshot : project));
+    }
+    setSettingsSnapshot(null);
+    setIsSettingsOpen(false);
+  };
 
-      if (nextPageCount > selectedProjectPageCount) {
-        const existingNumbers = new Set(selectedProjectPages.map((page) => Number(page.numero_pagina)));
-        const pagesToCreate = [];
-        for (let pageNumber = 1; pageNumber <= nextPageCount; pageNumber += 1) {
-          if (!existingNumbers.has(pageNumber)) {
-            pagesToCreate.push(createCatalogDesignPage(supabaseConnection, {
-              proyecto_id: selectedProject.id,
-              numero_pagina: pageNumber,
-              titulo_pagina: buildPageTitle(pageNumber, selectedProjectCatalogo),
-              estado: "pendiente",
-            }));
-          }
-        }
-        await Promise.all(pagesToCreate);
+  const saveSelectedProject = async () => {
+    if (!selectedProject) return;
+    const saved = await runAction("Guardando proyecto...", async () => {
+      const nextPageCount = Number(targetPageCount);
+      if (!Number.isInteger(nextPageCount) || nextPageCount < 1 || nextPageCount > 120) {
+        throw new Error("Defina entre 1 y 120 páginas enteras.");
       }
-
-      if (nextPageCount < selectedProjectPageCount) {
-        const pagesToRemove = selectedProjectPages
-          .filter((page) => Number(page.numero_pagina) > nextPageCount)
-          .sort((a, b) => Number(b.numero_pagina) - Number(a.numero_pagina));
-        const blockedPages = pagesToRemove.filter((page) => page.archivo_path || commentCountByPageId[page.id]);
-        if (blockedPages.length) {
-          throw new Error(`No se puede reducir la cantidad porque las paginas ${blockedPages.map((page) => page.numero_pagina).join(", ")} ya tienen imagen o comentarios.`);
-        }
-        await deleteCatalogDesignPages(supabaseConnection, pagesToRemove.map((page) => page.id));
-      }
+      await saveCatalogDesignProjectWithPages(supabaseConnection, selectedProject,
+        Array.from({ length: nextPageCount }, (_, index) => buildPageTitle(index + 1, selectedProjectCatalogo)));
     }, "Proyecto actualizado.");
+    if (saved) {
+      setSettingsSnapshot(null);
+      setIsSettingsOpen(false);
+    }
   };
 
   const updateProjectField = (field, value) => {
@@ -637,14 +704,49 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   };
 
   const updatePageField = (page, field, value) => {
+    if (field === "estado" && page.estado !== value && CONFIRM_PAGE_STATES.has(value)) {
+      const pageName = page.titulo_pagina || `Página ${page.numero_pagina}`;
+      const confirmed = window.confirm(`¿Cambiar "${pageName}" a "${getPageStateLabel(value)}"?\n\nSe registrará la revisión y se notificará a los responsables.`);
+      if (!confirmed) return;
+    }
     runAction("Actualizando página...", async () => {
-      await updateCatalogDesignPage(supabaseConnection, page.id, { [field]: value, actualizado_por: currentUserId || null });
+      if (field === "estado" && ["aprobada", "ajustes", "rechazada"].includes(value)) {
+        await reviewCatalogDesignPage(supabaseConnection, page, value, "", null, currentUserId, [], Number(page.version_actual) || 1);
+      } else {
+        await updateCatalogDesignPage(supabaseConnection, page.id, { [field]: value, actualizado_por: currentUserId || null });
+      }
     }, "Página actualizada.", field === "estado" && page.estado !== value ? designEvent(page, "state", { state: value }) : null);
   };
 
+  const performPageUpload = (page, file) => {
+    if (!file) return Promise.resolve(false);
+    return runAction(
+      "Subiendo nueva versión de imagen...",
+      async () => {
+        const result = await uploadCatalogDesignPageImage(supabaseConnection, page, selectedProject, file);
+        if (result?.newVersionRecord) {
+          setPageVersionsList((prev) => [...prev, result.newVersionRecord]);
+        }
+        if (result?.versionNumber) {
+          setSelectedVersionByPage((prev) => ({ ...prev, [page.id]: result.versionNumber }));
+        }
+        return result?.updatedPage;
+      },
+      "Nueva versión de imagen cargada exitosamente.",
+      designEvent(page, "image", { state: "en_revision" })
+    );
+  };
+
+  // Todas las entradas de archivo (botones, arrastrar a visor o miniatura) pasan por la vista previa.
   const uploadPageImage = (page, file) => {
-    if (!file) return;
-    runAction("Subiendo imagen de página...", () => uploadCatalogDesignPageImage(supabaseConnection, page, selectedProject, file, currentUserId), "Imagen actualizada sin crear versiones.", designEvent(page, "image", { state: "en_revision" }));
+    if (!page || !file) return;
+    setPendingUpload({ page, file });
+  };
+
+  const confirmPendingUpload = async () => {
+    if (!pendingUpload) return;
+    const uploaded = await performPageUpload(pendingUpload.page, pendingUpload.file);
+    if (uploaded) setPendingUpload(null);
   };
 
   const getAnnotationPoint = (event) => {
@@ -700,6 +802,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
 
   const resetReviewDraft = () => {
     setCommentText("");
+    setCommentCategory("ajuste");
     setDraftAnnotations([]);
     setActiveAnnotation(null);
     setIsDraftingComment(false);
@@ -730,15 +833,38 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   const addComment = () => {
     if (!selectedPage) return;
     runAction("Guardando comentario...", async () => {
-      await addCatalogDesignPageComment(supabaseConnection, selectedPage.id, commentText, commentCategory, currentUserId, draftAnnotations);
+      await addCatalogDesignPageComment(
+        supabaseConnection,
+        selectedPage.id,
+        commentText,
+        commentCategory,
+        currentUserId,
+        draftAnnotations,
+        activeVersionNumber,
+        activeVersionObj?.id || null
+      );
       resetReviewDraft();
     }, "Comentario guardado.", designEvent(selectedPage, "comment"));
   };
 
   const reviewPage = (nextStatus, type) => {
     if (!selectedPage) return;
+    if (isHistoricalVersion) {
+      setStatus({ type: "error", message: "Vuelva a la versión vigente para aprobar o solicitar ajustes." });
+      return;
+    }
     runAction("Registrando revisión...", async () => {
-      await reviewCatalogDesignPage(supabaseConnection, selectedPage, nextStatus, commentText, commentCategory || type, currentUserId, draftAnnotations);
+      await reviewCatalogDesignPage(
+        supabaseConnection,
+        selectedPage,
+        nextStatus,
+        commentText,
+        type,
+        currentUserId,
+        draftAnnotations,
+        activeVersionNumber,
+        activeVersionObj?.id || null
+      );
       resetReviewDraft();
     }, nextStatus === "aprobada" ? "Página aprobada." : "Página enviada a ajustes.", designEvent(selectedPage, "review", { state: nextStatus }));
   };
@@ -755,9 +881,9 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
   };
 
   const canUploadSelectedPage = selectedPage && (isAdminOrMark || (canUpload && (selectedPage.disenador_id === currentUserId || !selectedPage.disenador_id)) || isDesigner);
-  const canReviewSelectedPage = selectedPage && (isAdminOrMark || (canReview && (selectedPage.comprador_id === currentBuyerId || !selectedPage.comprador_id)));
+  const canReviewSelectedPage = selectedPage && !isHistoricalVersion && (isAdminOrMark || (canReview && (selectedPage.comprador_id === currentBuyerId || !selectedPage.comprador_id)));
   const canUpdateCommentStatus = Boolean(selectedPage && (isAdminOrMark || canReview || canUpload || isDesigner || isBuyer));
-  const canUseAnnotations = Boolean(selectedPage && selectedImageUrl);
+  const canUseAnnotations = Boolean(selectedPage && selectedImageUrl && !isHistoricalVersion);
 
   const toggleAnnotationMode = () => {
     if (!canUseAnnotations) return;
@@ -805,9 +931,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     e.stopPropagation();
     setIsDraggingOverStage(false);
     const file = e.dataTransfer?.files?.[0];
-    if (file && (file.type?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file.name))) {
-      uploadPageImage(selectedPage, file);
-    }
+    if (file) uploadPageImage(selectedPage, file);
   };
 
   const pendingAnnotationCount = draftAnnotations.length + (activeAnnotation ? 1 : 0);
@@ -817,9 +941,8 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
     <div className="toolbar page-header-toolbar">
       <Header title="Diseño de Catálogos" subtitle="Proyectos por página, avances de diseño, revisión del comprador y consolidación final." />
       <div className="toolbar-actions catalog-design-header-actions">
-        {status.message && <div className={classNames("catalog-design-status", status.type)} title={status.message}>{status.message}</div>}
         {hiddenProjectCount > 0 && <div className="catalog-design-status ready" title={`Se ocultaron ${hiddenProjectCount} proyectos sin catalogo trabajable en Inicio.`}>Se ocultaron {hiddenProjectCount} proyecto{hiddenProjectCount === 1 ? "" : "s"} sin catalogo trabajable.</div>}
-        <Button variant="outline" onClick={refreshData} disabled={status.type === "loading"}><RefreshCw size={16}/> Actualizar</Button>
+        <Button variant="outline" onClick={handleManualRefresh} disabled={status.type === "loading"}><RefreshCw size={16} className={status.type === "loading" ? "catalog-design-spin" : ""}/> Actualizar</Button>
       </div>
     </div>
 
@@ -883,7 +1006,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                 </div>
                 <div className="catalog-design-project-item-bottom">
                   <span className={classNames("catalog-design-state-chip", `state-${String(project.estado || "planificacion").toLowerCase()}`)}>
-                    {(project.estado || "planificación").replace(/_/g, " ")}
+                    {getProjectStateLabel(project.estado)}
                   </span>
                   <span className="catalog-design-project-date">
                     {formatDate(project.fecha_entrega) || "sin fecha"}
@@ -896,58 +1019,49 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
             {!projects.length && <div className="empty-state">No hay proyectos de diseño creados.</div>}
           </div>
 
-          <div className="catalog-design-summary-card">
-            <span>Proyecto activo</span>
-            <strong>{selectedProject?.nombre_proyecto || "Sin proyecto seleccionado"}</strong>
-            <p>{selectedProject ? selectedProjectCatalogo?.nombre || selectedProject.catalogo_id || "Proyecto sin catálogo visible" : "Seleccione un proyecto para revisar su avance."}</p>
-            {selectedProject && <div className="catalog-design-summary-meta">
-              <span><b>Estado:</b> {(selectedProject.estado || "planificación").replace(/_/g, " ")}</span>
-              <span><b>Entrega:</b> {formatDate(selectedProject.fecha_entrega) || "sin fecha"}</span>
-            </div>}
-          </div>
-
-          <div className="catalog-design-kpi-panel">
-            <div><span>Total</span><strong>{metrics.total}</strong></div>
-            <div><span>Pendientes</span><strong>{metrics.pendientes}</strong></div>
-            <div><span>Revisión</span><strong>{metrics.revision}</strong></div>
-            <div><span>Aprobadas</span><strong>{metrics.aprobadas}</strong></div>
-            <div><span>Ajustes</span><strong>{metrics.ajustes}</strong></div>
-            <div><span>Listas</span><strong>{metrics.listas}</strong></div>
-            <div className="catalog-design-kpi-progress"><span>Avance</span><strong>{metrics.porcentaje}%</strong></div>
-          </div>
+          {selectedProject && <DesignProgressBar metrics={metrics}/>}
           </>}
         </CardContent>
       </Card>
 
       <div className="catalog-design-main">
-        <DesignProjectSettings
-          configCollapsed={configCollapsed}
-          setConfigCollapsed={setConfigCollapsed}
-          selectedProject={selectedProject}
-          selectedProjectPageCount={selectedProjectPageCount}
-          canManage={canManage}
-          saveSelectedProject={saveSelectedProject}
-          updateProjectField={updateProjectField}
-          targetPageCount={targetPageCount}
-          setTargetPageCount={setTargetPageCount}
-        />
         <Card className="grid-card catalog-design-viewer-card">
           <CardContent>
             <div className="toolbar catalog-design-viewer-toolbar">
               <div className="catalog-design-viewer-header-info">
-                <h2>Páginas de {selectedProject?.nombre_proyecto || "proyecto"}</h2>
-                {selectedPage && (
+                <h2>{selectedProject?.nombre_proyecto || "Seleccione un proyecto"}</h2>
+                {selectedProject && (
                   <div className="catalog-design-viewer-current-meta">
-                    <span title="Diseñador asignado">🎨 {getUserLabel(userById[selectedPage.disenador_id]) || "Sin diseñador"}</span>
+                    <span>{selectedProjectCatalogo?.nombre || selectedProject.catalogo_id || "Sin catálogo visible"}</span>
                     <span className="dot-sep">·</span>
-                    <span title="Comprador asignado">🛒 {getBuyerLabel(buyerById[selectedPage.comprador_id]) || "Sin comprador"}</span>
+                    <span>{getProjectStateLabel(selectedProject.estado)}</span>
+                    <span className="dot-sep">·</span>
+                    <span>Entrega {formatDate(selectedProject.fecha_entrega) || "sin fecha"}</span>
+                    {selectedPage && <>
+                      <span className="dot-sep">·</span>
+                      <span title="Diseñador asignado"><Palette size={13} aria-hidden="true"/> {getUserLabel(userById[selectedPage.disenador_id])}</span>
+                      <span title="Comprador asignado"><ShoppingCart size={13} aria-hidden="true"/> {getBuyerLabel(buyerById[selectedPage.comprador_id])}</span>
+                    </>}
                   </div>
                 )}
               </div>
-              <div className="toolbar-actions filters">
-                <select value={filters.designer} onChange={(event) => setFilters((current) => ({ ...current, designer: event.target.value }))}><option value="">Todos los diseñadores</option>{designerOptions.map((user) => <option key={user.id} value={user.id}>{user.nombre || user.email}</option>)}</select>
-                <select value={filters.buyer} onChange={(event) => setFilters((current) => ({ ...current, buyer: event.target.value }))}><option value="">Todos los compradores</option>{seniorBuyerFilterOptions.map((buyer) => <option key={buyer.id} value={buyer.id}>{buyer.comprador}</option>)}</select>
-                <select value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value }))}><option value="">Todos los estados</option>{PAGE_STATES.map((state) => <option key={state} value={state}>{state.replace(/_/g, " ")}</option>)}</select>
+              <div className="toolbar-actions catalog-design-viewer-header-actions">
+                <DesignPageFilters
+                  filters={filters}
+                  setFilters={setFilters}
+                  designerOptions={designerOptions}
+                  buyerOptions={seniorBuyerFilterOptions}
+                />
+                {selectedProject && (
+                  <button
+                    type="button"
+                    className="catalog-design-tool-action-btn"
+                    onClick={openSettings}
+                    title={canManage ? "Editar nombre, estado, fechas y cantidad de páginas" : "Ver datos del proyecto"}
+                  >
+                    <Settings2 size={15}/> <span>{canManage ? "Configurar" : "Detalles"}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -960,8 +1074,11 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                 selectedPage={selectedPage}
                 canManage={canManage}
                 updatePageField={updatePageField}
-                setViewerZoom={setViewerZoom}
+                zoomTo={zoomTo}
+                fitViewerToHeight={fitViewerToHeight}
                 viewerZoom={viewerZoom}
+                shortcutsOpen={shortcutsOpen}
+                setShortcutsOpen={setShortcutsOpen}
                 annotationMode={annotationMode}
                 toggleAnnotationMode={toggleAnnotationMode}
                 annotationsHidden={annotationsHidden}
@@ -973,49 +1090,127 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                 draftAnnotations={draftAnnotations}
                 focusMode={focusMode}
                 setFocusMode={setFocusMode}
-                activeSideTab={activeSideTab}
-                sideRailCollapsed={sideRailCollapsed}
-                setActiveSideTab={setActiveSideTab}
-                setSideRailCollapsed={setSideRailCollapsed}
                 openReviewPanel={openReviewPanel}
-                selectedComments={selectedComments}
                 canUploadSelectedPage={canUploadSelectedPage}
                 uploadPageImage={uploadPageImage}
                 canReviewSelectedPage={canReviewSelectedPage}
                 reviewPage={reviewPage}
                 commentText={commentText}
                 setCommentText={setCommentText}
+                currentPageVersions={currentPageVersions}
+                activeVersionNumber={activeVersionNumber}
+                latestVersionNumber={latestVersionNumber}
+                onSelectVersion={(v) => setSelectedVersionByPage((prev) => ({ ...prev, [selectedPage?.id]: v }))}
+                isHistoricalVersion={isHistoricalVersion}
               />
               <div className={classNames("catalog-design-review-workspace", sideRailCollapsed && "rail-collapsed")}>
+                {/* Visor a la izquierda; observaciones y SKU en el panel derecho */}
+                {/* Superficie del Visor con soporte Drag & Drop nativo */}
+                <DesignImageViewer
+                  imageUrlError={imageUrlError}
+                  retryImageUrl={imageUrls.retry}
+                  annotationsHidden={annotationsHidden}
+                  viewerZoom={viewerZoom}
+                  isSpacePressed={isSpacePressed}
+                  annotationMode={annotationMode}
+                  isPanning={isPanning}
+                  isDraggingOverStage={isDraggingOverStage}
+                  viewerStageRef={viewerStageRef}
+                  handleStagePointerDown={handleStagePointerDown}
+                  handleStagePointerMove={handleStagePointerMove}
+                  handleStagePointerUp={handleStagePointerUp}
+                  handleStageDragOver={handleStageDragOver}
+                  handleStageDragLeave={handleStageDragLeave}
+                  handleStageDrop={handleStageDrop}
+                  selectedPage={selectedPage}
+                  selectedImageUrl={selectedImageUrl}
+                  imageShellRef={imageShellRef}
+                  beginAnnotation={beginAnnotation}
+                  moveAnnotation={moveAnnotation}
+                  endAnnotation={endAnnotation}
+                  selectedAnnotations={selectedAnnotations}
+                  activeCommentId={activeCommentId}
+                  hoveredAnnotation={hoveredAnnotation}
+                  setHoveredAnnotation={setHoveredAnnotation}
+                  highlightAndScrollComment={highlightAndScrollComment}
+                  setActiveCommentId={setActiveCommentId}
+                  draftAnnotations={draftAnnotations}
+                  activeAnnotation={activeAnnotation}
+                  hoveredAnnotationAnchor={hoveredAnnotationAnchor}
+                  canUploadSelectedPage={canUploadSelectedPage}
+                  uploadPageImage={uploadPageImage}
+                  isHistoricalVersion={isHistoricalVersion}
+                  activeVersionNumber={activeVersionNumber}
+                  latestVersionNumber={latestVersionNumber}
+                  onSelectVersion={(v) => setSelectedVersionByPage((prev) => ({ ...prev, [selectedPage?.id]: v }))}
+                  isImageLoading={isImageLoading}
+                />
                 <aside className={classNames("catalog-design-comment-rail", sideRailCollapsed && "collapsed")}>
-                  <div className="catalog-design-rail-tabs-bar">
-                    <div className="catalog-design-rail-tabs">
+                  {sideRailCollapsed ? (
+                    <div className="catalog-design-rail-collapsed-stack">
                       <button
                         type="button"
+                        className="icon-btn catalog-design-rail-toggle-btn"
+                        onClick={() => setSideRailCollapsed(false)}
+                        title="Expandir panel"
+                        aria-label="Expandir panel"
+                      >
+                        <PanelRightOpen size={16}/>
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn catalog-design-rail-icon-btn"
+                        onClick={() => { setActiveSideTab("comments"); setSideRailCollapsed(false); }}
+                        title="Observaciones"
+                        aria-label={`Observaciones (${pendingCommentsCount} pendientes)`}
+                      >
+                        <MessageSquare size={16}/>
+                        {pendingCommentsCount > 0 && <span className="catalog-design-tab-badge">{pendingCommentsCount}</span>}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn catalog-design-rail-icon-btn"
+                        onClick={() => { setActiveSideTab("sku"); setSideRailCollapsed(false); }}
+                        title="Catálogo SKU"
+                        aria-label="Catálogo SKU"
+                      >
+                        <Search size={16}/>
+                      </button>
+                    </div>
+                  ) : (
+                  <div className="catalog-design-rail-tabs-bar">
+                    <div className="catalog-design-rail-tabs" role="tablist" aria-label="Panel lateral">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeSideTab === "comments"}
                         className={classNames("catalog-design-tab-btn", activeSideTab === "comments" && "active")}
                         onClick={() => setActiveSideTab("comments")}
                       >
                         <MessageSquare size={14}/> Observaciones
-                        {selectedComments.length > 0 && <span className="catalog-design-tab-badge">{selectedComments.length}</span>}
+                        {pendingCommentsCount > 0 && <span className="catalog-design-tab-badge" title={`${pendingCommentsCount} pendientes`}>{pendingCommentsCount}</span>}
                       </button>
                       <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeSideTab === "sku"}
                         className={classNames("catalog-design-tab-btn", activeSideTab === "sku" && "active")}
                         onClick={() => setActiveSideTab("sku")}
                       >
-                        <Search size={14}/> Catálogo SKU
+                        <Search size={14}/> SKU
                       </button>
                     </div>
                     <button
                       type="button"
                       className="icon-btn catalog-design-rail-toggle-btn"
-                      onClick={() => setSideRailCollapsed((c) => !c)}
-                      title={sideRailCollapsed ? "Expandir panel" : "Contraer panel"}
-                      aria-label={sideRailCollapsed ? "Expandir panel" : "Contraer panel"}
+                      onClick={() => setSideRailCollapsed(true)}
+                      title="Contraer panel"
+                      aria-label="Contraer panel"
                     >
-                      {sideRailCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                      <PanelRightClose size={16}/>
                     </button>
                   </div>
+                  )}
 
                   {!sideRailCollapsed && activeSideTab === "comments" && (
                     <DesignCommentsPanel
@@ -1054,6 +1249,9 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                       currentBuyerId={currentBuyerId}
                       runAction={runAction}
                       designEvent={designEvent}
+                      activeVersionNumber={activeVersionNumber}
+                      currentPageVersions={currentPageVersions}
+                      currentVersionCommentsCount={currentVersionCommentsCount}
                     />
                   )}
 
@@ -1061,123 +1259,86 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
                     <div className="catalog-design-rail-content">
                       <div className="catalog-design-sku-head">
                         <div>
-                          <strong>Datos Promocionales SKU</strong>
-                          <span>Consulte y copie precios oficiales directo a su diseño</span>
+                          <strong>
+                            {skuSearchTerm
+                              ? "Resultados en el catálogo"
+                              : pagePromosCount > 0
+                                ? "Promociones de la página"
+                                : "Promociones del catálogo"}
+                          </strong>
+                          <span>
+                            {selectedPage
+                              ? skuSearchTerm
+                                ? `Página ${selectedPage.numero_pagina} · ${skuSearchResults.length} encontrada${skuSearchResults.length === 1 ? "" : "s"} · Primero las de esta página`
+                                : pagePromosCount > 0
+                                  ? `Página ${selectedPage.numero_pagina} · ${pagePromosCount} asociada${pagePromosCount === 1 ? "" : "s"} a esta página + catálogo`
+                                  : `Página ${selectedPage.numero_pagina} · Sin códigos asociados · Mostrando promociones del catálogo en edición`
+                              : "Seleccione una página para consultar sus promociones"}
+                          </span>
                         </div>
                       </div>
                       <form className="catalog-design-sku-search" onSubmit={submitSkuSearch}>
                         <input
                           value={skuQuery}
-                          onChange={(event) => setSkuQuery(event.target.value)}
-                          placeholder="Buscar código SKU o descripción..."
-                          autoFocus
+                          onChange={(event) => {
+                            const val = event.target.value;
+                            setSkuQuery(val);
+                            setSkuSearchTerm(normalizeValue(val));
+                          }}
+                          placeholder="Buscar SKU o descripción en este catálogo..."
+                          aria-label="Buscar SKU en este catálogo"
                         />
-                        <Button type="submit" disabled={!skuQuery.trim()}><Search size={15}/> Buscar</Button>
                       </form>
+                      {skuSearchTerm && (
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setSkuQuery("");
+                            setSkuSearchTerm("");
+                            setSkuDisplayLimit(50);
+                          }}
+                        >
+                          Ver promociones de esta página y catálogo
+                        </Button>
+                      )}
 
                       {/* Lista de resultados de búsqueda o SKUs asociados al proyecto */}
                       <div className="catalog-design-sku-results">
                         {skuSearchTerm && !skuSearchResults.length && (
                           <div className="catalog-design-sku-empty">
-                            No se encontró información para "{skuSearchTerm}".
+                            No se encontró información para "{skuSearchTerm}" en este catálogo.
                           </div>
                         )}
-                        {(skuSearchTerm ? skuSearchResults : selectedProjectPromoRows.slice(0, 20)).map((row, index) => (
-                          <div className="catalog-design-sku-result" key={`${row.id || row.row_id || row.sku}-${index}`}>
-                            <div className="catalog-design-sku-result-head">
-                              <div>
-                                <span className="sku-chip">SKU {formatSkuInfoValue(row.sku)}</span>
-                                <button
-                                  type="button"
-                                  className="catalog-design-copy-btn"
-                                  onClick={() => copyToClipboard(row.sku, `SKU ${row.sku}`)}
-                                  title="Copiar código SKU"
-                                >
-                                  {copiedSkuText === `SKU ${row.sku}` ? <Check size={12}/> : <Copy size={12}/>}
-                                </button>
-                              </div>
-                              {row.descuento && <span className="sku-discount-pill">{formatSkuInfoValue(getPromoField(row, "descuento"))}</span>}
-                            </div>
-                            <p className="sku-desc-text">
-                              {formatSkuInfoValue(getPromoField(row, "descripcion"))}
-                              <button
-                                type="button"
-                                className="catalog-design-copy-inline-btn"
-                                onClick={() => copyToClipboard(getPromoField(row, "descripcion"), "Descripción")}
-                                title="Copiar descripción al portapapeles"
-                              >
-                                <Copy size={12}/>
-                              </button>
-                            </p>
-                            <div className="catalog-design-sku-data">
-                              <div>
-                                <span>Antes</span>
-                                <strong>{formatSkuInfoValue(getPromoField(row, "precioAntes", "precio_antes"))}</strong>
-                              </div>
-                              <div className="sku-now-price">
-                                <span>Ahora</span>
-                                <strong>{formatSkuInfoValue(getPromoField(row, "precioAhora", "precio_ahora"))}</strong>
-                                <button
-                                  type="button"
-                                  className="catalog-design-copy-inline-btn"
-                                  onClick={() => copyToClipboard(getPromoField(row, "precioAhora", "precio_ahora"), "Precio")}
-                                  title="Copiar precio oferta"
-                                >
-                                  <Copy size={12}/>
-                                </button>
-                              </div>
-                            </div>
-                            {getPromoField(row, "comentario", "comentario_comprador") && (
-                              <div className="catalog-design-sku-comment">
-                                <span>Nota comercial:</span>
-                                <p>{formatSkuInfoValue(getPromoField(row, "comentario", "comentario_comprador"))}</p>
-                              </div>
-                            )}
-                          </div>
+                        {skuSearchResults.map((offer) => (
+                          <DesignSkuOfferCard
+                            key={offer.key}
+                            offer={offer}
+                            currentPage={Number(selectedPage?.numero_pagina) || null}
+                            copiedSkuText={copiedSkuText}
+                            onCopy={copyToClipboard}
+                          />
                         ))}
-                        {!skuSearchTerm && !selectedProjectPromoRows.length && (
+                        {skuOffersTotal > skuSearchResults.length && !skuSearchTerm && (
+                          <div className="catalog-design-sku-more">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSkuDisplayLimit((prev) => prev + 50)}
+                            >
+                              Mostrar más promociones (+50)
+                            </Button>
+                          </div>
+                        )}
+                        {!skuSearchTerm && !skuSearchResults.length && (
                           <div className="catalog-design-sku-empty">
-                            Ingrese un código para consultar descripción, precios, descuento y comentario.
+                            {!selectedProjectPromoRows.length ? "No hay promociones disponibles para este catálogo." : !selectedPage ? "Seleccione una página para ver sus promociones." : "No hay promociones disponibles en este catálogo."}
                           </div>
                         )}
                       </div>
                     </div>
                   )}
                 </aside>
-
-                {/* Superficie del Visor con soporte Drag & Drop nativo */}
-                <DesignImageViewer
-                  annotationsHidden={annotationsHidden}
-                  viewerZoom={viewerZoom}
-                  isSpacePressed={isSpacePressed}
-                  annotationMode={annotationMode}
-                  isPanning={isPanning}
-                  isDraggingOverStage={isDraggingOverStage}
-                  viewerStageRef={viewerStageRef}
-                  handleStagePointerDown={handleStagePointerDown}
-                  handleStagePointerMove={handleStagePointerMove}
-                  handleStagePointerUp={handleStagePointerUp}
-                  handleStageDragOver={handleStageDragOver}
-                  handleStageDragLeave={handleStageDragLeave}
-                  handleStageDrop={handleStageDrop}
-                  selectedPage={selectedPage}
-                  selectedImageUrl={selectedImageUrl}
-                  imageShellRef={imageShellRef}
-                  beginAnnotation={beginAnnotation}
-                  moveAnnotation={moveAnnotation}
-                  endAnnotation={endAnnotation}
-                  selectedAnnotations={selectedAnnotations}
-                  activeCommentId={activeCommentId}
-                  hoveredAnnotation={hoveredAnnotation}
-                  setHoveredAnnotation={setHoveredAnnotation}
-                  highlightAndScrollComment={highlightAndScrollComment}
-                  setActiveCommentId={setActiveCommentId}
-                  draftAnnotations={draftAnnotations}
-                  activeAnnotation={activeAnnotation}
-                  hoveredAnnotationAnchor={hoveredAnnotationAnchor}
-                  canUploadSelectedPage={canUploadSelectedPage}
-                  uploadPageImage={uploadPageImage}
-                />
               </div>
             </div>
 
@@ -1190,6 +1351,7 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
               selectedPage={selectedPage}
               signedUrls={signedUrls}
               commentCountByPageId={commentCountByPageId}
+              pendingCommentCountByPageId={pendingCommentCountByPageId}
               isAdminOrMark={isAdminOrMark}
               canUpload={canUpload}
               currentUserId={currentUserId}
@@ -1206,6 +1368,33 @@ export default function CatalogDesignPage({ catalogos = [], rows = [], supabaseC
         </Card>
       </div>
     </div>
+
+    {pendingUpload && (
+      <UploadConfirmModal
+        pending={pendingUpload}
+        onConfirm={confirmPendingUpload}
+        onCancel={() => setPendingUpload(null)}
+        isUploading={status.type === "loading"}
+      />
+    )}
+
+    <DesignToast status={status} onDismiss={dismissStatus}/>
+
+    {isSettingsOpen && selectedProject && (
+      <DesignProjectSettings
+        onClose={() => { setSettingsSnapshot(null); setIsSettingsOpen(false); }}
+        onCancel={cancelSettings}
+        selectedProject={selectedProject}
+        catalogName={selectedProjectCatalogo?.nombre || selectedProject.catalogo_id}
+        selectedProjectPageCount={selectedProjectPageCount}
+        canManage={canManage}
+        saveSelectedProject={saveSelectedProject}
+        updateProjectField={updateProjectField}
+        targetPageCount={targetPageCount}
+        setTargetPageCount={setTargetPageCount}
+        isSaving={status.type === "loading"}
+      />
+    )}
 
     {isCreateProjectModalOpen && (
       <CreateDesignProjectModal

@@ -17,6 +17,9 @@ import {
   toAppRow,
 } from "../utils/promoHelpers";
 import { Button, Card, CardContent, Header } from "./ui";
+import DesignExportPanel from "../features/designExport/DesignExportPanel";
+import "../styles/pages/catalog-design-export-compartido.page.css";
+import "../styles/pages/export.page.css";
 
 const OPERATIONAL_EXPORT_STATUSES = new Set(["APROBADO", "APROBADA", "APROVADO", "APROVADA", "REGISTRADO", "LISTA_CONSOLIDAR", "ANULADO"]);
 
@@ -29,7 +32,7 @@ function displayValue(value) {
   return value ?? "";
 }
 
-export default function ExportPageV2({ rows = [], actividades = [], comentarios = [], supabaseConnection = null, supabaseReady = false }) {
+export default function ExportPageV2({ rows = [], actividades = [], comentarios = [], catalogos = [], supabaseConnection = null, supabaseReady = false }) {
   const { can } = usePermissions();
   const canDownload = can(PERMISSIONS.DOWNLOAD_EXPORTS);
   const [compradorFiltro, setCompradorFiltro] = useState("Todos");
@@ -214,7 +217,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       title: "Mercadeo",
       desc: "Base para artes, catalogo y revision.",
       file: "export_mercadeo",
-      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["nombre_actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["num_parte", (row) => row.numParte || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["comentario_comprador", (row) => row.comentario || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || row.estadoRegistro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad], ["comentarios_abiertos_mercadeo", (row, ctx) => ctx.comentariosLineaAbiertos]],
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["nombre_actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["numero_pagina", (row) => row.numero_pagina || row.num_pagina || row.numPagina || ""], ["num_parte", (row) => row.numParte || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["comentario_comprador", (row) => row.comentario || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || row.estadoRegistro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad], ["comentarios_abiertos_mercadeo", (row, ctx) => ctx.comentariosLineaAbiertos]],
     },
     planimetria: {
       title: "Planimetria",
@@ -227,7 +230,7 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
       title: "Consolidado",
       desc: "Base completa con revision y aplicabilidad.",
       file: "consolidado_promociones",
-      columns: [["Actividad", (row, ctx) => ctx.activityId], ["Nombre actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""], ["Tipo actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["Canal", (row, ctx) => ctx.activity.canal || ""], ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""], ["Segmenta", (row, ctx) => ctx.segmenta], ["Segmento cliente", (row, ctx) => ctx.segmentoCliente], ["Comprador", (row) => row.comprador || ""], ["Tipo promo", (row) => row.tipoPromo || ""], ["Oferta", (row) => row.grupoOferta || ""], ["Rol", (row) => row.tipoSku || ""], ["Variante", (row) => row.variante || ""], ["SKU", (row) => row.sku || ""], ["Descripcion", (row) => row.descripcion || ""], ["Cantidad", (row) => displayValue(row.cantidadMinima)], ["Precio ahora", (row) => displayValue(row.precioAhora)], ["Descuento", (row) => displayValue(row.descuento)], ["Estado", (row) => row.estado_registro || row.estadoRegistro || ""], ["Comentarios actividad", (row, ctx) => ctx.comentariosActividad], ["Comentarios linea", (row, ctx) => ctx.comentariosLinea]],
+      columns: [["Actividad", (row, ctx) => ctx.activityId], ["Nombre actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""], ["Tipo actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["Canal", (row, ctx) => ctx.activity.canal || ""], ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""], ["Segmenta", (row, ctx) => ctx.segmenta], ["Segmento cliente", (row, ctx) => ctx.segmentoCliente], ["Comprador", (row) => row.comprador || ""], ["Tipo promo", (row) => row.tipoPromo || ""], ["Oferta", (row) => row.grupoOferta || ""], ["Rol", (row) => row.tipoSku || ""], ["Variante", (row) => row.variante || ""], ["SKU", (row) => row.sku || ""], ["Página", (row) => row.numero_pagina || row.num_pagina || row.numPagina || ""], ["Descripcion", (row) => row.descripcion || ""], ["Cantidad", (row) => displayValue(row.cantidadMinima)], ["Precio ahora", (row) => displayValue(row.precioAhora)], ["Descuento", (row) => displayValue(row.descuento)], ["Estado", (row) => row.estado_registro || row.estadoRegistro || ""], ["Comentario comprador", (row) => row.comentario || row.comentario_comprador || ""]],
     },
   };
 
@@ -265,12 +268,19 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
 
   return (
     <div>
-      <Header title="Exportaciones" subtitle="Salidas preparadas para Pricing, Mercadeo, Planimetria y consolidacion." />
-      <Card className="consolidado-filter-card export-filter-card">
-        <CardContent>
-          <div className="section-head">
-            <div>
-              <h2>Filtros</h2>
+      <Header title="Exportaciones" subtitle="Salidas preparadas para Pricing, Mercadeo, Planimetría, Consolidación y Diseño." />
+      <div className="export-section" style={{ marginTop: 0 }}>
+        <div className="export-section-head">
+          <div>
+            <h2>Promociones Comerciales</h2>
+            <span>Salidas operativas y consolidadas basadas en promociones.</span>
+          </div>
+        </div>
+        <Card className="consolidado-filter-card export-filter-card">
+          <CardContent>
+            <div className="section-head">
+              <div>
+                <h2>Filtros</h2>
               <span>{exportStatus.type === "loading" ? exportStatus.message : appliedFilters ? `${rowsFiltradas.length} filas listas para exportar` : "Presione Buscar para preparar descargas"}</span>
             </div>
             <div className="toolbar-actions">
@@ -329,6 +339,8 @@ export default function ExportPageV2({ rows = [], actividades = [], comentarios 
           </Card>
         ))}
       </div>
+      </div>
+      <DesignExportPanel catalogos={catalogos} supabaseConnection={supabaseConnection} supabaseReady={supabaseReady}/>
     </div>
   );
 }

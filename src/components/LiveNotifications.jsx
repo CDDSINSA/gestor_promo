@@ -15,9 +15,13 @@ function formatNotificationTime(value) {
   }).format(date);
 }
 
+export function isImportantNotification(item = {}) {
+  return item.tipoEvento === "AVISO_CORTE" || item.metadata?.importante === true;
+}
+
 export function LiveNotificationsToast({ notification, onClose }) {
   if (!notification) return null;
-  return <div className="live-notification-toast" role="status" aria-live="polite">
+  return <div className={classNames("live-notification-toast", isImportantNotification(notification) && "important")} role="status" aria-live="polite">
     <div className="live-notification-toast-icon"><Bell size={17}/></div>
     <div className="live-notification-toast-copy">
       <strong>{notification.titulo}</strong>
@@ -38,6 +42,10 @@ export default function LiveNotifications({
   onMarkRead,
   onMarkAllRead,
   onOpenItem,
+  view = "unread",
+  onChangeView,
+  hasMore = false,
+  onLoadMore,
   soundEnabled = true,
   onToggleSound,
 }) {
@@ -80,7 +88,7 @@ export default function LiveNotifications({
       title="Notificaciones"
     >
       <Bell size={22}/>
-      {unreadCount > 0 && <span>{unreadCount > 9 ? "9+" : unreadCount}</span>}
+      {unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}
     </button>
     {isOpen && <div ref={panelRef} id="live-notifications-panel" className="live-notifications-panel" role="dialog" aria-label="Notificaciones en vivo" tabIndex={-1}>
       <div className="live-notifications-head">
@@ -95,21 +103,27 @@ export default function LiveNotifications({
           <button type="button" onClick={onClose} title="Cerrar" aria-label="Cerrar notificaciones"><X size={16}/></button>
         </div>
       </div>
+      <div className="live-notifications-tabs" role="tablist" aria-label="Filtrar notificaciones">
+        <button type="button" role="tab" aria-selected={view === "unread"} className={classNames(view === "unread" && "active")} onClick={() => onChangeView?.("unread")}>No leídas{unreadCount ? ` (${unreadCount > 99 ? "99+" : unreadCount})` : ""}</button>
+        <button type="button" role="tab" aria-selected={view === "all"} className={classNames(view === "all" && "active")} onClick={() => onChangeView?.("all")}>Todas</button>
+      </div>
       {status.message && <div className={classNames("live-notifications-status", status.type === "error" && "error")}>{status.message}</div>}
       <div className="live-notifications-list">
         {items.length ? items.map((item) => <button
           type="button"
           key={item.id}
-          className={classNames("live-notification-item", !item.leida && "unread")}
+          className={classNames("live-notification-item", !item.leida && "unread", isImportantNotification(item) && "important")}
           onClick={() => onOpenItem ? onOpenItem(item) : onMarkRead(item.id)}
         >
           <span className="live-notification-dot" aria-hidden="true"></span>
           <span className="live-notification-copy">
+            {isImportantNotification(item) && <b className="live-notification-badge">Importante</b>}
             <strong>{item.titulo}</strong>
             <em>{item.mensaje}</em>
             <small>{[item.actorNombre, formatNotificationTime(item.createdAt)].filter(Boolean).join(" - ")}</small>
           </span>
-        </button>) : <div className="live-notifications-empty">No hay notificaciones recientes.</div>}
+        </button>) : <div className="live-notifications-empty">{view === "unread" ? "No tiene notificaciones pendientes." : "No hay notificaciones recientes."}</div>}
+        {hasMore && <button type="button" className="live-notifications-more" onClick={onLoadMore} disabled={isLoading}>{isLoading ? "Cargando..." : "Cargar más"}</button>}
       </div>
     </div>}
   </div>, document.body);

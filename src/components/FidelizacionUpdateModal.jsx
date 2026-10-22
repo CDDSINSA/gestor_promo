@@ -23,6 +23,8 @@ import {
   parseFidelizacionExcel,
 } from "../services/fidelizacionService";
 import { findCompradorForAppUser } from "../utils/avanceHelpers";
+import { buildOfferMovements } from "../features/fidelizacion/offerMovement";
+import OfferReference from "../features/fidelizacion/OfferReference";
 
 export default function FidelizacionUpdateModal({
   isOpen,
@@ -62,9 +64,10 @@ export default function FidelizacionUpdateModal({
 
   const filteredDeltas = useMemo(() => {
     if (!deltasData?.deltas) return [];
-    if (previewFilter === "TODOS") return deltasData.deltas;
-    return deltasData.deltas.filter((d) => d.tipo_cambio === previewFilter);
-  }, [deltasData, previewFilter]);
+    const movements = buildOfferMovements(deltasData.deltas, currentCanasto);
+    if (previewFilter === "TODOS") return movements;
+    return movements.filter((d) => d.tipo_cambio === previewFilter);
+  }, [deltasData, previewFilter, currentCanasto]);
 
   if (!isOpen) return null;
 
@@ -151,14 +154,20 @@ export default function FidelizacionUpdateModal({
       descripcion: itemDesc,
       segments: { ...manualDiscounts },
     };
-    const calculated = calculateFidelizacionDeltas({
-      parsedItems: [parsedItem],
-      currentCanasto,
-      canal,
-      skuMaster: master,
-      catalogMap: combinedMap,
-      defaultDivision: "",
-    });
+    let calculated;
+    try {
+      calculated = calculateFidelizacionDeltas({
+        parsedItems: [parsedItem],
+        currentCanasto,
+        canal,
+        skuMaster: master,
+        catalogMap: combinedMap,
+        defaultDivision: "",
+      });
+    } catch (error) {
+      setError(error.message);
+      return;
+    }
 
     setDeltasData((prev) => {
       if (!prev) return calculated;
@@ -168,7 +177,7 @@ export default function FidelizacionUpdateModal({
         ...prev,
         deltas: mergedDeltas,
         totalSkus: new Set(mergedDeltas.map((d) => d.sku)).size,
-        nuevosCount: mergedDeltas.filter((d) => d.tipo_cambio === "NUEVO").length,
+        nuevosCount: new Set(mergedDeltas.filter((d) => d.tipo_cambio === "NUEVO").map((d) => d.sku)).size,
         subenCount: mergedDeltas.filter((d) => d.tipo_cambio === "SUBE").length,
         bajanCount: mergedDeltas.filter((d) => d.tipo_cambio === "BAJA").length,
         eliminanCount: mergedDeltas.filter((d) => d.tipo_cambio === "ELIMINA").length,
@@ -185,7 +194,7 @@ export default function FidelizacionUpdateModal({
       return;
     }
     if (!deltasData || !deltasData.deltas.length) {
-      setError("No hay datos de descuentos para enviar.");
+      setError("No hay cambios de descuentos para enviar. Las celdas vacías mantienen el valor actual; use 0 para quitar un descuento.");
       return;
     }
 
@@ -266,6 +275,7 @@ export default function FidelizacionUpdateModal({
           </div>
 
           {/* Modo Excel */}
+          <p className="modal-note">Ingrese porcentajes como 20 o 20%. Las celdas vacías mantienen el descuento actual; use 0 para quitarlo.</p>
           {mode === "excel" && !deltasData && (
             <div
               className="fidelizacion-dropzone"
@@ -396,6 +406,12 @@ export default function FidelizacionUpdateModal({
                 )}
               </div>
 
+              <p className="fid-offer-note">
+                Ofertas ORCE por canal, segmento y descuento, sin considerar vigencia.
+                Origen: retirar el SKU. Destino: registrar el nuevo descuento.
+                Referencias según el canasto conciliado disponible para su usuario; varias coincidencias requieren revisión.
+                Si no se identifica una oferta, revise la conciliación ORCE. No se asignan ofertas automáticamente.
+              </p>
               <div className="fidelizacion-preview-table-wrap">
                 <table className="fidelizacion-table">
                   <thead>
@@ -406,6 +422,8 @@ export default function FidelizacionUpdateModal({
                       <th>Anterior</th>
                       <th>Solicitado</th>
                       <th>Cambio</th>
+                      <th>ID oferta origen · retirar</th>
+                      <th>ID oferta destino · registrar</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -432,6 +450,8 @@ export default function FidelizacionUpdateModal({
                             {d.tipo_cambio}
                           </span>
                         </td>
+                        <td><OfferReference reference={d.oferta_origen} /></td>
+                        <td><OfferReference reference={d.oferta_destino} /></td>
                       </tr>
                     ))}
                   </tbody>

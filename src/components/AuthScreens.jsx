@@ -14,7 +14,7 @@ import { classNames } from "../utils/common";
 import { Button, Card, CardContent } from "./ui";
 
 function AuthBrand({ message }) {
-  return <div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor de Promociones</h1><p>{message}</p></div></div>;
+  return <div className="login-brand"><img className="brand-logo" src={sinsaLogo} alt="SINSA" /><div><h1>Gestor Comercial</h1><p>{message}</p></div></div>;
 }
 
 export function LoginPage({ onLogin, onForgotPassword, loginStatus, connectionStatus }) {

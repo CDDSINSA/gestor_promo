@@ -28,6 +28,7 @@ import {
   getSeniorIds,
 } from "../utils/avanceHelpers";
 import { Button } from "./ui";
+import { normalizeTipoCantidad } from "../features/promotions/application/tipoCantidad.js";
 
 const OFFERS_PER_PAGE = 25;
 
@@ -483,7 +484,7 @@ export default function CatalogPromosModal({
                             const precioOferta = line.precioAhora ?? line.precio_ahora ?? "-";
                             const descuento = line.descuento || "-";
                             const cantidadMinima = line.cantidadMinima ?? line.cantidad_minima ?? 1;
-                            const tipoCantidad = line.tipoCantidad || line.tipo_cantidad || "Exacta";
+                            const tipoCantidad = normalizeTipoCantidad(line.tipoCantidad || line.tipo_cantidad) || "Exacta";
                             const comentario = line.comentario || line.comentario_comprador || "-";
                             const tipoSku = line.tipoSku || line.tipo_sku || "";
                             const isReward = isComboRewardRole(tipoSku);

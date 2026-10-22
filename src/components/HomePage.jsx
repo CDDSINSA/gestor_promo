@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ClipboardList,
 } from "lucide-react";
 import { hasSupabaseConnection } from "../services/supabaseService";
 import { PERMISSIONS, ROLES, normalizeRole } from "../constants/permissions";
@@ -26,9 +27,13 @@ import {
 } from "../utils/avanceHelpers";
 import { isActivityComment, isLineComment, normalizeActividad, normalizeCanal } from "../utils/promoHelpers";
 import { Button, Card, CardContent, Header, Metric } from "./ui";
+import CatalogCountdown from "../features/catalogSchedule/CatalogCountdown";
+import { useCatalogToday } from "../features/catalogSchedule/useCatalogToday";
+import "../styles/pages/home.page.css";
 
-export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], catalogoResumen = [], rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseReady: domainSupabaseReady, supabaseStatus, isSyncing }) {
+export default function HomePage({ catalogos, rows = [], actividades = [], comentarios = [], compradores = [], jerarquiaCategorias = [], catalogoResumen = [], comentariosActividadAbiertos = [], loadedCampaignIds = null, rowsCount, logsCount, setActive, setCatalogoActivo, onOpenAvances, onLoadSupabase, onSaveSupabase, supabaseSettings, supabaseReady: domainSupabaseReady, supabaseStatus, isSyncing }) {
   const { appUser } = useAuth();
+  const catalogToday = useCatalogToday();
   const { can } = usePermissions();
   const catalogosVisibles = useMemo(() => (catalogos || []).filter((c) => String(c.estado).toLowerCase() !== "cerrado"), [catalogos]);
   const activos = catalogosVisibles.filter((c) => c.estado === "Activo").length;
@@ -102,7 +107,7 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       if (activityId) buyerActivityIds.add(activityId);
     });
 
-    return comentarios.filter((comment) => {
+    const localOpen = comentarios.filter((comment) => {
       if (String(comment.estado || "").toLowerCase() !== "abierto") return false;
       const rowId = comment.rowId || comment.row_id || "";
       const activityId = comment.actividadId || comment.actividad_id || "";
@@ -110,20 +115,41 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
       if (isActivityComment(comment)) return buyerActivityIds.has(activityId);
       return buyerRowIds.has(rowId) || buyerActivityIds.has(activityId);
     }).length;
-  }, [actividades, appUser, comentarios, compradores, currentBuyerName, currentRole, rows]);
+    if (!(loadedCampaignIds instanceof Set)) return localOpen;
+
+    // Carga por campaña: las campañas no cargadas se cuentan con los resumenes del servidor.
+    const remoteActivityIds = new Set();
+    let remoteOpen = 0;
+    (catalogoResumen || []).forEach((item) => {
+      const activityId = String(item.actividad_id || item.actividadId || "").trim();
+      if (!activityId || loadedCampaignIds.has(activityId)) return;
+      if (!authorizedBuyerNames.has(normalizeCanal(item.comprador || ""))) return;
+      if (!(Number(item.promociones_count) > 0)) return;
+      remoteActivityIds.add(activityId);
+      remoteOpen += Number(item.comentarios_abiertos_count) || 0;
+    });
+    (comentariosActividadAbiertos || []).forEach((item) => {
+      const activityId = String(item.actividad_id || item.actividadId || "").trim();
+      if (remoteActivityIds.has(activityId)) remoteOpen += Number(item.abiertos) || 0;
+    });
+    return localOpen + remoteOpen;
+  }, [actividades, appUser, catalogoResumen, comentarios, comentariosActividadAbiertos, compradores, currentBuyerName, currentRole, loadedCampaignIds, rows]);
   const showBuyerCommentAlert = currentRole === ROLES.BUYER;
   const buyerCommentAlertCopy = buyerOpenComments
     ? `Tienes ${buyerOpenComments} comentario${buyerOpenComments === 1 ? "" : "s"} abierto${buyerOpenComments === 1 ? "" : "s"} de Mercadeo por revisar.`
     : "No tienes comentarios abiertos de Mercadeo.";
 
   const [selectedSection, setSelectedSection] = useState("hub"); // "hub" | "estrategia"
+  // Solicitudes especiales: quien puede crear entra al formulario; quien solo da seguimiento entra a la lista.
+  const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
+  const specialTarget = canCreateSpecial ? "especial" : can(PERMISSIONS.VIEW_SOLICITUDES) ? "solicitudes" : null;
 
   return <div>
     <div className="home-topbar">
       <Header
         title={selectedSection === "hub" ? "Portal de Gestión Comercial" : "Estrategia Comercial: Catálogos"}
         subtitle={selectedSection === "hub"
-          ? "Gestión centralizada de fidelización de clientes y campañas comerciales."
+          ? "Gestión centralizada de fidelización de clientes, campañas comerciales y solicitudes especiales."
           : "Panel para administrar catálogos activos, promociones y exportaciones."}
       />
     </div>
@@ -135,10 +161,6 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
           <div className="home-hub-glow-cyan" aria-hidden="true" />
           
           <div className="home-hub-intro">
-            <span className="home-hub-pill">
-              <span className="home-hub-pill-dot" />
-              SISTEMA DE GESTIÓN COMERCIAL
-            </span>
             <h2 className="home-hub-title">Seleccione el Proceso Comercial</h2>
           </div>
 
@@ -156,18 +178,17 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                 }
               }}
             >
-              <div className="hub-tile-header">
-                <div className="hub-tile-icon-box emerald">
-                  <Percent size={28} />
+              <div className="hub-tile-banner emerald">
+                <div className="hub-tile-icon-box">
+                  <Percent size={26} />
                 </div>
-                <div className="hub-tile-tag-wrap">
-                  <span className="hub-tile-badge emerald">Canastos Permanentes</span>
-                  <span className="hub-tile-indicator">Fidelización</span>
+                <div className="hub-tile-heading">
+                  <h3 className="hub-tile-title">Fidelización de Clientes</h3>
+                  <p className="hub-tile-meta">Canastos Permanentes · Fidelización</p>
                 </div>
               </div>
 
               <div className="hub-tile-body">
-                <h3 className="hub-tile-title">Fidelización de Clientes</h3>
                 <p className="hub-tile-desc">
                   Gestión de canastos de artículos y descuentos permanentes por segmento de clientes para <strong>Comasa</strong> y <strong>Retail</strong>. Consulta por división y solicitudes de actualización con análisis de deltas.
                 </p>
@@ -216,18 +237,17 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                 }
               }}
             >
-              <div className="hub-tile-header">
-                <div className="hub-tile-icon-box cyan">
-                  <ShoppingBag size={28} />
+              <div className="hub-tile-banner cyan">
+                <div className="hub-tile-icon-box">
+                  <ShoppingBag size={26} />
                 </div>
-                <div className="hub-tile-tag-wrap">
-                  <span className="hub-tile-badge cyan">Promociones & Catálogos</span>
-                  <span className="hub-tile-indicator">Estrategia Comercial</span>
+                <div className="hub-tile-heading">
+                  <h3 className="hub-tile-title">Campañas Comerciales</h3>
+                  <p className="hub-tile-meta">Promociones & Catálogos · Estrategia Comercial</p>
                 </div>
               </div>
 
               <div className="hub-tile-body">
-                <h3 className="hub-tile-title">Campañas Comerciales</h3>
                 <p className="hub-tile-desc">
                   Planificación y administración de catálogos comerciales bimensuales, promociones masivas, combos, escalas y promociones especiales para tiendas y canales corporativos.
                 </p>
@@ -262,6 +282,65 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                 </button>
               </div>
             </div>
+
+            {/* Tarjeta 3: Solicitudes Especiales */}
+            {specialTarget && <div
+              className="hub-tile hub-tile-especiales"
+              onClick={() => setActive(specialTarget)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActive(specialTarget);
+                }
+              }}
+            >
+              <div className="hub-tile-banner violet">
+                <div className="hub-tile-icon-box">
+                  <ClipboardList size={26} />
+                </div>
+                <div className="hub-tile-heading">
+                  <h3 className="hub-tile-title">Solicitudes Especiales</h3>
+                  <p className="hub-tile-meta">Fuera de catálogo · Solicitudes</p>
+                </div>
+              </div>
+
+              <div className="hub-tile-body">
+                <p className="hub-tile-desc">
+                  Creación y seguimiento de promociones especiales fuera del catálogo, con responsable asignado y su propio flujo de aprobación y ejecución.
+                </p>
+
+                <div className="hub-tile-features">
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check violet" />
+                    <span>Promociones fuera de catálogo</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check violet" />
+                    <span>Responsable y estado por solicitud</span>
+                  </div>
+                  <div className="hub-feature-item">
+                    <CheckCircle2 size={15} className="hub-feature-check violet" />
+                    <span>Seguimiento hasta su ejecución</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hub-tile-footer">
+                <button
+                  type="button"
+                  className="hub-cta-button violet"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActive(specialTarget);
+                  }}
+                >
+                  <span>{canCreateSpecial ? "Crear Solicitud Especial" : "Ver Solicitudes Especiales"}</span>
+                  <ArrowRight size={17} className="hub-cta-arrow" />
+                </button>
+              </div>
+            </div>}
           </div>
         </div>
       </div>
@@ -313,8 +392,8 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                     </div>
                     <div className="catalog-status">
                       <span className={cat.estado === "Activo" ? "pill green" : "pill"}>{cat.estado}</span>
-                      <span className={cat.notificaciones ? "notification-dot active" : "notification-dot inactive"} title={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"} aria-label={cat.notificaciones ? "Notificaciones activas" : "Notificaciones inactivas"}>
-                        {cat.notificaciones ? <Bell size={15}/> : <BellOff size={15}/>}
+                      <span className={cat.notificacionesEnvivo !== false ? "notification-dot active" : "notification-dot inactive"} title={cat.notificacionesEnvivo !== false ? "Notificaciones en vivo activas" : "Notificaciones en vivo apagadas"} aria-label={cat.notificacionesEnvivo !== false ? "Notificaciones en vivo activas" : "Notificaciones en vivo apagadas"}>
+                        {cat.notificacionesEnvivo !== false ? <Bell size={15}/> : <BellOff size={15}/>}
                       </span>
                     </div>
                   </div>
@@ -322,6 +401,7 @@ export default function HomePage({ catalogos, rows = [], actividades = [], comen
                     {can(PERMISSIONS.VIEW_PROMOS) && <Button className="full" onClick={() => { setCatalogoActivo(cat); setActive("promos"); }}>Trabajar catalogo</Button>}
                     {can(PERMISSIONS.VIEW_AVANCES) && <Button className="full btn-avances" variant="outline" onClick={() => onOpenAvances?.(cat)}><ListChecks size={16}/> Avances</Button>}
                   </div>
+                  <CatalogCountdown catalog={cat} today={catalogToday}/>
                 </CardContent>
               </Card>;
           })}

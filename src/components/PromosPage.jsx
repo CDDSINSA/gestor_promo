@@ -1,5 +1,17 @@
 import { getBulkSkuCodes } from "../features/promotions/application/bulkImport";
+import { priceWithIva } from "../features/promotions/application/promoPrices";
 import { useSkuLookup } from "../features/skuMaster/SkuLookupContext";
+import { useAiresWeightsLoader } from "../features/promotions/application/AiresWeightsContext";
+import {
+  buildAiresLineComment,
+  getAiresGroupTotal,
+  getAiresWeightRequest,
+  indexExistingAires,
+  isAiresRow,
+  normalizeAiresCostWeights,
+  parseAiresTable,
+  redistributeAiresGroup,
+} from "../features/promotions/application/airesCombo";
 import React, { useMemo } from "react";
 import {
   AlertTriangle,
@@ -15,7 +27,6 @@ import {
   Trash2,
   Users,
   X,
-  ChevronDown,
   Eye,
 } from "lucide-react";
 import {
@@ -24,6 +35,9 @@ import {
   promoLabels as labels,
 } from "../promoTypes/promoTypeEngine";
 import {
+  AIRES_COMPONENT_ROLE,
+  AIRES_PROMO_TYPE,
+  BULK_COLUMN_AIRES_TABLE,
   BULK_COLUMN_BUY_X_GET_X_TABLE,
   BULK_COLUMN_COMBO_TABLE,
   BULK_COLUMN_MEGAPACK_TABLE,
@@ -34,6 +48,7 @@ import {
   MEGAPACK_PROMO_TYPE,
 } from "../constants";
 import {
+  buildAiresBulkPreview,
   buildBuyXGetXBulkPreview,
   buildComboBulkPreview,
   buildMegapackBulkPreview,
@@ -43,6 +58,11 @@ import {
   isBulkTableColumn,
   isNumericSku,
   normalizeDiscountValue,
+  isDiscountOverLimit,
+  blockDiscountOverLimit,
+  blockMissingFixedPrice,
+  withDiscountLimitNotice,
+  MAX_DISCOUNT_PERCENT,
   normalizePastedNumber,
   parseClipboardRows,
   parseClipboardValues,
@@ -85,7 +105,6 @@ import {
   getSegmentosByCanal,
   hasPromoFieldValue,
   isComboRewardRole,
-  isSegmentedRow,
   normalizeCanal,
 } from "../utils/promoHelpers";
 import {
@@ -98,229 +117,22 @@ import {
 } from "../utils/avanceHelpers";
 import { Button, Card, CardContent, Header } from "./ui";
 import CatalogPromosModal from "./CatalogPromosModal";
+import { SIMPLE_PROMO_MODAL_TYPES, createSimplePromoDraft, getAuditUserLabel } from "../features/promotions/application/simplePromoDraft";
+import { renderCell } from "../features/promotions/ui/renderPromoGridCell";
+import { TIPOS_CANTIDAD, normalizeTipoCantidad } from "../features/promotions/application/tipoCantidad.js";
+import SegmentMultiSelect from "../features/promotions/ui/SegmentMultiSelect";
+import "../styles/pages/promociones-compartido.page.css";
+
+// Se mantiene la exportación para no romper importaciones existentes.
+export { SegmentMultiSelect };
 
 const PROMO_GRID_PAGE_SIZE = 100;
-const SIMPLE_PROMO_MODAL_TYPES = ["Descuento", "Precio fijo"];
 
-function createSimplePromoDraft(promoType = "Descuento", defaultSegments = []) {
-  return {
-    tipoPromo: SIMPLE_PROMO_MODAL_TYPES.includes(promoType) ? promoType : "Descuento",
-    sku: "",
-    tipoCantidad: "Exacta",
-    cantidadMinima: 1,
-    precioAhora: "",
-    descuento: "",
-    comentario: "",
-    segmentos: Array.isArray(defaultSegments) ? defaultSegments : [],
-    error: "",
-  };
-}
-
-function getAuditUserLabel(appUser = {}) {
-  return normalizeValue(appUser?.nombre || appUser?.email || "");
-}
-
-function EditableGridInput({ value, onCommit, onKeyDown, ...inputProps }) {
-  const sourceValue = String(value ?? "");
-  const [draft, setDraft] = React.useState(sourceValue);
-  const sourceValueRef = React.useRef(sourceValue);
-  const draftRef = React.useRef(sourceValue);
-
-  React.useEffect(() => {
-    sourceValueRef.current = sourceValue;
-    draftRef.current = sourceValue;
-    setDraft(sourceValue);
-  }, [sourceValue]);
-
-  const commitDraft = React.useCallback(() => {
-    const nextValue = draftRef.current;
-    if (nextValue === sourceValueRef.current) return;
-    sourceValueRef.current = nextValue;
-    onCommit(nextValue);
-  }, [onCommit]);
-
-  const handleChange = (event) => {
-    const nextValue = event.target.value;
-    draftRef.current = nextValue;
-    setDraft(nextValue);
-  };
-
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter") {
-      commitDraft();
-    } else if (event.key === "Escape") {
-      draftRef.current = sourceValueRef.current;
-      setDraft(sourceValueRef.current);
-      event.preventDefault();
-      return;
-    }
-    onKeyDown?.(event);
-  };
-
-  return <input {...inputProps} value={draft} onChange={handleChange} onBlur={commitDraft} onKeyDown={handleKeyDown} />;
-}
-
-function renderCell(row, col, updateRow, warning, segmentOptions = [], cellError = null, onKeyDown = null, rowIndex = 0, colIndex = 0) {
-  const hasErr = cellError?.type === "error";
-  const hasWarn = cellError?.type === "warning" || (col === "descuento" && warning);
-  const inputClass = classNames(
-    hasErr && "input-error",
-    hasWarn && !hasErr && "input-warning"
-  );
-  const titleText = cellError ? cellError.message : undefined;
-
-  if (col === "tipoCantidad") {
-    return <select className={inputClass} title={titleText} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} value={row[col]} onChange={(e) => updateRow(row.id, col, e.target.value)}>
-      <option>Exacta</option>
-      <option>MÃ­nimo</option>
-    </select>;
-  }
-  if (col === "tipoSku") {
-    const role = normalizeCanal(row[col]);
-    const highlightRole = ["Combo", ...BUY_X_GET_X_PROMO_TYPES].includes(row.tipoPromo || row.tipo_promo);
-    const roleClass = !highlightRole ? "neutral" : isComboRewardRole(role) ? "reward" : role === "principal" ? "principal" : "neutral";
-    return <div className={classNames("role-cell", roleClass)} title={titleText}>
-      <span className="role-dot" aria-hidden="true"></span>
-      <select className={classNames("role-select", inputClass)} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} value={row[col]} onChange={(e) => updateRow(row.id, col, e.target.value)}>
-        <option>principal</option>
-        <option>regalia</option>
-        <option>recompensa</option>
-      </select>
-    </div>;
-  }
-  if (col === "aplicaSegmento") {
-    return <select className={inputClass} title={titleText} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} value={isSegmentedRow(row) ? "SI" : "NO"} onChange={(e) => updateRow(row.id, col, e.target.value)}>
-      <option value="NO">NO</option>
-      <option value="SI">SI</option>
-    </select>;
-  }
-  if (col === "segmento") {
-    return isSegmentedRow(row) ? (
-      <>
-        <EditableGridInput className={inputClass} title={titleText} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} list={`segmentos-${row.id}`} value={row.segmento || ""} onCommit={(value) => updateRow(row.id, col, value)} />
-        <datalist id={`segmentos-${row.id}`}>
-          {segmentOptions.map((item) => <option key={item.segmento_id} value={item.segmento_id}>{item.segmento}</option>)}
-        </datalist>
-      </>
-    ) : (
-      <div className="readonly-cell">Todos</div>
-    );
-  }
-  if (["descripcion", "numParte", "grupoOferta", "tipoPromo"].includes(col)) {
-    return <div className="readonly-cell">{row[col]}</div>;
-  }
-  if (col === "descuento") {
-    return <div className="inline-cell">
-      <EditableGridInput className={inputClass} title={titleText} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} value={row[col] || ""} onCommit={(value) => updateRow(row.id, col, value)} />
-      {hasErr ? <AlertTriangle size={15} style={{color: "#ef4444"}}/> : hasWarn ? <AlertTriangle size={15}/> : null}
-    </div>;
-  }
-  return <div className="inline-cell">
-    <EditableGridInput className={inputClass} title={titleText} data-row-index={rowIndex} data-col-index={colIndex} onKeyDown={onKeyDown} value={row[col] || ""} onCommit={(value) => updateRow(row.id, col, value)} />
-    {hasErr && <AlertTriangle size={15} style={{color: "#ef4444"}}/>}
-  </div>;
-}
-
-export function SegmentMultiSelect({
-  options = [],
-  selected = [],
-  onChange,
-  placeholder = "Seleccione segmento(s)...",
-  disabled = false,
-  className = "",
-}) {
-  const [open, setOpen] = React.useState(false);
-  const containerRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (!open) return undefined;
-    const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
-
-  const selectedArray = Array.isArray(selected)
-    ? selected
-    : typeof selected === "string" && selected
-    ? selected.split(/\s*\|\s*/).map((s) => s.trim()).filter(Boolean)
-    : [];
-
-  const handleToggle = (id) => {
-    const next = selectedArray.includes(id)
-      ? selectedArray.filter((item) => item !== id)
-      : [...selectedArray, id];
-    onChange?.(next);
-  };
-
-  const handleSelectAll = () => {
-    if (selectedArray.length === options.length) {
-      onChange?.([]);
-    } else {
-      onChange?.(options.map((opt) => opt.segmento_id || opt.segmento));
-    }
-  };
-
-  const labelSummary = React.useMemo(() => {
-    if (!selectedArray.length) return placeholder;
-    if (selectedArray.length === 1) {
-      const match = options.find((o) => (o.segmento_id || o.segmento) === selectedArray[0]);
-      return match ? `${match.segmento_id ? match.segmento_id + " · " : ""}${match.segmento}` : selectedArray[0];
-    }
-    return `${selectedArray.length} segmentos seleccionados (${selectedArray.join(" | ")})`;
-  }, [selectedArray, options, placeholder]);
-
-  return (
-    <div className={classNames("segment-multiselect-container", className)} ref={containerRef}>
-      <button
-        type="button"
-        className={classNames("segment-multiselect-btn", open && "open", disabled && "disabled")}
-        onClick={() => !disabled && setOpen((prev) => !prev)}
-        disabled={disabled}
-      >
-        <span className="multiselect-label" title={labelSummary}>{labelSummary}</span>
-        <ChevronDown size={15} className={classNames("multiselect-chevron", open && "rotated")} />
-      </button>
-
-      {open && (
-        <div className="segment-multiselect-dropdown">
-          <div className="segment-dropdown-top">
-            <button type="button" className="multiselect-toggle-all-btn" onClick={handleSelectAll}>
-              {selectedArray.length === options.length ? "Deseleccionar todos" : "Seleccionar todos"}
-            </button>
-            <span className="multiselect-badge-count">{selectedArray.length} de {options.length}</span>
-          </div>
-          <div className="segment-dropdown-items">
-            {options.map((opt) => {
-              const optId = opt.segmento_id || opt.segmento;
-              const isChecked = selectedArray.includes(optId);
-              return (
-                <label key={optId} className={classNames("segment-dropdown-item", isChecked && "checked")}>
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => handleToggle(optId)}
-                  />
-                  {opt.segmento_id && <span className="segment-code-badge">{opt.segmento_id}</span>}
-                  <span className="segment-name-text">{opt.segmento}</span>
-                </label>
-              );
-            })}
-            {options.length === 0 && (
-              <div className="segment-dropdown-empty">Sin segmentos disponibles para este canal</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, skuMasterCount = 0, setLogs, skuMasterStatus, onRefreshSkuMaster, onCancelSkuMaster, onSaveSupabase, onSaveSupabaseDirect, onRefreshPromotionScope, promotionScopeRefreshStatus = { type: "idle", message: "" }, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador.", hideHeader = false }) {
+export default function PromosPage({ catalogoActivo, rows, setRows, comentarios, setComentarios, compradores, jerarquiaCategorias = [], segmentosClientes, skuMaster, skuMasterCount = 0, setLogs, skuMasterStatus, onRefreshSkuMaster, onCancelSkuMaster, onSaveSupabase, onSaveSupabaseDirect, onRefreshPromotionScope, promotionScopeRefreshStatus = { type: "idle", message: "" }, supabaseReady, saveSupabaseStatus, isSyncing, avanceCatalogos = {}, setAvanceCatalogos, activityContext = null, initialComprador = "", lockComprador = false, initialTipoPromo = "Descuento", title = "Carga de promociones", subtitle = "Grilla controlada para registrar promociones simples y complejas por comprador.", hideHeader = false, getPromotionSaveStatus = null }) {
   const lookupSkus = useSkuLookup();
+  const loadAiresCostWeights = useAiresWeightsLoader();
+  // AIRES: pesos por costo de la última tabla leída y aviso si no se pudieron consultar.
+  const airesWeightsRef = React.useRef({ weights: {}, notice: "" });
   const masterRef = React.useRef(skuMaster || {});
   masterRef.current = skuMaster || {};
   const [masterError, setMasterError] = React.useState("");
@@ -504,9 +316,9 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const toggleSegment = (segmentoId) => setSelectedSegments((prev) => prev.includes(segmentoId) ? prev.filter((item) => item !== segmentoId) : [...prev, segmentoId]);
   const toggleSegmentMode = () => { setSegmentMode((prev) => { if (prev) setSelectedSegments([]); return !prev; }); };
   const applySegmentsToGrid = () => {
-    const rowIds = new Set(filteredRows.map((row) => row.id));
+    const rowIds = new Set(displayRows.map((row) => row.id));
     setRows((prev) => prev.map((row) => rowIds.has(row.id) ? toAppRow(stampEditedPromo({ ...row, aplica_segmento: segmentMode && segmentText ? "SI" : "NO", aplicaSegmento: segmentMode && segmentText ? "SI" : "NO", segmento: segmentMode && segmentText ? segmentText : "Todos" })) : row));
-    pushLog(segmentMode && segmentText ? `AplicÃ³ segmentos ${segmentText}` : "MarcÃ³ promociones para pÃºblico general");
+    pushLog(segmentMode && segmentText ? `Aplicó segmentos ${segmentText}` : "Marcó promociones para público general");
   };
   const addActivityComment = () => {
     const texto = normalizeValue(activityCommentDraft);
@@ -533,7 +345,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setShowActivityComment(false);
     pushLog(`Agregó comentario general en ${currentActivityName}`);
   };
-  const buildPromoRow = ({ sku = "", promoType = tipoActivo, group = "", tipoSku = "", tipoCantidad = "Exacta", cantidadMinima = 1, precioAhora = "", descuento = "", comentario = "", variante = "", segmento = "", aplicaSegmento = "" } = {}) => {
+  const buildPromoRow = ({ sku = "", numPagina = "", numero_pagina = "", promoType = tipoActivo, group = "", tipoSku = "", tipoCantidad = "Exacta", cantidadMinima = 1, precioAhora = "", descuento = "", comentario = "", variante = "", segmento = "", aplicaSegmento = "", descripcion = "" } = {}) => {
     const cleanSku = normalizeValue(sku);
     const master = masterRef.current[cleanSku] || {};
     const rowId = makeId("ROW");
@@ -545,6 +357,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const actividadId = currentActivityId;
     const division = getMasterDivision(master, buyer?.division || "");
     const compradorId = buyer?.comprador_id || buyer?.compradorId || buyer?.id || "";
+    const resolvedNumPagina = numPagina || numero_pagina || "";
     return toAppRow(stampCreatedPromo({
       row_id: rowId,
       actividad_id: actividadId,
@@ -553,12 +366,16 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       tipo_sku: tipoSku || (promoIsComplex ? "principal" : "simple"),
       variante,
       sku: cleanSku,
+      num_pagina: resolvedNumPagina,
+      numero_pagina: resolvedNumPagina,
+      numPagina: resolvedNumPagina,
       dep_id: master.dep_id || "",
       num_parte: master.vpn || "",
-      descripcion: master.descripcion || "",
+      // AIRES: la descripción de la plantilla reemplaza la del maestro.
+      descripcion: descripcion || master.descripcion || "",
       tipo_cantidad: tipoCantidad,
       cantidad_minima: cantidadMinima,
-      precio_antes: master.precio ?? "",
+      precio_antes: priceWithIva(master.precio),
       precio_ahora: precioAhora,
       descuento,
       comentario_comprador: comentario,
@@ -641,16 +458,16 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     });
     setRows((prev) => [...prev, ...principalRows, ...rewardRows]);
     setComboDraft(createEmptyComboDraft());
-    pushLog(`AgregÃ³ combo completo ${group}: ${validPrincipals.length} principal(es) y ${validRewards.length} regalÃ­a(s)`);
+    pushLog(`Agregó combo completo ${group}: ${validPrincipals.length} principal(es) y ${validRewards.length} regalía(s)`);
   });
   const addRow = (sku = "") => {
     if (!canCreatePromotion) return;
     sku = normalizeValue(sku);
     if (sku && !isNumericSku(sku)) return;
-    if (tipoActivo === "Combo") return;
+    if (tipoActivo === "Combo" || tipoActivo === AIRES_PROMO_TYPE) return;
     const newRow = buildPromoRow({ sku });
     setRows((prev) => [...prev, newRow]);
-    pushLog(`AgregÃ³ SKU ${sku || "sin cÃ³digo"} en ${tipoActivo}`);
+    pushLog(`Agregó SKU ${sku || "sin código"} en ${tipoActivo}`);
   };
   const openAddPromoModal = () => {
     if (!canCreatePromotion) return;
@@ -687,6 +504,10 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       setSimplePromoDraft((current) => ({ ...current, error: "Ingrese el descuento de la promocion." }));
       return;
     }
+    if (descuento && isDiscountOverLimit(descuento)) {
+      setSimplePromoDraft((current) => ({ ...current, error: `El descuento no puede ser mayor a ${MAX_DISCOUNT_PERCENT}%.` }));
+      return;
+    }
     if (promoType === "Precio fijo" && !precioAhora) {
       setSimplePromoDraft((current) => ({ ...current, error: "Ingrese el precio fijo con IVA." }));
       return;
@@ -698,6 +519,8 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const aplicaSegmento = segmentMode && segmentoVal !== "Todos" ? "SI" : "NO";
     const newRow = buildPromoRow({
       sku,
+      numPagina: simplePromoDraft.numPagina || "",
+      numero_pagina: simplePromoDraft.numPagina || "",
       promoType,
       tipoCantidad: simplePromoDraft.tipoCantidad || "Exacta",
       cantidadMinima: Math.max(1, Number(simplePromoDraft.cantidadMinima) || 1),
@@ -708,7 +531,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       aplicaSegmento,
     });
     setRows((prev) => [...prev, newRow]);
-    pushLog(`AgregÃ³ SKU ${sku} en ${promoType}`);
+    pushLog(`Agregó SKU ${sku} en ${promoType}`);
     closeSimplePromoModal();
   });
   const pasteSkus = async () => {
@@ -719,6 +542,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       masterRef.current = await lookupSkus(getBulkSkus(text, getDefaultBulkColumnForPromoType(tipoActivo) || "sku"));
       if (tipoActivo === "Umbral") { setBulkColumn(BULK_COLUMN_UMBRAL_TABLE); setBulkText(text); setBulkPreview(buildUmbralBulkPreview(text, masterRef.current)); return; }
       if (tipoActivo === "Combo") { setBulkColumn(BULK_COLUMN_COMBO_TABLE); setBulkText(text); setBulkPreview(buildComboBulkPreview(text, masterRef.current)); return; }
+      if (tipoActivo === AIRES_PROMO_TYPE) { await refreshAiresWeights(text); setBulkColumn(BULK_COLUMN_AIRES_TABLE); setBulkText(text); setBulkPreview(buildBulkPreviewItems(text, BULK_COLUMN_AIRES_TABLE)); return; }
       if (BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo)) { setBulkColumn(BULK_COLUMN_BUY_X_GET_X_TABLE); setBulkText(text); setBulkPreview(buildBuyXGetXBulkPreview(text, masterRef.current, tipoActivo)); return; }
       if (tipoActivo === MEGAPACK_PROMO_TYPE) { setBulkColumn(BULK_COLUMN_MEGAPACK_TABLE); setBulkText(text); setBulkPreview(buildMegapackBulkPreview(text, masterRef.current)); return; }
       parseClipboardValues(text).forEach(addRow);
@@ -737,10 +561,33 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     else if (isBulkTableColumn(bulkColumn)) setBulkColumn("sku");
   };
   const getBulkSkus = (text, column) => getBulkSkuCodes(text, column, tipoActivo);
-  const buildBulkPreviewItems = (text = bulkText, column = bulkColumn) => {
+  // AIRES: pide a Supabase los pesos por costo de cada aire. Si la consulta falla o no hay
+  // conexión, el aire se reparte por precio regular y la vista previa lo avisa.
+  const refreshAiresWeights = async (text) => {
+    const request = getAiresWeightRequest(parseAiresTable(parseClipboardRows(text)));
+    if (!request.length) { airesWeightsRef.current = { weights: {}, notice: "" }; return; }
+    if (typeof loadAiresCostWeights !== "function") {
+      airesWeightsRef.current = { weights: {}, notice: "Sin conexión para consultar costos: el precio se repartió por precio regular." };
+      return;
+    }
+    try {
+      airesWeightsRef.current = { weights: normalizeAiresCostWeights(await loadAiresCostWeights(request)), notice: "" };
+    } catch (error) {
+      airesWeightsRef.current = { weights: {}, notice: `No se pudo consultar el costo (${error?.message || "error de red"}): el precio se repartió por precio regular. Revise antes de aplicar.` };
+    }
+  };
+  const buildAiresPreview = (text) => {
+    const existingAires = indexExistingAires(rows.filter((row) => rowMatchesActiveScope(row) && isAiresRow(row) && String(row.estado_registro || "").toUpperCase() !== "ANULADO"));
+    const preview = buildAiresBulkPreview(text, masterRef.current, { costWeightsByCombo: airesWeightsRef.current.weights, existingAires });
+    const notice = airesWeightsRef.current.notice;
+    return notice ? [{ index: "Aviso", sku: "Costo", descripcion: notice, campo: "Reparto", valorActual: "", valorNuevo: "Precio regular", warning: true, canApply: false }, ...preview] : preview;
+  };
+  const buildBulkPreviewItems = (text = bulkText, column = bulkColumn) => withDiscountLimitNotice(buildBulkPreviewItemsRaw(text, column));
+  const buildBulkPreviewItemsRaw = (text = bulkText, column = bulkColumn) => {
     const pastedRows = parseClipboardRows(text); if (!pastedRows.length) return [];
     if (column === BULK_COLUMN_UMBRAL_TABLE) return buildUmbralBulkPreview(text, masterRef.current);
     if (column === BULK_COLUMN_COMBO_TABLE) return buildComboBulkPreview(text, masterRef.current);
+    if (column === BULK_COLUMN_AIRES_TABLE) return buildAiresPreview(text);
     if (column === BULK_COLUMN_BUY_X_GET_X_TABLE) return buildBuyXGetXBulkPreview(text, masterRef.current, tipoActivo);
     if (column === BULK_COLUMN_MEGAPACK_TABLE) return buildMegapackBulkPreview(text, masterRef.current);
     const numericRows = pastedRows.filter((cells) => isNumericSku(cells[0]));
@@ -748,21 +595,34 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const simpleRequiredPaste = column === (tipoActivo === "Precio fijo" ? "precioAhora" : tipoActivo === "Descuento" ? "descuento" : "");
     if (simpleRequiredPaste) return numericRows.map((cells, index) => {
       const sku = cells[0];
-      const value = cells.length > 1 ? cells[1] : "";
+      const rawValue = cells.length > 1 ? cells[1] : "";
+      // Precio fijo: quita separadores de miles ("2,999.00" -> "2999.00"). Descuento: "30", "-30", "0.3" -> "30%".
+      const value = !normalizeValue(rawValue) ? rawValue : column === "precioAhora" ? normalizePastedNumber(rawValue) : normalizeDiscountValue(rawValue);
       const optionalValue = cells.length > 2 ? normalizeValue(cells[2]) : "";
       const commentValue = cells.length > 3 ? normalizeValue(cells[3]) : "";
+      const pageValue = cells.length > 4 ? normalizeValue(cells[4]) : "";
       const extraValues = {};
       if (optionalValue && column === "descuento") { const precioAhora = normalizePastedNumber(optionalValue); extraValues.precioAhora = precioAhora; extraValues.precio_ahora = precioAhora; }
       if (optionalValue && column === "precioAhora") extraValues.descuento = normalizeDiscountValue(optionalValue);
       if (commentValue) extraValues.comentario = commentValue;
-      const extraSummary = [hasPromoFieldValue(extraValues.precioAhora) ? `Precio ${extraValues.precioAhora}` : "", hasPromoFieldValue(extraValues.descuento) ? `Descuento ${extraValues.descuento}` : "", extraValues.comentario ? "Comentario" : ""].filter(Boolean).join(" | ");
+      if (pageValue) {
+        extraValues.numPagina = pageValue;
+        extraValues.num_pagina = pageValue;
+        extraValues.numero_pagina = pageValue;
+      }
+      const extraSummary = [hasPromoFieldValue(extraValues.precioAhora) ? `Precio ${extraValues.precioAhora}` : "", hasPromoFieldValue(extraValues.descuento) ? `Descuento ${extraValues.descuento}` : "", extraValues.comentario ? "Comentario" : "", extraValues.numPagina ? `Pág. ${extraValues.numPagina}` : ""].filter(Boolean).join(" | ");
       const matches = rows.filter((row) => rowMatchesActiveScope(row) && rowMatchesSkuSegment(row, sku));
       const missingSecondColumn = cells.length < 2;
       const missingRequired = !sku || missingSecondColumn;
       const master = masterRef.current[sku];
       const baseDescripcion = missingRequired ? `Pegue dos columnas: SKU y ${labels[column]}` : matches.length ? `Actualizara ${matches.length} fila(s) existente(s)` : master?.descripcion || "SKU nuevo sin descripcion del maestro en la BD";
-      const descripcion = extraSummary ? `${baseDescripcion} | ${extraSummary}` : baseDescripcion;
-      return { index:index+1, rowId:matches[0]?.id || null, rowIds:matches.map((row) => row.id), sku:sku || "SKU vacio", descripcion, campo:labels[column], valorActual:matches.length ? matches.map((row) => row[column] || "").join(" | ") : "", valorNuevo:value, extraValues, warning:missingRequired || !master, canApply:!missingRequired };
+      // Descuento sin "Ahora c/iva" en la plantilla: el precio se calcula desde el precio regular del maestro.
+      const missingRegularPrice = column === "descuento" && !missingRequired && !hasPromoFieldValue(extraValues.precioAhora) && !hasPromoFieldValue(master?.precio);
+      const priceNote = missingRegularPrice ? "Sin precio regular en maestro: no se puede calcular Ahora c/iva" : "";
+      const descripcion = [baseDescripcion, extraSummary, priceNote].filter(Boolean).join(" | ");
+      const previewItem = { index:index+1, rowId:matches[0]?.id || null, rowIds:matches.map((row) => row.id), sku:sku || "SKU vacio", descripcion, campo:labels[column], valorActual:matches.length ? matches.map((row) => row[column] || "").join(" | ") : "", valorNuevo:value, extraValues, warning:missingRequired || !master || missingRegularPrice, canApply:!missingRequired };
+      const checkedItem = column === "precioAhora" && !missingRequired ? blockMissingFixedPrice(previewItem, value) : previewItem;
+      return blockDiscountOverLimit(checkedItem, column === "descuento" ? value : extraValues.descuento);
     });
     return numericRows.map((cells, index) => {
       const sku = cells[0];
@@ -776,7 +636,11 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       return { index:index+1, rowId:row?.id || null, sku:sku || "SKU vacio", descripcion, campo:labels[column], valorActual:row ? row[column] : "", valorNuevo:value, warning, canApply:!warning };
     });
   };
-  const buildBulkPreview = withArticles(() => getBulkSkus(bulkText, bulkColumn), () => { if (!canCreatePromotion) return; setBulkPreview(buildBulkPreviewItems()); });
+  const buildBulkPreview = withArticles(() => getBulkSkus(bulkText, bulkColumn), async () => {
+    if (!canCreatePromotion) return;
+    if (bulkColumn === BULK_COLUMN_AIRES_TABLE) await refreshAiresWeights(bulkText);
+    setBulkPreview(buildBulkPreviewItems());
+  });
   const loadPromoTemplate = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !canCreatePromotion) return;
@@ -784,10 +648,11 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     try {
       const result = await readPromoTemplateFile(file, tipoActivo);
       masterRef.current = await lookupSkus(getBulkSkus(result.text, result.bulkColumn));
+      if (result.bulkColumn === BULK_COLUMN_AIRES_TABLE) await refreshAiresWeights(result.text);
       const preview = buildBulkPreviewItems(result.text, result.bulkColumn);
       setBulkColumn(result.bulkColumn);
       setBulkText(result.text);
-      setBulkPreview(preview.length ? preview : [{ index:"Aviso", sku:"Plantilla", descripcion:`La pestaÃ±a ${result.sheetName} no generÃ³ vista previa.`, campo:"Archivo", valorActual:"", valorNuevo:file.name, warning:true, canApply:false }]);
+      setBulkPreview(preview.length ? preview : [{ index:"Aviso", sku:"Plantilla", descripcion:`La pestaña ${result.sheetName} no generó vista previa.`, campo:"Archivo", valorActual:"", valorNuevo:file.name, warning:true, canApply:false }]);
     } catch (error) {
       setBulkPreview([{ index:"Aviso", sku:"Plantilla", descripcion:error?.message || "No se pudo leer la plantilla.", campo:"Archivo", valorActual:"", valorNuevo:file.name, warning:true, canApply:false }]);
     } finally {
@@ -802,6 +667,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   const applyBulkPaste = withArticles(() => bulkPreview.flatMap((item) => [item.principalSku || item.sku, ...(item.rewards || []).map((reward) => reward.sku)]).filter(isNumericSku), () => {
     if (!canCreatePromotion) return;
     if (!bulkPreview.length) return;
+    if (bulkPreview.some((item) => item.blocking)) return;
     if (bulkColumn === "sku") { bulkPreview.forEach((item) => addRow(item.valorNuevo)); setBulkText(""); setBulkPreview([]); return; }
     if (bulkColumn === BULK_COLUMN_UMBRAL_TABLE) {
       const applicableItems = bulkPreview.filter((item) => item.canApply !== false);
@@ -809,11 +675,11 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       const newRows = [];
       applicableItems.forEach((item) => {
         if (!groupsBySku.has(item.sku)) groupsBySku.set(item.sku, createGroupForCurrentActivity("Umbral", [...rows, ...newRows]));
-        newRows.push(buildPromoRow({ sku: item.sku, promoType: "Umbral", group: groupsBySku.get(item.sku), tipoSku: "principal", tipoCantidad: "MÃ­nimo", cantidadMinima: item.cantidadMinima, precioAhora: item.precioAhora, descuento: item.descuento }));
+        newRows.push(buildPromoRow({ sku: item.sku, promoType: "Umbral", group: groupsBySku.get(item.sku), tipoSku: "principal", tipoCantidad: "Mínimo", cantidadMinima: item.cantidadMinima, precioAhora: item.precioAhora, descuento: item.descuento, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
       });
       if (!newRows.length) return;
       setRows((prev) => [...prev, ...newRows]);
-      pushLog(`PegÃ³ ${newRows.length} filas de umbral para ${groupsBySku.size} SKU`);
+      pushLog(`Pegó ${newRows.length} filas de umbral para ${groupsBySku.size} SKU`);
       setBulkText("");
       setBulkPreview([]);
       return;
@@ -825,13 +691,59 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       applicableItems.forEach((item) => {
         if (!groupsByScenario.has(item.scenario)) groupsByScenario.set(item.scenario, createGroupForCurrentActivity("Combo", [...rows, ...newRows]));
         const reward = isComboRewardRole(item.role);
-        const comboComment = [`${item.scenario}: ${reward ? "regalia" : "principal"} cantidad 1`, item.comentario].filter(Boolean).join(" | ");
-        newRows.push(buildPromoRow({ sku: item.sku, promoType: "Combo", group: groupsByScenario.get(item.scenario), tipoSku: reward ? "regalia" : "principal", tipoCantidad: "Exacta", cantidadMinima: 1, precioAhora: item.precioAhora, descuento: item.descuento, comentario: comboComment }));
+        const comboQuantity = Number(item.cantidadMinima) > 0 ? Number(item.cantidadMinima) : 1;
+        const comboComment = [`${item.scenario}: ${reward ? "regalia" : "principal"} cantidad ${comboQuantity}`, item.comentario].filter(Boolean).join(" | ");
+        newRows.push(buildPromoRow({ sku: item.sku, promoType: "Combo", group: groupsByScenario.get(item.scenario), tipoSku: reward ? "regalia" : "principal", tipoCantidad: "Exacta", cantidadMinima: comboQuantity, precioAhora: item.precioAhora, descuento: item.descuento, comentario: comboComment, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
       });
       if (!newRows.length) return;
       setRows((prev) => [...prev, ...newRows]);
       setComboDraft((prev) => ({ ...prev, group: Array.from(groupsByScenario.values()).at(-1) || prev.group }));
-      pushLog(`PegÃ³ ${newRows.length} filas de combo para ${groupsByScenario.size} combos`);
+      pushLog(`Pegó ${newRows.length} filas de combo para ${groupsByScenario.size} combos`);
+      setBulkText("");
+      setBulkPreview([]);
+      return;
+    }
+    if (bulkColumn === BULK_COLUMN_AIRES_TABLE) {
+      const applicableItems = bulkPreview.filter((item) => item.canApply !== false && item.index !== "Aviso");
+      const piecesByAire = new Map();
+      applicableItems.forEach((item) => {
+        if (!piecesByAire.has(item.scenario)) piecesByAire.set(item.scenario, []);
+        piecesByAire.get(item.scenario).push(item);
+      });
+      const newRows = [];
+      const updates = new Map();
+      let createdCount = 0;
+      let updatedCount = 0;
+      piecesByAire.forEach((pieces) => {
+        const existingGroup = pieces[0].existingGroup;
+        if (existingGroup) {
+          // Misma combinación de SKU ya cargada en la actividad: se actualiza el aire.
+          const existingRows = rows.filter((row) => rowMatchesActiveScope(row) && isAiresRow(row) && String(row.estado_registro || "").toUpperCase() !== "ANULADO" && (row.grupoOferta || row.grupo_oferta) === existingGroup);
+          pieces.forEach((piece) => {
+            existingRows.filter((row) => row.sku === piece.sku).forEach((row) => {
+              const comentario = buildAiresLineComment(piece, existingGroup);
+              updates.set(row.id, {
+                precioAhora: piece.precioAhora, precio_ahora: piece.precioAhora,
+                descuento: "",
+                descripcion: piece.aireDescripcion,
+                cantidadMinima: piece.cantidadMinima, cantidad_minima: piece.cantidadMinima,
+                comentario, comentario_comprador: comentario,
+                ...(piece.numPagina ? { numPagina: piece.numPagina, num_pagina: piece.numPagina, numero_pagina: piece.numPagina } : {}),
+              });
+            });
+          });
+          updatedCount += 1;
+          return;
+        }
+        const group = createGroupForCurrentActivity(AIRES_PROMO_TYPE, [...rows, ...newRows]);
+        pieces.forEach((piece) => {
+          newRows.push(buildPromoRow({ sku: piece.sku, promoType: AIRES_PROMO_TYPE, group, tipoSku: AIRES_COMPONENT_ROLE, tipoCantidad: "Exacta", cantidadMinima: piece.cantidadMinima, precioAhora: piece.precioAhora, descuento: "", comentario: buildAiresLineComment(piece, group), numPagina: piece.numPagina, numero_pagina: piece.numero_pagina, descripcion: piece.aireDescripcion }));
+        });
+        createdCount += 1;
+      });
+      if (!newRows.length && !updates.size) return;
+      setRows((prev) => [...prev.map((row) => (updates.has(row.id) ? toAppRow(stampEditedPromo({ ...row, ...updates.get(row.id) })) : row)), ...newRows]);
+      pushLog(`Cargó AIRES: ${createdCount} aire(s) nuevo(s) y ${updatedCount} actualizado(s)`);
       setBulkText("");
       setBulkPreview([]);
       return;
@@ -843,15 +755,15 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
         const promoType = BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) ? tipoActivo : BUY_X_GET_X_PROMO_TYPE;
         const group = createGroupForCurrentActivity(promoType, [...rows, ...newRows]);
         if (promoType === BUY_X_GET_X_V2_PROMO_TYPE) {
-          newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, precioAhora: item.precioAhora, descuento: item.descuento, comentario: `Variante ${item.variant}: principal ${item.principalQty}; regalia ${item.rewardQty}`, variante: item.variant }));
+          newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, precioAhora: item.precioAhora, descuento: item.descuento, comentario: `Variante ${item.variant}: principal ${item.principalQty}; regalia ${item.rewardQty}`, variante: item.variant, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
           return;
         }
-        newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, precioAhora: item.precioAhora, descuento: item.descuento, comentario: `Variante ${item.variant}: principal ${item.principalQty}`, variante: item.variant }));
-        newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "regalia", tipoCantidad: "Exacta", cantidadMinima: item.rewardQty, precioAhora: 0, descuento: "100%", comentario: `Variante ${item.variant}: regalia ${item.rewardQty}`, variante: item.variant }));
+        newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, precioAhora: item.precioAhora, descuento: item.descuento, comentario: `Variante ${item.variant}: principal ${item.principalQty}`, variante: item.variant, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
+        newRows.push(buildPromoRow({ sku: item.sku, promoType, group, tipoSku: "regalia", tipoCantidad: "Exacta", cantidadMinima: item.rewardQty, precioAhora: 0, descuento: "100%", comentario: `Variante ${item.variant}: regalia ${item.rewardQty}`, variante: item.variant, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
       });
       if (!newRows.length) return;
       setRows((prev) => [...prev, ...newRows]);
-      pushLog(`PegÃ³ ${newRows.length} filas de ${tipoActivo} para ${applicableItems.length} variantes`);
+      pushLog(`Pegó ${newRows.length} filas de ${tipoActivo} para ${applicableItems.length} variantes`);
       setBulkText("");
       setBulkPreview([]);
       return;
@@ -862,15 +774,15 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
       applicableItems.forEach((item) => {
         const group = createGroupForCurrentActivity(MEGAPACK_PROMO_TYPE, [...rows, ...newRows]);
         const baseComment = [`Megapack: compra ${item.principalQty}`, item.comentario].filter(Boolean).join(" | ");
-        newRows.push(buildPromoRow({ sku: item.principalSku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, comentario: baseComment }));
+        newRows.push(buildPromoRow({ sku: item.principalSku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "principal", tipoCantidad: "Exacta", cantidadMinima: item.principalQty, comentario: baseComment, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
         item.rewards.forEach((reward) => {
           const rewardComment = [`Megapack: obsequio ${reward.quantity}`, item.comentario].filter(Boolean).join(" | ");
-          newRows.push(buildPromoRow({ sku: reward.sku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "regalia", tipoCantidad: "Exacta", cantidadMinima: reward.quantity, precioAhora: 0, descuento: "100%", comentario: rewardComment }));
+          newRows.push(buildPromoRow({ sku: reward.sku, promoType: MEGAPACK_PROMO_TYPE, group, tipoSku: "regalia", tipoCantidad: "Exacta", cantidadMinima: reward.quantity, precioAhora: 0, descuento: "100%", comentario: rewardComment, numPagina: item.numPagina, numero_pagina: item.numero_pagina }));
         });
       });
       if (!newRows.length) return;
       setRows((prev) => [...prev, ...newRows]);
-      pushLog(`PegÃ³ ${newRows.length} filas de ${MEGAPACK_PROMO_TYPE} para ${applicableItems.length} megapack`);
+      pushLog(`Pegó ${newRows.length} filas de ${MEGAPACK_PROMO_TYPE} para ${applicableItems.length} megapack`);
       setBulkText("");
       setBulkPreview([]);
       return;
@@ -885,7 +797,14 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
           const extraValues = item.extraValues || {};
           if (matches.length) {
             const ids = new Set(matches.map((row) => row.id));
-            nextRows = nextRows.map((row) => ids.has(row.id) ? toAppRow(stampEditedPromo({ ...row, [bulkColumn]: item.valorNuevo, [bulkColumn === "precioAhora" ? "precio_ahora" : bulkColumn]: item.valorNuevo, ...extraValues })) : row);
+            // Al cambiar el descuento se recalcula Ahora c/iva (salvo que la plantilla traiga uno explicito).
+            const recalcDiscountPrice = bulkColumn === "descuento" && !hasPromoFieldValue(extraValues.precioAhora);
+            const masterPrice = priceWithIva(masterRef.current[item.sku]?.precio);
+            nextRows = nextRows.map((row) => {
+              if (!ids.has(row.id)) return row;
+              const priceReset = recalcDiscountPrice ? { precioAhora: "", precio_ahora: "", ...(hasPromoFieldValue(row.precioAntes) || hasPromoFieldValue(row.precio_antes) || !hasPromoFieldValue(masterPrice) ? {} : { precioAntes: masterPrice, precio_antes: masterPrice }) } : {};
+              return toAppRow(stampEditedPromo({ ...row, [bulkColumn]: item.valorNuevo, [bulkColumn === "precioAhora" ? "precio_ahora" : bulkColumn]: item.valorNuevo, ...priceReset, ...extraValues }));
+            });
             return;
           }
           const values = bulkColumn === "precioAhora" ? { precioAhora: item.valorNuevo } : { descuento: item.valorNuevo };
@@ -893,13 +812,13 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
         });
         return nextRows;
       });
-      pushLog(`PegÃ³ ${applicableItems.length} valores de ${labels[bulkColumn]} en ${tipoActivo}`);
+      pushLog(`Pegó ${applicableItems.length} valores de ${labels[bulkColumn]} en ${tipoActivo}`);
       setBulkText("");
       setBulkPreview([]);
       return;
     }
     const map = new Map(bulkPreview.filter((item) => item.rowId && !item.warning && isNumericSku(item.sku)).map((item) => [item.rowId, item.valorNuevo]));
-    setRows((prev) => prev.map((row) => map.has(row.id) ? toAppRow(stampEditedPromo({ ...row, [bulkColumn]: map.get(row.id), [bulkColumn === "precioAhora" ? "precio_ahora" : bulkColumn]: map.get(row.id) })) : row));
+    setRows((prev) => prev.map((row) => map.has(row.id) ? toAppRow(stampEditedPromo({ ...row, [bulkColumn]: map.get(row.id), [bulkColumn === "precioAhora" ? "precio_ahora" : bulkColumn]: map.get(row.id), ...(bulkColumn === "numPagina" ? { numero_pagina: map.get(row.id), num_pagina: map.get(row.id) } : {}) })) : row));
     setBulkText("");
     setBulkPreview([]);
   });
@@ -912,7 +831,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     setSelectedSegments([]);
     setComboDraft(createEmptyComboDraft());
   };
-  const { updateRow, isResolvingSku } = usePromos({
+  const { updateRow: updatePromoRow, isResolvingSku } = usePromos({
     lookupSkus,
     onLookupError: setMasterError,
     setRows,
@@ -922,6 +841,38 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     normalizeRow: toAppRow,
     auditUser,
   });
+  // Líneas de un mismo aire (misma oferta en la actividad).
+  const getAiresOfferKey = (row) => [row.actividadId || row.actividad_id || "", row.ofertaId || row.oferta_id || row.grupoOferta || row.grupo_oferta || ""].join("::");
+  const getAiresLines = (row, sourceRows = rows) => {
+    const key = getAiresOfferKey(row);
+    return sourceRows.filter((item) => isAiresRow(item) && String(item.estado_registro || "").toUpperCase() !== "ANULADO" && getAiresOfferKey(item) === key);
+  };
+  // Precio del aire = suma de sus piezas (se muestra en cada línea del aire).
+  const airesTotals = useMemo(() => {
+    const groups = new Map();
+    rows.forEach((row) => {
+      if (!isAiresRow(row) || String(row.estado_registro || "").toUpperCase() === "ANULADO") return;
+      const key = getAiresOfferKey(row);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    return new Map(Array.from(groups.entries()).map(([key, lines]) => [key, getAiresGroupTotal(lines)]));
+  }, [rows]);
+  const updateRow = (id, field, value) => {
+    if (field !== "precioAire") return updatePromoRow(id, field, value);
+    const target = rows.find((row) => row.id === id);
+    if (!target) return undefined;
+    const lines = getAiresLines(target);
+    const prices = redistributeAiresGroup(lines, value);
+    if (!prices) {
+      setMasterError(`Precio del aire inválido (${value || "vacío"}): use un número mayor a 0.`);
+      return undefined;
+    }
+    setMasterError("");
+    setRows((prev) => prev.map((row) => (Object.prototype.hasOwnProperty.call(prices, row.id) ? toAppRow(stampEditedPromo({ ...row, precioAhora: prices[row.id], precio_ahora: prices[row.id] })) : row)));
+    pushLog(`Cambió precio del aire ${target.grupoOferta || target.grupo_oferta || ""} a ${value}`);
+    return undefined;
+  };
   React.useEffect(() => {
     if (comprador && !buyerList.includes(comprador)) {
       setComprador("");
@@ -944,15 +895,44 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     const timer = window.setTimeout(() => simplePromoSkuInputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [simplePromoModalOpen]);
-  const promoGridTotalPages = Math.max(1, Math.ceil(filteredRows.length / PROMO_GRID_PAGE_SIZE));
+  // Filtro "Todas / Guardadas en BD / Pendientes". En promociones complejas se filtra por oferta
+  // completa: si una linea del grupo esta pendiente, se muestra todo el grupo.
+  const [saveFilter, setSaveFilter] = React.useState("all");
+  const showSaveFilter = typeof getPromotionSaveStatus === "function";
+  const saveStatusById = useMemo(() => {
+    const map = new Map();
+    if (!showSaveFilter) return map;
+    activeRows.forEach((row) => map.set(row.id, getPromotionSaveStatus(row)));
+    return map;
+  }, [activeRows, getPromotionSaveStatus, showSaveFilter]);
+  const getRowSaveKey = (row) => (esCompleja ? (row.grupoOferta || row.grupo_oferta || row.id) : row.id);
+  const pendingSaveKeys = useMemo(() => {
+    const keys = new Set();
+    activeRows.forEach((row) => { if ((saveStatusById.get(row.id) || "saved") !== "saved") keys.add(getRowSaveKey(row)); });
+    return keys;
+  }, [activeRows, saveStatusById, esCompleja]);
+  const saveFilterCounts = useMemo(() => {
+    const pending = filteredRows.filter((row) => pendingSaveKeys.has(getRowSaveKey(row))).length;
+    return { all: filteredRows.length, saved: filteredRows.length - pending, pending };
+  }, [filteredRows, pendingSaveKeys, esCompleja]);
+  const displayRows = useMemo(() => {
+    if (!showSaveFilter || saveFilter === "all") return filteredRows;
+    const wantPending = saveFilter === "pending";
+    return filteredRows.filter((row) => pendingSaveKeys.has(getRowSaveKey(row)) === wantPending);
+  }, [filteredRows, pendingSaveKeys, saveFilter, showSaveFilter, esCompleja]);
+  React.useEffect(() => {
+    setPromoGridPage(1);
+    setSelectedPromoIds(new Set());
+  }, [saveFilter]);
+  const promoGridTotalPages = Math.max(1, Math.ceil(displayRows.length / PROMO_GRID_PAGE_SIZE));
   const safePromoGridPage = Math.min(promoGridPage, promoGridTotalPages);
   React.useEffect(() => {
     if (promoGridPage > promoGridTotalPages) setPromoGridPage(promoGridTotalPages);
   }, [promoGridPage, promoGridTotalPages]);
   const paginatedRows = useMemo(() => {
     const start = (safePromoGridPage - 1) * PROMO_GRID_PAGE_SIZE;
-    return filteredRows.slice(start, start + PROMO_GRID_PAGE_SIZE);
-  }, [filteredRows, safePromoGridPage]);
+    return displayRows.slice(start, start + PROMO_GRID_PAGE_SIZE);
+  }, [displayRows, safePromoGridPage]);
   const selectableFilteredRowIds = useMemo(() => paginatedRows.map((row) => row.id).filter(Boolean), [paginatedRows]);
   React.useEffect(() => {
     setSelectedPromoIds((current) => pruneSelectionToVisible(current, selectableFilteredRowIds));
@@ -1007,7 +987,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
     requestAnulation(getPromotionAnulationScopeByIds(ids, rows));
   };
   const { bulkInstructions, bulkPlaceholder } = getBulkPasteContent({ bulkColumn, tipoActivo, labels, isSimpleRequiredValuePaste });
-  const canApplyBulkPreview = bulkPreview.length > 0 && bulkPreview.some((item) => item.canApply !== false);
+  const canApplyBulkPreview = bulkPreview.length > 0 && !bulkPreview.some((item) => item.blocking) && bulkPreview.some((item) => item.canApply !== false);
   const isComboActive = tipoActivo === "Combo";
   const principalCompleteCount = comboPrincipals.filter((line) => normalizeValue(line.sku) && canUseComboBenefit(line.beneficio, line.valor)).length;
   const rewardCompleteCount = comboRewards.filter((line) => normalizeValue(line.sku) && canUseComboBenefit(line.beneficio, line.valor)).length;
@@ -1033,20 +1013,20 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
   };
   const renderComboLine = (role, line, index, total) => {
     const isReward = role === "reward";
-    const collectionLabel = isReward ? "regalÃ­a" : "principal";
+    const collectionLabel = isReward ? "regalía" : "principal";
     const needsValue = comboBenefitNeedsValue(line.beneficio);
     return <div className="combo-line" key={line.id}>
       <div className="combo-line-head">
         <strong>{collectionLabel} {index + 1}</strong>
         <button type="button" className="icon-btn" onClick={() => removeComboDraftLine(role, line.id)} disabled={total <= 1} title={`Quitar ${collectionLabel}`} aria-label={`Quitar ${collectionLabel}`}><Trash2 size={15}/></button>
       </div>
-      <label className="field"><span>SKU</span><input value={line.sku || ""} onChange={(e) => updateComboLine(role, line.id, "sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={isReward ? "SKU de regalÃ­a" : "SKU principal"} /></label>
+      <label className="field"><span>SKU</span><input value={line.sku || ""} onChange={(e) => updateComboLine(role, line.id, "sku", e.target.value)} disabled={!compradorSeleccionado} placeholder={isReward ? "SKU de regalía" : "SKU principal"} /></label>
       <label className="field"><span>{isReward ? "Cantidad entregada" : "Cantidad comprada"}</span><input type="number" min="1" step="1" value={line.cantidad || 1} onChange={(e) => updateComboLine(role, line.id, "cantidad", e.target.value)} disabled={!compradorSeleccionado} /></label>
-      <label className="field"><span>Beneficio</span><select value={line.beneficio || (isReward ? "gratis" : "descuento")} onChange={(e) => updateComboLine(role, line.id, "beneficio", e.target.value)} disabled={!compradorSeleccionado}>{isReward && <option value="gratis">Gratis / regalÃ­a</option>}<option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="sin">Sin beneficio</option></select></label>
+      <label className="field"><span>Beneficio</span><select value={line.beneficio || (isReward ? "gratis" : "descuento")} onChange={(e) => updateComboLine(role, line.id, "beneficio", e.target.value)} disabled={!compradorSeleccionado}>{isReward && <option value="gratis">Gratis / regalía</option>}<option value="descuento">Descuento</option><option value="precio">Precio fijo</option><option value="sin">Sin beneficio</option></select></label>
       <label className="field"><span>Valor beneficio</span><input value={line.valor || ""} onChange={(e) => updateComboLine(role, line.id, "valor", e.target.value)} disabled={!compradorSeleccionado || !needsValue} placeholder={line.beneficio === "precio" ? "250" : "10%"} /></label>
     </div>;
   };
-  const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder combo-builder-pair"><label className="field wide"><span>Oferta</span><select value={comboDraft.group || ""} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group}>{group}</option>)}</select></label><div className="combo-role-panel principal"><div className="combo-role-head"><div><strong>Principales</strong><span>SKU que compra el cliente</span></div><Button variant="outline" onClick={() => addComboDraftLine("principal")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboPrincipals.map((line, index) => renderComboLine("principal", line, index, comboPrincipals.length))}</div></div><div className="combo-role-panel reward"><div className="combo-role-head"><div><strong>RegalÃ­as</strong><span>SKU entregados como beneficio</span></div><Button variant="outline" onClick={() => addComboDraftLine("reward")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboRewards.map((line, index) => renderComboLine("reward", line, index, comboRewards.length))}</div></div><div className="combo-builder-summary"><span>{principalCompleteCount}/{comboPrincipals.length} principales completos</span><span>{rewardCompleteCount}/{comboRewards.length} regalÃ­as completas</span></div><div className="button-row combo-pair-actions"><Button onClick={addComboPair} disabled={!canAddComboPair}><Plus size={16}/> Agregar combo completo</Button></div></div></CardContent></Card> : null;
+  const comboBuilder = isComboActive && canEditPromos ? <Card className="combo-builder-card"><CardContent><div className="combo-builder-head"><div><h2>Constructor de combo</h2><p>{comboGroup}</p></div><Button variant="outline" onClick={startNewCombo} disabled={!compradorSeleccionado}><Plus size={16}/> Nuevo combo</Button></div><div className="combo-builder combo-builder-pair"><label className="field wide"><span>Oferta</span><select value={comboDraft.group || ""} onChange={(e) => updateComboDraft("group", e.target.value)} disabled={!compradorSeleccionado}><option value="">Nueva oferta: {createGroupForCurrentActivity("Combo")}</option>{comboGroups.map((group) => <option key={group}>{group}</option>)}</select></label><div className="combo-role-panel principal"><div className="combo-role-head"><div><strong>Principales</strong><span>SKU que compra el cliente</span></div><Button variant="outline" onClick={() => addComboDraftLine("principal")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboPrincipals.map((line, index) => renderComboLine("principal", line, index, comboPrincipals.length))}</div></div><div className="combo-role-panel reward"><div className="combo-role-head"><div><strong>Regalías</strong><span>SKU entregados como beneficio</span></div><Button variant="outline" onClick={() => addComboDraftLine("reward")} disabled={!compradorSeleccionado}><Plus size={16}/> Agregar</Button></div><div className="combo-line-list">{comboRewards.map((line, index) => renderComboLine("reward", line, index, comboRewards.length))}</div></div><div className="combo-builder-summary"><span>{principalCompleteCount}/{comboPrincipals.length} principales completos</span><span>{rewardCompleteCount}/{comboRewards.length} regalías completas</span></div><div className="button-row combo-pair-actions"><Button onClick={addComboPair} disabled={!canAddComboPair}><Plus size={16}/> Agregar combo completo</Button></div></div></CardContent></Card> : null;
   const saveSupabaseLabel = saveSupabaseStatus === "saving" ? "Guardando..." : saveSupabaseStatus === "error" ? "Reintentar" : saveSupabaseStatus === "success" ? "Guardado" : "Guardar cambios";
   const activityCommentStatus = openActivityComments.length ? `${openActivityComments.length} abierto(s)` : activityComments.length ? `${activityComments.length} registrado(s)` : "Sin comentarios";
   const simplePromoDraftType = SIMPLE_PROMO_MODAL_TYPES.includes(simplePromoDraft.tipoPromo) ? simplePromoDraft.tipoPromo : tipoActivo;
@@ -1246,7 +1226,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
             <div className="promo-action-bar">
               <div className="promo-action-left">
                 <Button variant="outline" onClick={pasteSkus} disabled={!canCreatePromotion}>
-                  <ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) || tipoActivo === MEGAPACK_PROMO_TYPE ? "Pegar tabla" : "Pegar SKU"}
+                  <ClipboardPaste size={16}/> {tipoActivo === "Umbral" || tipoActivo === "Combo" || tipoActivo === AIRES_PROMO_TYPE || BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) || tipoActivo === MEGAPACK_PROMO_TYPE ? "Pegar tabla" : "Pegar SKU"}
                 </Button>
                 <Button variant="outline" onClick={openTemplatePicker} disabled={!canCreatePromotion}>
                   <FileSpreadsheet size={16}/> Plantilla
@@ -1268,7 +1248,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
                       onChange={setSelectedSegments}
                       placeholder="Seleccionar segmento(s)..."
                     />
-                    {filteredRows.length > 0 && (
+                    {displayRows.length > 0 && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1276,7 +1256,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
                         disabled={!selectedSegments.length}
                         title="Aplicar estos segmentos a las ofertas mostradas en grilla"
                       >
-                        <Users size={14}/> Aplicar a {filteredRows.length} oferta(s)
+                        <Users size={14}/> Aplicar a {displayRows.length} oferta(s)
                       </Button>
                     )}
                   </div>
@@ -1291,14 +1271,16 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
               <label className="field">
                 <span>Pegar valores en</span>
                 <select value={bulkColumn} onChange={(e) => changeBulkColumn(e.target.value)} disabled={!canCreatePromotion}>
-                  <option value="sku">SKU nuevos</option>
+                  {tipoActivo !== AIRES_PROMO_TYPE && <option value="sku">SKU nuevos</option>}
+                  {tipoActivo === AIRES_PROMO_TYPE && <option value={BULK_COLUMN_AIRES_TABLE}>Tabla de aires</option>}
                   {tipoActivo === "Umbral" && <option value={BULK_COLUMN_UMBRAL_TABLE}>Tabla de umbrales</option>}
                   {tipoActivo === "Combo" && <option value={BULK_COLUMN_COMBO_TABLE}>Tabla de combos</option>}
                   {BUY_X_GET_X_PROMO_TYPES.includes(tipoActivo) && <option value={BULK_COLUMN_BUY_X_GET_X_TABLE}>Tabla compra X lleva X</option>}
                   {tipoActivo === MEGAPACK_PROMO_TYPE && <option value={BULK_COLUMN_MEGAPACK_TABLE}>Tabla Megapack</option>}
-                  <option value="precioAhora">Precio ahora c/IVA</option>
-                  <option value="descuento">Descuento</option>
-                  <option value="cantidadMinima">{"Cantidad mínima"}</option>
+                  {tipoActivo !== AIRES_PROMO_TYPE && <option value="precioAhora">Precio ahora c/IVA</option>}
+                  {tipoActivo !== AIRES_PROMO_TYPE && <option value="descuento">Descuento</option>}
+                  <option value="numPagina">Número de página</option>
+                  {tipoActivo !== AIRES_PROMO_TYPE && <option value="cantidadMinima">{"Cantidad mínima"}</option>}
                   <option value="comentario">Comentario adicional</option>
                 </select>
               </label>
@@ -1335,6 +1317,26 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
                   <p>{esCompleja ? "Cada paquete se configura hacia abajo: principal y recompensas." : "Cada SKU ocupa una fila independiente."}</p>
                 </div>
                 <div className="toolbar-actions">
+                  {showSaveFilter && (
+                    <div className="promo-save-filter" role="group" aria-label="Filtrar por estado de guardado">
+                      {[
+                        ["all", "Todas", "Todas las líneas de este comprador y tipo de promoción"],
+                        ["saved", "Guardadas en BD", "Líneas que ya están guardadas en la base de datos"],
+                        ["pending", "Pendientes", "Líneas nuevas o modificadas que aún no se guardan"],
+                      ].map(([key, label, hint]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={classNames("promo-save-filter-btn", key, saveFilter === key && "active")}
+                          aria-pressed={saveFilter === key}
+                          title={hint}
+                          onClick={() => setSaveFilter(key)}
+                        >
+                          {label} <span className="promo-save-filter-count">{saveFilterCounts[key]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="search">
                     <Search size={16}/>
                     <input placeholder={"Buscar SKU o descripción"} value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -1350,7 +1352,7 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
                     </Button>
                   )}
                   {canEditPromos && (
-                    <Button variant="outline" onClick={openAddPromoModal} disabled={!canCreatePromotion || isComboActive}>
+                    <Button variant="outline" onClick={openAddPromoModal} disabled={!canCreatePromotion || isComboActive || tipoActivo === AIRES_PROMO_TYPE} title={tipoActivo === AIRES_PROMO_TYPE ? "Los aires se cargan con la plantilla (pestaña AIRES) o pegando la tabla" : undefined}>
                       <Plus size={16}/> {"Agregar línea"}
                     </Button>
                   )}
@@ -1395,18 +1397,33 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
                           )}
                           {columnas.map((col, cIdx) => {
                             const cellError = cellErrors.get(`${row.id}::${col}`);
-                            return <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>{renderCell(row, col, updateRow, warning, segmentOptions, cellError, handleGridKeyDown, rIdx, cIdx)}</td>;
+                            const rowSaveStatus = col === "sku" && showSaveFilter ? saveStatusById.get(row.id) : null;
+                            return <td key={col} className={col === "sku" ? "sticky-sku-col" : ""}>
+                              {renderCell(isAiresRow(row) ? { ...row, precioAire: airesTotals.get(getAiresOfferKey(row)) ?? "" } : row, col, updateRow, warning, segmentOptions, cellError, handleGridKeyDown, rIdx, cIdx)}
+                              {rowSaveStatus && rowSaveStatus !== "saved" && (
+                                <span className={classNames("promo-save-badge", rowSaveStatus)} title={rowSaveStatus === "new" ? "Línea nueva: aún no está en la base de datos" : "Línea modificada: los cambios aún no se guardan"}>
+                                  {rowSaveStatus === "new" ? "Nueva" : "Modificada"}
+                                </span>
+                              )}
+                            </td>;
                           })}
                         </tr>
                       );
                     })}
+                    {showSaveFilter && saveFilter !== "all" && displayRows.length === 0 && (
+                      <tr>
+                        <td className="promo-save-filter-empty" colSpan={columnas.length + (canEditPromos ? 1 : 0)}>
+                          {saveFilter === "pending" ? "No hay líneas pendientes: todo está guardado en la base de datos." : "Aún no hay líneas guardadas en la base de datos."}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-              {filteredRows.length > PROMO_GRID_PAGE_SIZE && (
+              {displayRows.length > PROMO_GRID_PAGE_SIZE && (
                 <div className="pagination-bar">
                   <Button variant="outline" onClick={() => setPromoGridPage((page) => Math.max(1, page - 1))} disabled={safePromoGridPage <= 1}>Anterior</Button>
-                  <span>Pagina {safePromoGridPage} de {promoGridTotalPages} · {filteredRows.length} filas filtradas</span>
+                  <span>Pagina {safePromoGridPage} de {promoGridTotalPages} · {displayRows.length} filas filtradas</span>
                   <Button variant="outline" onClick={() => setPromoGridPage((page) => Math.min(promoGridTotalPages, page + 1))} disabled={safePromoGridPage >= promoGridTotalPages}>Siguiente</Button>
                 </div>
               )}
@@ -1436,10 +1453,13 @@ export default function PromosPage({ catalogoActivo, rows, setRows, comentarios,
             <input ref={simplePromoSkuInputRef} value={simplePromoDraft.sku} onChange={(event) => updateSimplePromoDraft("sku", event.target.value)} placeholder="Ej. 147072842" inputMode="numeric" autoComplete="off" />
           </label>
           <label className="field">
+            <span>N° Página (opcional)</span>
+            <input type="number" min="1" step="1" value={simplePromoDraft.numPagina || ""} onChange={(event) => updateSimplePromoDraft("numPagina", event.target.value)} placeholder="Ej. 1" />
+          </label>
+          <label className="field">
             <span>{"Tipo de cantidad"}</span>
-            <select value={simplePromoDraft.tipoCantidad} onChange={(event) => updateSimplePromoDraft("tipoCantidad", event.target.value)}>
-              <option value="Exacta">Exacta</option>
-              <option value="M\u00ednimo">{"M\u00ednimo"}</option>
+            <select value={normalizeTipoCantidad(simplePromoDraft.tipoCantidad) || "Exacta"} onChange={(event) => updateSimplePromoDraft("tipoCantidad", event.target.value)}>
+              {TIPOS_CANTIDAD.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
           <label className="field">

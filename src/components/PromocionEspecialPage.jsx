@@ -24,8 +24,11 @@ import {
   createSpecialActivityId,
   formatDateKey,
 } from "../utils/promoHelpers";
-import PromosPageView, { SegmentMultiSelect } from "./PromosPage";
+import PromosPageView from "./PromosPage";
+import SegmentMultiSelect from "../features/promotions/ui/SegmentMultiSelect";
 import { Button, Card, CardContent, Header } from "./ui";
+import "../styles/pages/promociones-compartido.page.css";
+import "../styles/pages/promocion-especial.page.css";
 
 const SPECIAL_CHANNEL_OPTIONS = ["Retail", "Comasa", "Galerón", "Ferrex"];
 const SPECIAL_REQUEST_REASONS = [

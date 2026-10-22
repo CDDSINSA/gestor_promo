@@ -25,11 +25,17 @@ import { usePermissions } from "../hooks/usePermissions";
 import {
   exportFidelizacionOrce,
   loadCanastoFidelizacion,
+  loadFidelizacionRequests,
+  loadFidelizacionExport,
   loadSolicitudFidelizacionDetalle,
 } from "../services/fidelizacionService";
 import { hasSupabaseConnection } from "../services/supabase";
 import { segmentosClientesIniciales } from "../constants/seedData";
 import FidelizacionUpdateModal from "./FidelizacionUpdateModal";
+import FidelizacionOrceImportModal from "./FidelizacionOrceImportModal";
+import { orceStatusLabel } from "../features/fidelizacion/orceReconciliation";
+import SummaryPanel from "../features/fidelizacion/summary/SummaryPanel";
+import "../styles/pages/fidelizacion.page.css";
 
 const PAGE_SIZE = 50;
 
@@ -51,9 +57,10 @@ export default function FidelizacionPage({
   const { can } = usePermissions();
 
   const [canal, setCanal] = useState("comasa"); // 'comasa' | 'retail'
-  const [activeTab, setActiveTab] = useState("canasto"); // 'canasto' | 'solicitudes'
+  const [activeTab, setActiveTab] = useState("canasto"); // 'canasto' | 'solicitudes' | 'resumen'
 
   const [canastoRows, setCanastoRows] = useState([]);
+  const fetchVersion = useRef(0);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
 
@@ -67,6 +74,8 @@ export default function FidelizacionPage({
 
   // Update modal
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [showOrceImport, setShowOrceImport] = useState(false);
+  const [orceSku, setOrceSku] = useState(null);
 
   // Request detail viewer modal
   const [selectedSolicitud, setSelectedSolicitud] = useState(null);
@@ -87,41 +96,49 @@ export default function FidelizacionPage({
       .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   }, [segmentosClientes, canal]);
 
-  // Lista de divisiones disponibles
-  const divisionOptions = useMemo(() => {
-    const set = new Set();
-    (jerarquiaCategorias || []).forEach((j) => {
-      const name = j.division || j.categoria || j.nombre;
-      if (name) set.add(name);
-    });
-    canastoRows.forEach((r) => {
-      if (r.division) set.add(r.division);
-    });
-    return ["Todas", ...Array.from(set).sort()];
-  }, [jerarquiaCategorias, canastoRows]);
+  const resolveDivision = useMemo(() => {
+    const byDepartment = new Map((jerarquiaCategorias || []).map((item) => [
+      String(item.dep_id ?? "").trim(), String(item.division || "").trim(),
+    ]));
+    return (division, depId) => {
+      const value = String(division ?? "").trim();
+      return byDepartment.get(String(depId ?? "").trim()) ||
+        byDepartment.get(value) || (/^\d+$/.test(value) ? "" : value);
+    };
+  }, [jerarquiaCategorias]);
 
   // Cargar canasto
   const fetchData = async () => {
+    const version = ++fetchVersion.current;
     setLoading(true);
     setStatusMessage("");
     try {
-      const data = await loadCanastoFidelizacion(supabaseConnection, {
-        canal,
-        division: selectedDivision,
-        estatus: selectedEstatus,
-      });
+      const [data, requests] = await Promise.all([
+        loadCanastoFidelizacion(supabaseConnection, { canal }),
+        loadFidelizacionRequests(supabaseConnection, canal),
+      ]);
+      if (version !== fetchVersion.current) return;
       setCanastoRows(data);
+      if (requests && setActividades) setActividades((prev) => [
+        ...prev.filter((a) => !((String(a.actividad_id || "").startsWith("FID-") || a.subtipo === "FIDELIZACION") && String(a.canal).toLowerCase() === canal)),
+        ...requests,
+      ]);
     } catch (err) {
       console.error(err);
-      setStatusMessage("Error al cargar canasto de fidelización.");
+      if (version === fetchVersion.current) {
+        setCanastoRows([]);
+        setStatusMessage(err.message || "Error al cargar canasto de fidelización.");
+      }
     } finally {
-      setLoading(false);
+      if (version === fetchVersion.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [canal, selectedDivision, selectedEstatus]);
+    if (activeTab !== "resumen") fetchData();
+    else setLoading(false);
+    return () => { fetchVersion.current++; };
+  }, [canal, supabaseConnection, activeTab]);
 
   // Reset page when filters or channel change
   useEffect(() => {
@@ -170,7 +187,7 @@ export default function FidelizacionPage({
       const s = String(sku || "").trim();
       if (!s || !info) return;
       const desc = info.descripcion || "";
-      const div = info.dep_id || info.division || info.departamento || "";
+      const div = resolveDivision(info.division || info.departamento, info.dep_id);
       registerItem(s, desc, div, "");
     });
 
@@ -185,7 +202,23 @@ export default function FidelizacionPage({
     });
 
     return map;
-  }, [rows, skuMaster, canastoRows]);
+  }, [rows, skuMaster, canastoRows, resolveDivision]);
+
+  const resolvedCanasto = useMemo(() => canastoRows.map((item) => {
+    const sku = String(item.sku || "").trim();
+    const master = skuMaster[sku] || skuMaster[sku.toLowerCase()] || skuMaster[String(Number(sku))] || {};
+    const catalog = catalogSkuMap.get(sku) || {};
+    return {
+      ...item,
+      division: resolveDivision(item.division || catalog.division || master.division || master.departamento, master.dep_id || item.dep_id),
+    };
+  }), [canastoRows, skuMaster, catalogSkuMap, resolveDivision]);
+
+  const divisionOptions = useMemo(() => {
+    const divisions = new Set((jerarquiaCategorias || []).map((item) => String(item.division || "").trim()).filter(Boolean));
+    resolvedCanasto.forEach((item) => { if (item.division) divisions.add(item.division); });
+    return ["Todas", ...Array.from(divisions).sort()];
+  }, [jerarquiaCategorias, resolvedCanasto]);
 
   // Consultar descripciones faltantes en Supabase para los SKUs del canasto
   useEffect(() => {
@@ -198,10 +231,15 @@ export default function FidelizacionPage({
   }, [canastoRows, lookupSkus]);
 
   // Transformar / pivotar canasto vertical a horizontal para visualización
+  const visibleCanasto = useMemo(() => resolvedCanasto.filter((r) =>
+    (selectedDivision === "Todas" || r.division === selectedDivision) &&
+    (selectedEstatus === "Todos" || r.estatus === selectedEstatus)
+  ), [resolvedCanasto, selectedDivision, selectedEstatus]);
+
   const pivotedRows = useMemo(() => {
     const skuMap = new Map();
 
-    canastoRows.forEach((item) => {
+    visibleCanasto.forEach((item) => {
       const sku = String(item.sku).trim();
       if (!skuMap.has(sku)) {
         const sKey = sku.toLowerCase();
@@ -217,7 +255,7 @@ export default function FidelizacionPage({
           (!Number.isNaN(skuNum) ? skuMaster[String(skuNum)] : null) ||
           {};
         const finalDesc = item.descripcion || catItem.descripcion || masterItem.descripcion || "-";
-        const finalDiv = item.division || catItem.division || masterItem.dep_id || masterItem.division || masterItem.departamento || "-";
+        const finalDiv = item.division || "-";
         const finalComp = item.comprador || catItem.comprador || "-";
 
         skuMap.set(sku, {
@@ -243,11 +281,19 @@ export default function FidelizacionPage({
     // Filtrar por SKU o lista de SKUs
     if (skuSearch.trim()) {
       const query = skuSearch.trim().toLowerCase();
-      list = list.filter((r) => r.sku.toLowerCase().includes(query) || r.descripcion.toLowerCase().includes(query));
+      const codes = query.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+      list = codes.length > 1
+        ? list.filter((r) => codes.includes(r.sku.toLowerCase()))
+        : list.filter((r) => r.sku.toLowerCase().includes(query) || r.descripcion.toLowerCase().includes(query));
     }
 
     return list;
-  }, [canastoRows, catalogSkuMap, skuSearch]);
+  }, [visibleCanasto, catalogSkuMap, skuSearch, skuMaster]);
+
+  const exportableCanasto = useMemo(() => {
+    const skus = new Set(pivotedRows.map((r) => r.sku));
+    return visibleCanasto.filter((r) => skus.has(String(r.sku).trim()));
+  }, [pivotedRows, visibleCanasto]);
 
   // Paginación segura
   const totalPages = Math.max(1, Math.ceil(pivotedRows.length / PAGE_SIZE));
@@ -305,7 +351,7 @@ export default function FidelizacionPage({
       return {
         ...d,
         descripcion: d.descripcion || cat.descripcion || master.descripcion || "",
-        division: d.division || cat.division || master.dep_id || master.division || master.departamento || "",
+        division: resolveDivision(d.division || cat.division || master.division || master.departamento, master.dep_id || d.dep_id),
       };
     });
     await exportFidelizacionOrce(enriched, filename);
@@ -315,14 +361,15 @@ export default function FidelizacionPage({
   const handleExportOrceByRequest = async (req) => {
     try {
       const id = req.actividad_id || req.actividadId;
-      const details = await loadSolicitudFidelizacionDetalle(supabaseConnection, id);
+      const details = await loadFidelizacionExport(supabaseConnection, id);
       if (!details || !details.length) {
         alert(`No se encontraron registros de detalle para la solicitud ${id}.`);
         return;
       }
-      handleExportOrce(details, `ORCE_${id}.xlsx`);
+      await handleExportOrce(details, `ORCE_${id}.xlsx`);
     } catch (e) {
       console.error("Error al exportar ORCE:", e);
+      alert(e.message || "No se pudo exportar la solicitud.");
     }
   };
 
@@ -332,7 +379,7 @@ export default function FidelizacionPage({
       .map((s) => s.trim())
       .filter(Boolean);
     if (skus.length > 0) {
-      setSkuSearch(skus[0]);
+      setSkuSearch(skus.join(", "));
     }
     setShowMassSkuModal(false);
   };
@@ -352,12 +399,15 @@ export default function FidelizacionPage({
           subtitle="Administración de canastos permanentes y matriz de descuentos por segmento para Comasa y Retail."
         />
         <div className="toolbar-actions home-sync-actions">
-          <Button variant="outline" onClick={fetchData} disabled={loading}>
+          {isPricingOrAdmin && <Button variant="outline" disabled={loading || !supabaseReady} onClick={() => setShowOrceImport(true)}>
+            <FileSpreadsheet size={15}/> Cargar reporte ORCE
+          </Button>}
+          {activeTab !== "resumen" && <Button variant="outline" onClick={fetchData} disabled={loading}>
             <RefreshCw size={15} className={loading ? "spin" : ""} /> Actualizar datos
-          </Button>
-          <Button onClick={() => setIsUpdateModalOpen(true)}>
+          </Button>}
+          {can(PERMISSIONS.MANAGE_FIDELIZACION) && <Button disabled={loading || !!statusMessage} onClick={() => setIsUpdateModalOpen(true)}>
             <Plus size={16} /> Solicitar actualización de canasto
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -369,7 +419,7 @@ export default function FidelizacionPage({
             className={classNames("fidelizacion-channel-btn", canal === "comasa" && "active")}
             onClick={() => setCanal("comasa")}
           >
-            COMASA (~12,000 SKU)
+            COMASA
           </button>
           <button
             type="button"
@@ -380,10 +430,11 @@ export default function FidelizacionPage({
           </button>
         </div>
 
-        <div className="special-request-tabs" role="tablist">
+        <div className="special-request-tabs" role="group" aria-label="Vistas de Fidelización">
           <button
             type="button"
             className={activeTab === "canasto" ? "selected" : ""}
+            aria-pressed={activeTab === "canasto"}
             onClick={() => setActiveTab("canasto")}
           >
             <Percent size={15} /> Canasto de Artículos ({pivotedRows.length})
@@ -391,14 +442,19 @@ export default function FidelizacionPage({
           <button
             type="button"
             className={activeTab === "solicitudes" ? "selected" : ""}
+            aria-pressed={activeTab === "solicitudes"}
             onClick={() => setActiveTab("solicitudes")}
           >
             <ListChecks size={15} /> Solicitudes de Modificación ({fidelizacionRequests.length})
           </button>
+          {isPricingOrAdmin && <button type="button" aria-pressed={activeTab === "resumen"} className={activeTab === "resumen" ? "selected" : ""} onClick={() => setActiveTab("resumen")}>
+            <Tag size={15} /> Resumen de ofertas
+          </button>}
         </div>
       </div>
 
       {/* Subvista 1: Canasto de Artículos */}
+      {activeTab === "resumen" && isPricingOrAdmin && <SummaryPanel connection={supabaseConnection} channel={canal} onReconcile={() => setShowOrceImport(true)} />}
       {activeTab === "canasto" && (
         <>
           {/* Barra de Filtros */}
@@ -447,7 +503,8 @@ export default function FidelizacionPage({
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => handleExportOrce(canastoRows, `Canasto_Fidelizacion_${canal.toUpperCase()}.xlsx`)}
+                    disabled={loading || !exportableCanasto.length}
+                    onClick={() => handleExportOrce(exportableCanasto, `Canasto_Fidelizacion_${canal.toUpperCase()}.xlsx`)}
                     title="Exportar formato ORCE"
                   >
                     <Download size={15} /> Exportar ORCE
@@ -480,7 +537,7 @@ export default function FidelizacionPage({
                   <tbody>
                     {paginatedRows.map((row) => (
                       <tr key={row.sku}>
-                        <td className="fidelizacion-sku-code">{row.sku}</td>
+                        <td className="fidelizacion-sku-code"><button className="fidelizacion-sku-link" onClick={() => setOrceSku(row.sku)} title="Ver IDs de promo y oferta por segmento">{row.sku}</button></td>
                         <td className="fidelizacion-desc-cell" title={row.descripcion}>
                           {row.descripcion}
                         </td>
@@ -732,7 +789,17 @@ export default function FidelizacionPage({
       )}
 
       {/* Modal de Actualización de Canasto */}
-      {isUpdateModalOpen && (
+      {showOrceImport && <FidelizacionOrceImportModal connection={supabaseConnection}
+        segments={segmentosClientes.length ? segmentosClientes : segmentosClientesIniciales}
+        onClose={() => setShowOrceImport(false)} onImported={fetchData}/>}
+      {orceSku && <div className="modal-backdrop"><div className="modal-card fidelizacion-modal-card" role="dialog" aria-modal="true" aria-labelledby="orce-sku-title">
+        <div className="modal-head"><div><h2 id="orce-sku-title">Referencias ORCE · {orceSku}</h2><p>{canal.toUpperCase()} · IDs por segmento</p></div><button className="icon-btn" onClick={() => setOrceSku(null)} aria-label="Cerrar"><X size={18}/></button></div>
+        <div className="modal-body"><p className="modal-note">En descuentos inactivos, los IDs conservados son referencias anteriores; no confirman una oferta activa.</p>
+          <div className="fidelizacion-table-wrapper"><table className="fidelizacion-table"><thead><tr><th>Segmento</th><th>Descuento</th><th>ID promo</th><th>ID oferta</th><th>Conciliación</th><th>Última conciliación</th></tr></thead><tbody>
+            {canastoRows.filter((r) => String(r.sku).trim() === orceSku).map((r) => <tr key={r.segmento_id}><td>{r.segmento_id}</td><td>{r.descuento}%</td><td>{r.promo_id_orce || "—"}</td><td>{r.oferta_id_orce || "—"}</td><td>{orceStatusLabel(r)}</td><td>{r.fecha_conciliacion_orce ? new Date(r.fecha_conciliacion_orce).toLocaleString() : "—"}</td></tr>)}
+          </tbody></table></div></div><div className="modal-actions"><Button variant="outline" onClick={() => setOrceSku(null)}>Cerrar</Button></div>
+      </div></div>}
+      {isUpdateModalOpen && can(PERMISSIONS.MANAGE_FIDELIZACION) && (
         <FidelizacionUpdateModal
           isOpen={isUpdateModalOpen}
           onClose={() => setIsUpdateModalOpen(false)}

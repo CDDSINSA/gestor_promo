@@ -13,6 +13,13 @@ import {
 } from "../utils/avanceHelpers";
 import { normalizeCanal, normalizeCatalogo, splitChannelValues } from "../utils/promoHelpers";
 import SkuMasterSettingsCard from "../features/skuMaster/SkuMasterSettingsCard";
+import BroadcastSettings from "../features/notifications/BroadcastSettings";
+import NotificationRoutingSettings from "../features/notifications/NotificationRoutingSettings";
+import MarginSettingsCard from "../features/margins/MarginSettingsCard";
+import { useAuth } from "../hooks/useAuth";
+import { SUPABASE_PROJECT_URL } from "../services/supabase/session";
+import { normalizeRole, ROLES } from "../constants/permissions";
+import "../styles/pages/ajustes.page.css";
 
 function Field({ label, value, onChange, type = "text", ...props }) { return <label className="field"><span>{label}</span><input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
 
@@ -46,6 +53,8 @@ export default function AjustesPage({
   supabaseStatus,
   isSyncing,
 }) {
+  const { appUser } = useAuth();
+  const isAdmin = normalizeRole(appUser?.rol || appUser?.role) === ROLES.ADMIN;
   const [selectedId, setSelectedId] = useState(catalogos[0]?.id);
   const [selectedBuyerIndex, setSelectedBuyerIndex] = useState(0);
   const [activeSection, setActiveSection] = useState("general");
@@ -80,7 +89,7 @@ export default function AjustesPage({
 
   const addCatalogo = () => {
     const id = makeId("cat");
-    const nuevoCatalogo = { id, nombre: "Nuevo catalogo", canal: "Retail", vigencia_inicio: "", vigencia_fin: "", vigencia: "", estado: "Borrador", color: "bg-emerald-700", docId: `local-${id}`, tokenConexion: "********", notificaciones: false, notificacionesEnvivo: true, notificaciones_envivo: true, correos: "" };
+    const nuevoCatalogo = { id, nombre: "Nuevo catalogo", canal: "Retail", vigencia_inicio: "", vigencia_fin: "", vigencia: "", estado: "Borrador", color: "bg-emerald-700", docId: `local-${id}`, tokenConexion: "********", notificaciones: false, notificacionesEnvivo: false, notificaciones_envivo: false, correos: "" };
     setCatalogos((prev) => [...prev, nuevoCatalogo]);
     setSelectedId(id);
   };
@@ -182,7 +191,14 @@ export default function AjustesPage({
       <button type="button" className={activeSection === "compradores" ? "selected" : ""} onClick={() => setActiveSection("compradores")}>Compradores</button>
       <button type="button" className={activeSection === "catalogos" ? "selected" : ""} onClick={() => setActiveSection("catalogos")}>Catalogos</button>
       <button type="button" className={activeSection === "maestro" ? "selected" : ""} onClick={() => setActiveSection("maestro")}>Maestro de SKU (ERP)</button>
+      {isAdmin && <button type="button" className={activeSection === "notificaciones" ? "selected" : ""} onClick={() => setActiveSection("notificaciones")}>Notificaciones</button>}
+      {isAdmin && <button type="button" className={activeSection === "difusion" ? "selected" : ""} onClick={() => setActiveSection("difusion")}>Difusión</button>}
+      {isAdmin && <button type="button" className={activeSection === "margenes" ? "selected" : ""} onClick={() => setActiveSection("margenes")}>Márgenes</button>}
     </div>
+
+    {isAdmin && activeSection === "notificaciones" && <NotificationRoutingSettings connection={supabaseConnection}/>}
+    {isAdmin && activeSection === "difusion" && <BroadcastSettings connection={supabaseConnection}/>}
+    {isAdmin && activeSection === "margenes" && <MarginSettingsCard connection={supabaseConnection}/>}
 
     {activeSection === "general" && <Card className="settings-section-card">
       <CardContent>
@@ -314,10 +330,10 @@ export default function AjustesPage({
             <label className="field"><span>Vigencia</span><input value={selected?.vigencia || ""} readOnly /></label>
             <Field label="Documento ID" value={selected?.docId || ""} onChange={(v) => updateSelected("docId", v)}/>
             <Field label="Token de conexion" value={selected?.tokenConexion || ""} onChange={(v) => updateSelected("tokenConexion", v)} type="password"/>
-            <label className="field"><span>Estado</span><select value={selected?.estado || "Borrador"} onChange={(e) => updateSelected("estado", e.target.value)}><option>Preliminar</option><option>Activo</option><option>Borrador</option><option>Cerrado</option></select></label>
+            <label className="field" title="Pasa a Preliminar y a Precios Finales automáticamente en sus fechas de corte; el resto de cambios es manual."><span>Estado (automático hasta Precios Finales)</span><select value={selected?.estado || "Borrador"} onChange={(e) => updateSelected("estado", e.target.value)}><option>Preliminar</option><option>Precios Finales</option><option>Activo</option><option>Borrador</option><option>Cerrado</option></select></label>
             <label className="field wide"><span>Correos para notificacion por cambios</span><textarea value={selected?.correos || ""} onChange={(e) => updateSelected("correos", e.target.value)} /></label>
-            <div className="switch-row wide"><div><strong>Enviar notificaciones por cambios</strong><p>Aplica cuando se modifica SKU, precio, descuento o logica de promocion.</p></div><button className={selected?.notificaciones ? "switch on" : "switch"} onClick={() => updateSelected("notificaciones", !selected?.notificaciones)}><span/></button></div>
-            <div className="switch-row wide"><div><strong>Activar notificaciones en vivo</strong><p>Muestra avisos dentro de la app cuando Compras o Mercadeo guardan cambios relevantes.</p></div><button className={selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false ? "switch on" : "switch"} onClick={() => updateSelectedFields({ notificacionesEnvivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false), notificaciones_envivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false) })}><span/></button></div>
+            <div className="switch-row wide"><div><strong>Notificaciones por correo</strong><p>Pendiente: el envío por correo aún no está implementado. La lista de correos se guarda para cuando se active.</p></div><button className={selected?.notificaciones ? "switch on" : "switch"} onClick={() => updateSelected("notificaciones", !selected?.notificaciones)}><span/></button></div>
+            <div className="switch-row wide"><div><strong>Notificaciones en vivo</strong><p>Avisos en la campana para este catálogo. Se encienden solos al pasar de Borrador a Preliminar; puede apagarlos después y no se vuelven a encender.</p></div><button className={selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false ? "switch on" : "switch"} onClick={() => updateSelectedFields({ notificacionesEnvivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false), notificaciones_envivo: !(selected?.notificacionesEnvivo !== false && selected?.notificaciones_envivo !== false) })}><span/></button></div>
           </div>
         </CardContent>
       </Card>

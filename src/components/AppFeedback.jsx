@@ -11,8 +11,11 @@ function ModalButton({ children, className = "", variant = "default", ...props }
   return <button className={classNames("btn", variant === "outline" ? "btn-outline" : "btn-primary", className)} {...props}>{children}</button>;
 }
 
-export function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, onConfirm, onCancel }) {
-  return <div className="modal-backdrop" role="presentation"><div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className="modal-note"><Icon size={16}/> {note}</p></div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton onClick={onConfirm}>{confirmLabel}</ModalButton></div></div></div>;
+export function ConfirmModal({ title, description, note, confirmLabel = "Confirmar", cancelLabel = "Cancelar", icon: Icon = AlertTriangle, tone = "default", requireAck = "", onConfirm, onCancel }) {
+  const [acknowledged, setAcknowledged] = React.useState(false);
+  const isDanger = tone === "danger";
+  const canConfirm = !requireAck || acknowledged;
+  return <div className="modal-backdrop" role="presentation"><div className={classNames("modal-card", isDanger && "modal-card-danger")} role={isDanger ? "alertdialog" : "dialog"} aria-modal="true" aria-labelledby="save-confirm-title"><div className="modal-head"><div><h2 id="save-confirm-title">{title}</h2><p>{description}</p></div><button type="button" className="icon-btn" onClick={onCancel} aria-label="Cerrar confirmacion"><X size={18}/></button></div><div className="modal-body"><p className={classNames("modal-note", isDanger && "modal-note-danger")}><Icon size={16}/> {note}</p>{requireAck && <label className="modal-ack"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)}/> <span>{requireAck}</span></label>}</div><div className="modal-actions"><ModalButton variant="outline" onClick={onCancel}>{cancelLabel}</ModalButton><ModalButton className={isDanger ? "btn-danger" : ""} onClick={onConfirm} disabled={!canConfirm}>{confirmLabel}</ModalButton></div></div></div>;
 }
 
 export function SuccessToast({ toast, onClose }) {

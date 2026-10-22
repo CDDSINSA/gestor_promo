@@ -1,3 +1,4 @@
+import { callRpc } from "../services/supabase/http";
 import { useSkuLookup } from "../features/skuMaster/SkuLookupContext";
 import React, { useMemo, useState } from "react";
 import {
@@ -35,8 +36,10 @@ import { Button, Card, CardContent, Header, Metric } from "./ui";
 import {
   exportFidelizacionOrce,
   finalizarSolicitudFidelizacion,
-  loadSolicitudFidelizacionDetalle,
+  loadFidelizacionExport,
 } from "../services/fidelizacionService";
+import "../styles/pages/promociones-compartido.page.css";
+import "../styles/pages/special-requests.page.css";
 
 function getStatusLabel(status) {
   return status;
@@ -65,6 +68,9 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
   const lookupSkus = useSkuLookup();
   const { can } = usePermissions();
   const canManageRequests = can(PERMISSIONS.MANAGE_SOLICITUDES);
+  const canFidelizacion = can(PERMISSIONS.VIEW_FIDELIZACION);
+  const canChangeStatus = can(PERMISSIONS.CHANGE_REQUEST_STATUS);
+  const [statusSaving, setStatusSaving] = useState(false);
   const canCreateSpecial = can(PERMISSIONS.CREATE_SPECIAL_PROMO);
   const canSyncSupabase = can(PERMISSIONS.SYNC_SUPABASE);
   const [activeTab, setActiveTab] = useState("seguimiento");
@@ -96,7 +102,8 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
 
   const specialRequests = useMemo(() => actividades
     .map(normalizeActividad)
-    .filter((item) => (item.tipo_actividad === "ESPECIAL" || String(item.actividad_id || "").startsWith("FID-")) && normalizeSpecialRequestStatus(item.estado) !== SPECIAL_REQUEST_ARCHIVED_STATUS), [actividades]);
+    .filter((item) => canFidelizacion || !(String(item.actividad_id || "").startsWith("FID-") || item.subtipo === "FIDELIZACION"))
+    .filter((item) => (item.tipo_actividad === "ESPECIAL" || String(item.actividad_id || "").startsWith("FID-")) && normalizeSpecialRequestStatus(item.estado) !== SPECIAL_REQUEST_ARCHIVED_STATUS), [actividades, canFidelizacion]);
   const buyerOptions = useMemo(() => {
     const values = specialRequests.map((item) => item.comprador || item.solicitante).filter(Boolean);
     return ["Todos", ...Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))];
@@ -181,11 +188,33 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
     applyActivityChanges(activity, { [field]: value, fecha_modificacion: new Date().toISOString() }, action);
   };
 
-  const performStatusChange = (activity, nextStatus, extraChanges = {}, customAction = "") => {
-    if (!activity) return;
+  const performStatusChange = async (activity, nextStatus, extraChanges = {}, customAction = "") => {
+    if (!activity || !canChangeStatus || statusSaving) return false;
     const currentStatus = normalizeSpecialRequestStatus(activity.estado);
     const targetStatus = normalizeSpecialRequestStatus(nextStatus);
     if (currentStatus === targetStatus) return;
+
+    // Guardar cambios de estado del canvas directamente; la asignacion conserva su flujo de edicion.
+    if (!canManageRequests || (supabaseReady && !Object.hasOwn(extraChanges, "responsable"))) {
+      setStatusSaving(true);
+      setAssignmentError("");
+      try {
+        const saved = await callRpc(supabaseConnection, "cambiar_estado_solicitud", {
+          p_actividad_id: activity.actividad_id,
+          p_estado: targetStatus,
+          p_estado_anterior: activity.estado,
+          p_promo_ids: extraChanges.promo_ids || "",
+          p_oferta_ids: extraChanges.oferta_ids || "",
+        });
+        applyActivityChanges(activity, { ...saved, actividad_id: activity.actividad_id }, customAction);
+        return true;
+      } catch (error) {
+        setAssignmentError(error.message || "No se pudo guardar el estado.");
+        return false;
+      } finally {
+        setStatusSaving(false);
+      }
+    }
 
     const now = new Date();
     const isoNow = now.toISOString();
@@ -203,10 +232,11 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
       tiempo_total_horas: addElapsedHours(activity.tiempo_total_horas, elapsed),
       ...extraChanges,
     }, customAction || `Cambio estado de ${activity.actividad_id}: ${currentStatus} -> ${targetStatus}`);
+    return true;
   };
 
   const requestStatusChange = (activity, nextStatus) => {
-    if (!activity) return;
+    if (!activity || !canChangeStatus || statusSaving) return;
     const currentStatus = normalizeSpecialRequestStatus(activity.estado);
     const targetStatus = normalizeSpecialRequestStatus(nextStatus);
     if (currentStatus === targetStatus) return;
@@ -225,40 +255,45 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
   };
 
   const archiveRequest = (activity) => {
-    if (!activity || normalizeSpecialRequestStatus(activity.estado) !== "Finalizado") return;
+    if (!canChangeStatus || statusSaving || !activity || normalizeSpecialRequestStatus(activity.estado) !== "Finalizado") return;
     performStatusChange(activity, SPECIAL_REQUEST_ARCHIVED_STATUS, {}, `Archivo solicitud ${activity.actividad_id}`);
   };
 
   const confirmFinish = async () => {
-    if (!finishModal?.activity) return;
+    if (!finishModal?.activity || !canChangeStatus || statusSaving) return;
     const isFidelizacion = String(finishModal.activity.actividad_id || "").startsWith("FID-") || finishModal.activity.subtipo === "FIDELIZACION";
     const promoIds = normalizeIdList(finishModal.promoIds);
     const ofertaIds = normalizeIdList(finishModal.ofertaIds);
+    if (isFidelizacion && (!promoIds || promoIds.toUpperCase() === "ORCE-CARGADO")) {
+      setFinishModal((current) => ({ ...current, error: "Registre en ID de promos / ORCE la referencia de la carga realizada en ORCE antes de finalizar." }));
+      return;
+    }
     if (!isFidelizacion && (!promoIds || !ofertaIds)) {
       setFinishModal((current) => ({ ...current, error: "Para finalizar debe ingresar ID de promo e ID de oferta." }));
       return;
     }
 
-    if (isFidelizacion) {
+    if (isFidelizacion && canManageRequests && !supabaseReady) {
       try {
-        await finalizarSolicitudFidelizacion(supabaseConnection, finishModal.activity.actividad_id);
+        await finalizarSolicitudFidelizacion(supabaseConnection, finishModal.activity.actividad_id, promoIds);
       } catch (err) {
-        console.error("Error al finalizar fidelizacion:", err);
+        setFinishModal((current) => ({ ...current, error: err.message }));
+        return;
       }
     }
 
-    performStatusChange(finishModal.activity, "Finalizado", {
+    const saved = await performStatusChange(finishModal.activity, "Finalizado", {
       promo_ids: promoIds || (isFidelizacion ? "ORCE-CARGADO" : ""),
       oferta_ids: ofertaIds || (isFidelizacion ? "ORCE-CARGADO" : ""),
     }, isFidelizacion ? `Finalizó y aplicó descuentos de fidelización para ${finishModal.activity.actividad_id}` : "");
-    setFinishModal(null);
+    if (saved) setFinishModal(null);
   };
 
   const handleExportOrceFromCanvas = async (activity) => {
     if (!activity) return;
     const id = activity.actividad_id || activity.actividadId;
     try {
-      let details = await loadSolicitudFidelizacionDetalle(supabaseConnection, id);
+      const details = await loadFidelizacionExport(supabaseConnection, id);
       if (!details || !details.length) {
         alert(`No se encontraron registros de detalle para la solicitud ${id}.`);
         return;
@@ -302,6 +337,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
 
   return <div>
     <Header title="Solicitudes especiales" subtitle="Seguimiento operativo de promociones especiales desde solicitud hasta resolucion." />
+    {assignmentError && <p role="alert" className="modal-error">{assignmentError}</p>}
     {refreshStatus.message && <div className={classNames("status-message", refreshStatus.type === "error" && "error")}>{refreshStatus.message}</div>}
     <div className="special-request-tabs" role="tablist" aria-label="Vista de solicitudes especiales">
       <button type="button" className={activeTab === "seguimiento" ? "selected" : ""} onClick={() => setActiveTab("seguimiento")}><ListChecks size={16}/> Seguimiento</button>
@@ -361,7 +397,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             </div>
           </div>
           {selected ? <div className="special-detail-grid">
-            <label className="field"><span>Estado</span><select value={selectedStatus} onChange={(e) => requestStatusChange(selected, e.target.value)} disabled={!canManageRequests}>{SPECIAL_REQUEST_STATUSES.map((status) => <option key={status} value={status}>{getStatusLabel(status)}</option>)}</select></label>
+            <label className="field"><span>Estado</span><select value={selectedStatus} onChange={(e) => requestStatusChange(selected, e.target.value)} disabled={!canChangeStatus || statusSaving}>{SPECIAL_REQUEST_STATUSES.map((status) => <option key={status} value={status}>{getStatusLabel(status)}</option>)}</select></label>
             <label className="field"><span>Responsable</span><select value={selected.responsable || ""} onChange={(e) => updateField(selected, "responsable", e.target.value)} disabled={!canManageRequests}><option value="">Sin asignar</option>{selected.responsable && !responsables.some((item) => item.nombre === selected.responsable) && <option value={selected.responsable}>{selected.responsable} - no esta en catalogo</option>}{responsables.map((item) => <option key={item.responsable_id || item.nombre} value={item.nombre}>{item.area ? `${item.nombre} - ${item.area}` : item.nombre}</option>)}</select></label>
             {assignmentError && <p className="modal-error wide">{assignmentError}</p>}
             <label className="field"><span>Comprador</span><input value={selected.comprador || selected.solicitante || ""} readOnly /></label>
@@ -387,7 +423,7 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
             </div>
           </div>
           {selected ? <div className="special-edit-summary">
-            <label className="field"><span>Nombre de solicitud</span><input value={selected.nombre_actividad || ""} onChange={(e) => updateField(selected, "nombre_actividad", e.target.value)} placeholder="Nombre de solicitud especial" /></label>
+            <label className="field"><span>Nombre de solicitud</span><input value={selected.nombre_actividad || ""} readOnly={!canManageRequests} onChange={(e) => updateField(selected, "nombre_actividad", e.target.value)} placeholder="Nombre de solicitud especial" /></label>
             <div><strong>{selected.actividad_id}</strong><span>{selected.comprador || selected.solicitante || "Sin comprador"} · {selected.canal || "Sin canal"}</span></div>
             <span className={classNames("status-badge", `status-${getSpecialRequestStatusKey(selectedStatus)}`)}>{getStatusLabel(selectedStatus)}</span>
           </div> : <div className="empty-state">Busque y seleccione una solicitud especial para editar sus SKU.</div>}
@@ -480,8 +516,8 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
                       <Download size={13} /> Exportar ORCE
                     </Button>
                   )}
-                  {canManageRequests && nextStatus && <Button variant="outline" onClick={(event) => { event.stopPropagation(); requestStatusChange(item, nextStatus); }}><ArrowRight size={14}/> {getStatusLabel(nextStatus)}</Button>}
-                  {canManageRequests && status === "Finalizado" && <Button variant="outline" onClick={(event) => { event.stopPropagation(); archiveRequest(item); }}><Archive size={14}/> Archivar</Button>}
+                  {canChangeStatus && nextStatus && <Button disabled={statusSaving} variant="outline" onClick={(event) => { event.stopPropagation(); requestStatusChange(item, nextStatus); }}><ArrowRight size={14}/> {getStatusLabel(nextStatus)}</Button>}
+                  {canChangeStatus && status === "Finalizado" && <Button disabled={statusSaving} variant="outline" onClick={(event) => { event.stopPropagation(); archiveRequest(item); }}><Archive size={14}/> Archivar</Button>}
                 </article>
               );
             })}
@@ -503,18 +539,19 @@ export default function SolicitudesEspecialesPage({ actividades = [], setActivid
         <div className="modal-body">
           {String(finishModal.activity.actividad_id || "").startsWith("FID-") || finishModal.activity.subtipo === "FIDELIZACION" ? (
             <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "0.75rem", borderRadius: "0.5rem", color: "#065f46", fontSize: "0.82rem" }}>
-              <strong>Actualización de Fidelización:</strong> Al finalizar esta solicitud, los descuentos solicitados se aplicarán automáticamente a la matriz definitiva del Canasto y los registros quedarán archivados como aplicados.
+              <strong>Actualización de Fidelización:</strong> Finalice después de cargar el archivo en ORCE y registre su referencia en ID de promos / ORCE. Se aplicarán los descuentos al Canasto y el detalle quedará marcado como aplicado.
             </div>
           ) : (
             <p className="modal-note">Para cambiar a Finalizado debe registrar los ID de promos y los ID de oferta. Si hay varios, separelos por coma.</p>
           )}
           <label className="field"><span>ID de promos / ORCE</span><textarea value={finishModal.promoIds} onChange={(e) => setFinishModal((current) => ({ ...current, promoIds: e.target.value, error: "" }))} placeholder="Ej. PROMO-001 o ID ORCE" /></label>
           <label className="field"><span>ID de oferta / ORCE</span><textarea value={finishModal.ofertaIds} onChange={(e) => setFinishModal((current) => ({ ...current, ofertaIds: e.target.value, error: "" }))} placeholder="Ej. OFE-001 o ID ORCE" /></label>
+          {assignmentError && <p className="modal-error">{assignmentError}</p>}
           {finishModal.error && <p className="modal-error">{finishModal.error}</p>}
         </div>
         <div className="modal-actions">
           <Button variant="outline" onClick={() => setFinishModal(null)}>Cancelar</Button>
-          <Button onClick={confirmFinish}>Finalizar solicitud</Button>
+          <Button disabled={statusSaving} onClick={confirmFinish}>Finalizar solicitud</Button>
         </div>
       </div>
     </div>}

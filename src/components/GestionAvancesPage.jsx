@@ -20,6 +20,7 @@ import {
   sameDivision,
   toggleAvanceTerminado,
 } from "../utils/avanceHelpers";
+import "../styles/pages/gestion-avances.page.css";
 
 function normalizeKey(value) {
   return String(value || "")

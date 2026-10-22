@@ -3,6 +3,7 @@ import { FileSpreadsheet, Search, Upload, X } from "lucide-react";
 import { normalizeValue } from "../utils/common";
 import { normalizeActividad } from "../utils/promoHelpers";
 import { Button, Card, CardContent, Header } from "./ui";
+import "../styles/pages/consulta-sku.page.css";
 
 function parseSkuText(text) {
   const seen = new Set();

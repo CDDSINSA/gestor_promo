@@ -373,7 +373,8 @@ export function filterRowsByIds(rows = [], ids = new Set(), getKey) {
   return (rows || []).filter((row) => ids.has(String(getKey(row) || "").trim()));
 }
 
-const PROMOTION_CONTEXT_TYPES = new Set(["Combo", BUY_X_GET_X_PROMO_TYPE, MEGAPACK_PROMO_TYPE]);
+// AIRES: si cambia una pieza se envía el aire completo (se valida junto).
+const PROMOTION_CONTEXT_TYPES = new Set(["Combo", BUY_X_GET_X_PROMO_TYPE, MEGAPACK_PROMO_TYPE, "AIRES"]);
 
 export function getPromotionContextKey(row = {}) {
   const tipoPromo = String(row.tipo_promo || row.tipoPromo || "").trim();

@@ -11,6 +11,7 @@ import {
   getUniqueBuyers,
   getUniqueTypes,
 } from "../features/seguimiento/ganttModel";
+import "../styles/pages/seguimiento.page.css";
 
 const BAR_COLORS = {
   CATALOGO: "#006b3f",
@@ -80,11 +81,11 @@ function TimelineRow({ item, index, timeline }) {
   </div>;
 }
 
-export default function SeguimientoGanttPage({ actividades = [], rows = [], catalogos = [] }) {
+export default function SeguimientoGanttPage({ actividades = [], rows = [], catalogos = [], resumen = [] }) {
   const [buyerFilter, setBuyerFilter] = useState("Todos");
   const [typeFilter, setTypeFilter] = useState("Todos");
   const [tooltip, setTooltip] = useState(null);
-  const items = useMemo(() => buildSeguimientoItems({ actividades, rows, catalogos }), [actividades, rows, catalogos]);
+  const items = useMemo(() => buildSeguimientoItems({ actividades, rows, catalogos, resumen }), [actividades, rows, catalogos, resumen]);
   const buyerOptions = useMemo(() => getUniqueBuyers(items), [items]);
   const typeOptions = useMemo(() => getUniqueTypes(items), [items]);
   const filteredItems = useMemo(() => items.filter((item) => {
