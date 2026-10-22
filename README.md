@@ -1,319 +1,259 @@
-# SINSA Promo MVP
+# SINSA Promo MVP — Gestor de Promociones
 
-Aplicacion web React/Vite para gestionar promociones comerciales retail de SINSA. El sistema centraliza el flujo de trabajo entre Compradores, Mercadeo, Pricing y Planimetria, reemplazando gradualmente el uso de archivos Excel compartidos.
+Aplicación web React/Vite para gestionar las promociones comerciales retail de SINSA. Centraliza el trabajo de Compradores, Mercadeo, Pricing, Planimetría y Diseño, y reemplaza gradualmente los archivos Excel compartidos.
 
-La persistencia operativa actual es Supabase. Excel se mantiene como respaldo, importacion/exportacion y puente operativo para usuarios acostumbrados a trabajar con archivos.
+- Persistencia operativa: **Supabase** (Auth, RLS, REST, RPC, Storage y Realtime).
+- Excel: respaldo, importación/exportación y puente para usuarios habituados a archivos. No es la fuente de datos.
+- Flujo de negocio: **Comprador → Mercadeo → Pricing → Planimetría**.
 
-## Estado Actual
+Actualizado: 2026-10-12.
 
-- Version del paquete: `0.2.0`.
-- Frontend: React 19 con Vite.
-- Base operativa: Supabase con Auth, RLS, RPC transaccional y consultas REST.
-- Excel: soporte de carga, respaldo y exportacion mediante `xlsx` y `exceljs`.
-- Maestro de articulos: tabla `sku_master` en Supabase, consultada por demanda.
-- Roles activos: `ADMIN`, `BUYER`, `MARK`, `OPER`, `AUD`, `DISENADOR`.
-- La app usa el token del usuario autenticado. No se debe exponer una `service_role` key en el frontend.
+## Parámetros del proyecto
 
-## Instalacion Local
+| Parámetro | Valor | Dónde se define |
+| --- | --- | --- |
+| Paquete / versión | `promo-retail-mvp` `0.2.0` | `package.json` |
+| Frontend | React 19.2, Vite 8.1, `lucide-react` | `package.json` |
+| Excel | `xlsx` 0.20.3 (CDN SheetJS), `exceljs` 4.4 | `package.json` |
+| Puerto de desarrollo | `3005`, escuchando en `0.0.0.0` | `vite.config.js` |
+| URL local | `http://localhost:3005/` | — |
+| Zona horaria de negocio | `America/Managua` | cuenta regresiva y exportaciones |
+| Tamaño de página en lecturas | 1000 filas (`SELECT_PAGE_SIZE`) | `src/services/supabase/config.js` |
+| Tiempo máximo por petición | 45 s (`REQUEST_TIMEOUT_MS`) | `src/services/supabase/config.js` |
+| Lote de escritura REST | 500 filas | `src/services/supabase/http.js` |
+| Buckets de Storage | `sns_app_promo` (trabajo), `catalogo_final` (PDF final), ambos privados | `src/services/supabase/catalogDesign.js` |
+| Claves de `localStorage` | `sinsaPromo.supabaseConnection`, `sinsaPromo.appSession`, `sinsaPromo.notificationSound` | `config.js`, `useNotificationSound.js` |
+| Pruebas | `node:test`, archivos `tests/*.test.mjs` | `tests/` |
+
+## Instalación local
+
+Requisitos: Node.js con npm y acceso a un proyecto Supabase ya preparado (ver [scripts SQL](docs/README.md#scripts-sql)).
 
 ```bash
 npm install
-npm run dev
+cp .env.example .env.local   # completar valores
+npm run dev                  # http://localhost:3005/
 ```
 
-Para validar el build:
+Scripts de `package.json`:
 
-```bash
-npm run build
-```
-
-Vite puede emitir advertencias de chunks grandes. Esa advertencia es informativa mientras el build termine correctamente.
-
-## Variables de Entorno
-
-Copiar `.env.example` a `.env.local` y configurar:
-
-```env
-VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
-VITE_SUPABASE_ANON_KEY=tu-publishable-o-anon-key
-VITE_SUPABASE_ALLOWED_HOSTS=tu-proyecto.supabase.co
-VITE_SUPABASE_AUTH_REDIRECT_URL=http://localhost:5173/
-```
-
-Notas:
-
-- `VITE_SUPABASE_ALLOWED_HOSTS` restringe los hosts de Supabase permitidos por el frontend.
-- En desarrollo se permiten overrides locales de conexion desde la app; en produccion se usan las variables de entorno.
-- `VITE_SUPABASE_AUTH_REDIRECT_URL` se usa para recuperacion de contrasena.
-- No se usan credenciales tecnicas de usuario ni claves privadas en el frontend.
-
-## Flujo Operativo
-
-1. El usuario inicia sesion con Supabase Auth.
-2. La app carga su perfil desde `public.usuarios_app`.
-3. El frontend habilita modulos segun permisos de rol.
-4. Se cargan catalogos, actividades abiertas, compradores, segmentos, responsables, jerarquias, promociones, detalles, comentarios, avances y notificaciones desde Supabase.
-5. El comprador crea o modifica promociones.
-6. Mercadeo revisa promociones, agrega comentarios y resuelve observaciones.
-7. Pricing, Planimetria y otros equipos consumen exportaciones generadas.
-8. Los cambios se guardan en Supabase mediante `save_catalog_transactional`.
-9. Excel queda disponible para importar respaldos o generar archivos operativos.
-
-## Modulos Actuales
-
-- `Inicio`: resumen operativo, catalogos/actividades y acciones principales.
-- `Fidelizacion`: solicitudes y canastos de fidelizacion.
-- `Promociones`: carga y edicion tipo Excel de promociones.
-- `Consulta SKU`: busqueda y revision de SKU usados en promociones.
-- `Solicitudes`: gestion de solicitudes especiales.
-- `Promocion especial`: creacion de promociones fuera del flujo regular de catalogo.
-- `Seguimiento`: vista Gantt/seguimiento de actividades.
-- `Avances`: control de avances por catalogo, comprador y division.
-- `Diseno Catalogos`: mesa de trabajo para disenadores y revisores (visualizacion de artes con zoom/paneo, drag & drop de imagenes, senalizaciones y anotaciones en lienzo, checklist interactivo de observaciones y consulta/copiado de SKUs promocionales).
-- `Logs`: consulta paginada bajo demanda de auditoria.
-- `Consolidado`: vista unificada con comentarios de Mercadeo.
-  - Su exportacion XLSX agrega al final la columna `Fecha de modificación`, con fecha/hora de Nicaragua (`dd/mm/yyyy hh:mm`) como valor de fecha ordenable en Excel. Si falta una fecha valida, la celda queda vacia.
-  - Las promociones modificadas se resaltan en amarillo: version guardada mayor a 1 o, para datos sin version, fecha de modificacion posterior a la creacion. El criterio es historico, no desde la ultima exportacion. Las anuladas conservan el rojo y las promociones complejas sin modificaciones conservan sus bandas.
-  - Aplica al archivo descargado desde este modulo y respeta los filtros seleccionados; no cambia las hojas de respaldo ni las otras exportaciones. Para validar, exportar una promocion nueva, una modificada y una anulada, y revisar fecha, amarillo y rojo respectivamente.
-- `Exportar`: exportaciones de Pricing, Mercadeo, Planimetria y Consolidado.
-- `Ajustes`: catalogos base, compradores, conexion y carga administrativa de maestro SKU.
-
-## Roles y Permisos
-
-La matriz de permisos del frontend esta en `src/constants/permissions.js`.
-
-| Rol | Uso principal |
+| Comando | Uso |
 | --- | --- |
-| `ADMIN` | Acceso total y administracion del sistema. |
-| `BUYER` | Promociones, solicitudes, avances, consolidado, exportaciones y fidelizacion. |
-| `MARK` | Diseno de catalogos, seguimiento, consolidado, comentarios y exportaciones. |
-| `OPER` | Solicitudes, seguimiento, exportaciones y fidelizacion operativa. |
-| `AUD` | Diseno de catalogos en lectura, seguimiento y logs. |
-| `DISENADOR` | Diseno de catalogos, carga/revision de paginas y seguimiento. |
+| `npm run dev` | Servidor de desarrollo en el puerto 3005. |
+| `npm run build` | Build de producción en `dist/`. Las advertencias de chunks grandes son informativas. |
+| `npm run preview` | Sirve el build localmente. |
 
-Los permisos visuales del frontend no sustituyen RLS. La seguridad real debe existir en Supabase.
+En PowerShell con políticas restrictivas, usar `npm.cmd` en lugar de `npm`.
 
-## Arquitectura del Frontend
+## Variables de entorno
+
+Definir en `.env.local` (desarrollo) y en las variables del hosting (producción). `.env` y `.env.local` están en `.gitignore`.
+
+| Variable | Obligatoria | Uso |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | Sí | URL del proyecto, p. ej. `https://xxxx.supabase.co`. |
+| `VITE_SUPABASE_ANON_KEY` | Sí | Clave pública (anon/publishable). Nunca usar `service_role` en el frontend. |
+| `VITE_SUPABASE_ALLOWED_HOSTS` | No | Lista de hosts permitidos separada por comas. El host de `VITE_SUPABASE_URL` siempre se permite. |
+| `VITE_SUPABASE_AUTH_REDIRECT_URL` | No | URL de retorno del correo de recuperación. Si falta, se usa la URL actual del navegador. Debe estar registrada en Supabase Auth. |
+| `VITE_USE_DEMO_DATA` | No | `true` carga datos de ejemplo de `src/constants/seedData.js`. Solo funciona en modo desarrollo. |
+| `VITE_CARGA_POR_CAMPANA` | No | `true` activa la carga por campaña: el inicio de sesión no descarga todas las promociones y cada módulo carga solo las campañas que usa (Consolidado, Exportes, Consulta SKU, Fidelización y Ajustes todavía cargan todo al entrar). `false` o vacío = carga completa como antes; es el rollback inmediato. Requiere el paso 40 de `docs/`. En un navegador se puede forzar con `localStorage` `promo.cargaPorCampana` = `on` / `off`. |
+
+La conexión se toma solo de estas variables: la edición manual de URL/clave desde la app está desactivada (`SUPABASE_CONNECTION_OVERRIDES_ENABLED = false`).
+
+## Flujo operativo
+
+1. El usuario inicia sesión con Supabase Auth.
+2. La app carga su perfil desde `public.usuarios_app` y normaliza su rol.
+3. Se habilitan los módulos según la matriz de permisos.
+4. Se cargan catálogos/actividades operativas, compradores, segmentos, responsables, jerarquías y avances. Las promociones se cargan por alcance, bajo demanda.
+5. El comprador crea o modifica promociones; Mercadeo revisa y comenta en Consolidado.
+6. Pricing y Planimetría descargan las exportaciones.
+7. Los cambios se guardan con la RPC `save_catalog_transactional`.
+8. Excel queda disponible para respaldos e importación.
+
+## Módulos
+
+Identificadores definidos en `src/constants/ui.js` y `MODULE_PERMISSIONS`.
+
+| Id | Módulo | Acceso desde | Permiso |
+| --- | --- | --- | --- |
+| `home` | Inicio: catálogos, cuenta regresiva de cortes y acciones principales | Menú | `view:home` |
+| `fidelizacion` | Fidelización: canasto, solicitudes, conciliación ORCE y resumen | Menú | `view:fidelizacion` |
+| `promos` | Promociones: grilla tipo Excel, pegado masivo y validación | Menú | `view:promos` |
+| `consulta` | Consulta SKU | Menú | `view:consulta` |
+| `solicitudes` | Solicitudes especiales | Menú | `view:solicitudes` |
+| `especial` | Promoción especial (fuera del catálogo regular) | Inicio / Solicitudes | `create:promocion_especial` |
+| `seguimiento` | Seguimiento tipo Gantt | Menú | `view:seguimiento` |
+| `avances` | Gestión de avances por catálogo, comprador y división | Inicio | `view:avances` |
+| `catalogDesign` | Diseño de Catálogos: visor, anotaciones, observaciones, versiones | Menú | `view:catalog_design` |
+| `logs` | Logs de auditoría, paginados (25/50/100) | Menú | `view:logs` |
+| `consolidado` | Consolidado y comentarios de Mercadeo | Menú | `view:consolidado` |
+| `margenes` | Monitoreo de márgenes por grupo de oferta (catálogos y especiales), semáforo y export XLSX | Menú | `view:margenes` (export: `export:margenes`) |
+| `export` | Exportaciones Pricing, Mercadeo, Planimetría, Consolidado y seguimiento de diseños | Menú | `view:exports` |
+| `ajustes` | Catálogos base, compradores, maestro SKU, difusión y parámetros de márgenes | Menú | `manage:settings` |
+
+Notas de Consolidado: la exportación XLSX agrega la columna `Fecha de modificación` (hora de Nicaragua, `dd/mm/yyyy hh:mm`), resalta en amarillo las promociones modificadas (versión > 1, o fecha de modificación posterior a la creación) y en rojo las anuladas. Respeta los filtros seleccionados y no altera otras exportaciones.
+
+## Roles y permisos
+
+Fuente: `src/constants/permissions.js`. El frontend solo oculta o muestra; la seguridad real está en RLS. Ambos deben mantenerse alineados.
+
+| Rol (`usuarios_app.rol`) | Etiqueta | Módulos | Acciones destacadas |
+| --- | --- | --- | --- |
+| `ADMIN` | Administrador | Todos | Todas, excepto `manage:fidelizacion` (crear solicitudes). En Supabase puede consultar, cambiar estado y conciliar ORCE. |
+| `BUYER` | Comprador | Inicio, Fidelización, Promociones, Consulta SKU, Solicitudes, Promoción especial, Seguimiento, Avances, Diseño, Consolidado, Exportar | Edita promociones y avances; comenta en Consolidado; revisa páginas de Diseño; opera Fidelización de su alcance. Requiere `buyer_id`. |
+| `MARK` | Marketing | Diseño, Seguimiento, Consolidado, Exportar | Gestiona proyectos de Diseño, sube y revisa páginas, comenta en Consolidado. No tiene Inicio. |
+| `OPER` | Ejecutor (Pricing / Planimetría) | Fidelización, Solicitudes, Seguimiento, Exportar | Cambia estado de solicitudes y finaliza solicitudes de Fidelización. |
+| `AUD` | Auditor | Diseño (lectura), Seguimiento, Logs | Solo consulta. |
+| `DISENADOR` | Diseñador | Diseño, Seguimiento | Sube páginas de catálogo. |
+
+Alias aceptados al normalizar el rol: `COMPRADOR`/`COMP` → `BUYER`; `MERCADEO`/`MARKETING` → `MARK`; `PRICING`/`PRICE`/`PLANIMETRIA`/`EJECUTOR` → `OPER`; `AUDITOR`/`AUT` → `AUD`; `CDD`/`DISEÑADOR` → `DISENADOR`. En la base, la restricción de `usuarios_app.rol` solo admite los seis valores canónicos.
+
+## Arquitectura del frontend
 
 ```text
 src/
-  App.jsx                         Estado principal, autenticacion y orquestacion.
-  main.jsx                        Entrada React.
+  App.jsx                  Autenticación, carga inicial, estado principal y orquestación.
+  main.jsx                 Entrada React.
   app/
-    shell/                        Navegacion, layout y contenido por modulo.
-    session/                      Helpers de sesion.
-    sync/                         Snapshots, firmas y payloads de guardado.
-  components/                     Pantallas y componentes de UI.
-  constants/                      Roles, permisos, hojas Excel, navegacion y datos base.
-  context/                        Contextos React.
+    shell/                 AppContent (módulos con React.lazy), AppNavigation, DatabaseStatus.
+    session/               Helpers de sesión.
+    sync/                  Snapshots, firmas y payloads de guardado.
+  components/              Pantallas (PromosPage, ConsolidadoPage, CatalogDesignPage, ...).
+  constants/               Roles/permisos, navegación, hojas Excel, constantes de promociones, datos demo.
+  context/                 AuthContext.
   features/
-    promotions/                   Logica de grilla, importacion, anulacion y combos.
-    seguimiento/                  Modelo Gantt.
-    skuMaster/                    Consulta y carga del maestro SKU.
-  hooks/                          Estado de dominio, auth, carga, sync y notificaciones.
-  promoTypes/                     Motor de reglas por tipo de promocion.
+    catalogDesign/         Visor, anotaciones, comentarios y respuestas de Diseño.
+    catalogSchedule/       Cuenta regresiva de cortes por catálogo.
+    consolidado/           Metadatos de exportación.
+    designExport/          Reporte de seguimiento de diseños.
+    fidelizacion/          Conciliación ORCE, movimiento de ofertas y resumen.
+    notifications/         Eventos, entrega, sonido y difusión.
+    promotions/            Importación masiva, grilla, anulación y combos.
+    seguimiento/           Modelo Gantt.
+    skuMaster/             Consulta y carga del maestro SKU.
+  hooks/                   Estado de dominio, auth, carga, sync y notificaciones.
+  promoTypes/              Motor de reglas por tipo de promoción.
   services/
-    excelService.js               Importacion/exportacion Excel.
-    excelStyleService.js          Estilos de archivos Excel.
-    promotionValidationService.js Validaciones de promociones.
-    fidelizacionService.js        Operaciones de fidelizacion.
-    supabase/                     Cliente REST/RPC modular de Supabase.
-  styles/                         CSS global organizado por base, layout, componentes y paginas.
-  utils/                          Normalizadores y conversiones app/Excel.
-tests/                            Pruebas unitarias con node:test.
-docs/                             SQL, guias tecnicas y notas de arquitectura.
+    excelService.js        Importación/exportación Excel.
+    excelStyleService.js   Estilos de archivos Excel.
+    promotionValidationService.js
+    fidelizacionService.js, fidelizacionOrceService.js, fidelizacionSummaryService.js
+    supabase/              Cliente REST/RPC/Storage modular (http, config, session, catalog, save, ...).
+    supabaseService.js     Reexporta services/supabase para imports antiguos.
+  styles/                  CSS por base, layout, componentes y páginas.
+  utils/                   Normalizadores y conversiones app/Excel.
+tests/                     Pruebas node:test.
+docs/                      Guías técnicas y scripts SQL (ver docs/README.md).
+scripts/                   Utilidades Python de la migración desde Drive (histórico).
+apps-script/               API anterior sobre Google Sheets (histórico).
 ```
 
-`src/services/supabaseService.js` reexporta los servicios modulares de `src/services/supabase/` para conservar compatibilidad con imports existentes.
+Archivos en la raíz que no forman parte del build: `excelService.js` (versión antigua, sin uso; la vigente es `src/services/excelService.js`), `summary-preview.*` (vista previa de desarrollo) y las carpetas `output/`, `outputs/` y `.archify/` (resultados de QA y análisis).
 
-## Persistencia Supabase
+## Tipos de promoción
 
-Tablas y vistas principales usadas por la app:
+Fuente: `src/promoTypes/promoTypeEngine.js`.
 
-- `usuarios_app`
-- `compradores`
-- `configuracion`
-- `campanas`
-- `segmentos_clientes`
-- `sku_master`
-- `promociones`
-- `promociones_detalle`
-- `comentarios`
-- `logs`
-- `notificaciones`
-- `notificaciones_envivo`
-- `responsables_solicitudes`
-- `jerarquia_categorias`
-- `avances_catalogo`
-- `canasto_fidelizacion`
-- `fidelizacion_solicitudes_detalle`
-- `catalogo_proyecto_diseno`
-- `catalogo_paginas_diseno`
-- `catalogo_pagina_comentarios`
-- `catalogo_consolidado_final`
-- `save_operations`
-- `v_catalogos_operativos`
-- `v_catalogo_resumen`
+| Tipo | Clase | Campos obligatorios adicionales |
+| --- | --- | --- |
+| `Precio fijo` | Simple | `precio_ahora` |
+| `Descuento` | Simple | `descuento` |
+| `Combo` | Compleja | `grupo_oferta`, `tipo_sku` |
+| `Umbral` | Compleja | `grupo_oferta`, `tipo_sku` (hasta 6 niveles) |
+| `Compra X lleva X` | Compleja | `grupo_oferta`, `tipo_sku`, `variante` |
+| `Compra X Lleva X V2` | Compleja | `grupo_oferta`, `tipo_sku`, `variante` |
+| `Megapack` | Compleja | `grupo_oferta`, `tipo_sku` |
 
-Funciones/RPC relevantes:
+Otras constantes (`src/constants/promoConstants.js`): tipos de actividad `CATALOGO`/`ESPECIAL`; alcances `CANAL`, `SEGMENTO`, `TIENDA`, `MULTI_TIENDA`; estados de solicitud especial `Nuevo`, `Aprobado`, `En trabajo`, `Finalizado` y `Archivado`.
 
-- `current_user_role`
-- `current_buyer_id`
-- `current_buyer_scope_ids`
-- `current_app_user_id`
-- `current_user_label`
-- `save_catalog_transactional`
-- `create_live_notification`
-- `get_sku_master_summary`
-- `clear_sku_master`
-- `insert_sku_master_batch`
-- `crear_solicitud_fidelizacion`
-- `finalizar_solicitud_fidelizacion`
+## Supabase
 
-## Scripts de Supabase
+Tablas:
 
-Documentos SQL relevantes en `docs/`:
+- Núcleo: `usuarios_app`, `compradores`, `configuracion`, `campanas`, `segmentos_clientes`, `promociones`, `promociones_detalle`, `comentarios`, `logs`, `notificaciones`, `save_operations`.
+- Operación: `responsables_solicitudes`, `jerarquia_categorias`, `avances_catalogo`, `sku_master`, `notificaciones_envivo`, `catalogo_eventos_programados`.
+- Diseño: `catalogo_proyecto_diseno`, `catalogo_paginas_diseno`, `catalogo_pagina_comentarios`, `catalogo_pagina_respuestas`, `catalogo_pagina_versiones`, `catalogo_diseno_operaciones`, `catalogo_consolidado_final`.
+- Fidelización: `canasto_fidelizacion`, `fidelizacion_solicitudes_detalle`, `fidelizacion_orce_importaciones`, `fidelizacion_orce_historial`.
+- Clasificación ABC: `sku_clasificacion_abc` y `clasificacion_abc_catalogo`; vista `sku_master_abc` (maestro con clasificación, por defecto 8 Nuevo).
+- Márgenes: `sku_costos` (costo por SKU, se carga con el maestro) y `promociones_costo` (costo guardado por línea de promoción). Sin acceso REST; solo por RPC. Parámetros `TASA_CAMBIO_USD` y `MARGEN_SEMAFORO` en `configuracion`.
 
-- `supabase_schema.sql`: esquema base.
-- `supabase_roles_permissions_mvp.sql`: roles, permisos, RLS y auditoria.
-- `supabase_transactional_save_rpc.sql`: guardado transaccional e idempotencia de operaciones.
-- `supabase_promociones_optimistic_concurrency.sql`: versionado para conflictos de promociones.
-- `supabase_live_notifications.sql`: notificaciones en vivo.
-- `supabase_sku_master.sql`: maestro SKU.
-- `supabase_fidelizacion_schema.sql`: tablas y RPC de fidelizacion.
-- `supabase_catalogo_diseno.sql`: flujo de diseno de catalogos.
-- `supabase_catalogo_respuestas.sql`: hasta dos respuestas por observación de Diseño. Ejecutar antes de publicar el frontend; ver [instalación y pruebas](docs/diseno_respuestas.md).
-- [Componentes de Diseño](docs/diseno_componentes.md): separación de comentarios, lista, formularios, visor y anotaciones; responsabilidades y verificación.
-- `supabase_delta_operativo_2026_06_22.sql`: delta operativo historico.
-- Hotfixes y deltas puntuales: `supabase_hotfix_estado_registro_delta_rpc.sql`, `supabase_special_request_status_cleanup.sql`, `supabase_add_catalog_status_preliminar.sql`, `supabase_require_activity_id.sql`, `supabase_catalogo_diseno_fix_fecha_actualizacion.sql`.
+Vistas: `v_catalogos_operativos`, `v_catalogo_resumen`, `consolidado`, `export_pricing`, `export_mercadeo`, `export_planimetria`.
 
-Guia de autenticacion y RLS: `docs/supabase_auth_rls_setup.md`.
+RPC que llama el frontend:
 
-Guia de [notificaciones en vivo](docs/notificaciones_envivo_flujo.md): destinatarios, campana flotante, sonido configurable, tokens del naranja SINSA, validacion y limites de entrega.
+| Área | RPC |
+| --- | --- |
+| Sesión | `current_user_role` |
+| Guardado | `save_catalog_transactional` |
+| Notificaciones | `create_live_notification`, `send_admin_broadcast`, `get_notification_routing`, `set_notification_subscriptions`, `save_notification_group`, `delete_notification_group` (Ajustes > Notificaciones, solo ADMIN) |
+| Maestro SKU | `get_sku_master_summary`, `clear_sku_master`, `insert_sku_master_batch`, `cargar_clasificacion_abc_lote`, `aplicar_clasificacion_abc`, `get_clasificacion_abc_resumen` |
+| Diseño | `save_catalog_design_project`, `review_catalog_design_page`, `register_catalog_design_version`, `catalog_design_user_directory` (opcional: nombres de diseñadores y autores para compradores y diseñadores) |
+| Fidelización | `crear_solicitud_fidelizacion`, `finalizar_solicitud_fidelizacion`, `conciliar_fidelizacion_orce` |
+| Márgenes | `consultar_margenes_promociones` (ADMIN, OPER y BUYER de su alcance), `completar_costos_promociones` (ADMIN, al final de la carga del maestro) |
 
-## Sincronizacion y Guardado
+Tareas programadas (`pg_cron`, ver [notificaciones](docs/notificaciones_envivo_flujo.md#calendario-automático-de-catálogos)): `run_catalog_daily_jobs` (00:05 Managua: estados automáticos Borrador → Preliminar → Precios Finales y aviso de corte) y `cleanup_live_notifications` (limpieza de avisos 30/90 días). Los avisos de estado, vigencia, asignaciones y respuestas de Diseño los generan triggers.
 
-El guardado principal se realiza mediante la RPC `save_catalog_transactional`.
+Funciones auxiliares usadas por RLS: `current_app_user_id`, `current_buyer_id`, `current_buyer_scope_ids`, `current_user_label`, `is_role`, `is_any_role`, `normalize_role`.
 
-Caracteristicas:
+Instalación, orden de ejecución y riesgos de cada script: [docs/README.md](docs/README.md#scripts-sql). Autenticación y alta de usuarios: [docs/supabase_auth_rls_setup.md](docs/supabase_auth_rls_setup.md).
 
-- Genera un `operation_id` por operacion cliente.
-- Valida promociones antes de enviar datos.
-- Guarda cambios de forma transaccional.
-- Usa firmas/snapshots locales para sincronizar solo registros modificados cuando hay estado previo.
-- Maneja conflictos de version en promociones con el codigo `PROMOTION_VERSION_CONFLICT`.
-- Si falta la RPC, la app muestra un error indicando ejecutar `docs/supabase_transactional_save_rpc.sql`.
+## Sincronización y guardado
 
-Lecturas grandes:
+- Guardado con la RPC `save_catalog_transactional`, con `operation_id` por operación (idempotencia en `save_operations`).
+- Validación de promociones antes de enviar.
+- Sincronización incremental mediante firmas/snapshots locales.
+- Conflictos de versión de promociones: código `PROMOTION_VERSION_CONFLICT` y modal de resolución.
+- Si falta la RPC, la app pide ejecutar `docs/supabase_transactional_save_rpc.sql`.
+- Lecturas grandes paginadas de 1000 en 1000; logs bajo demanda; exportaciones consultan Supabase con filtros.
 
-- `selectAll` pagina internamente con `SELECT_PAGE_SIZE = 1000`.
-- Logs se consultan bajo demanda con paginacion de 25, 50 o 100 filas.
-- Exportaciones consultan datos desde Supabase con filtros y no dependen de tener todo cargado en memoria.
+## Maestro de artículos
 
-## Maestro de Articulos
-
-El maestro se consulta exclusivamente desde `sku_master` en Supabase.
-
-- La app no descarga todo el maestro al abrir.
-- Se consultan solo los SKU usados, digitados, pegados o requeridos por flujos como regalías.
-- Los resultados se mantienen en cache durante la sesion.
-- Los SKU no encontrados se recuerdan para evitar consultas repetidas.
-- Un fallo de red no se interpreta como SKU inexistente.
-- La importacion administrativa desde Ajustes reemplaza el maestro en lotes.
-
-Detalle tecnico: `docs/maestro_sku_por_demanda.md`.
+Se consulta solo desde `sku_master`, por los códigos necesarios, con caché durante la sesión. Recuerda los SKU no encontrados y no confunde un fallo de red con un SKU inexistente. La carga administrativa desde Ajustes (solo ADMIN) reemplaza el maestro por lotes y, en la misma acción, los costos (`UNIT_COST`, `ORIGIN_COUNTRY_ID`) en `sku_costos`. Si el archivo es el reporte UDA (`UDA_ID, UDA_DESC, UDA_ITEM, UDA_VALUE`), la app lo detecta y solo actualiza la clasificación ABC (filas con `UDA_ID = 4`); los SKU que no vienen quedan como 8 (Nuevo) y la clasificación se conserva al recargar el maestro. Detalle: [docs/maestro_sku_por_demanda.md](docs/maestro_sku_por_demanda.md).
 
 ## Modelo Excel
 
-Excel es respaldo operativo, no la fuente principal de datos en esta version.
+Hojas (`src/constants/sheets.js`): `CONFIG`, `CATALOGOS`, `ACTIVIDADES`, `segmentos_clientes`, `COMPRADORES`, `RESPONSABLES_SOLICITUDES`, `JERARQUIA_CATEGORIAS`, `PROMOCIONES`, `PROMOCIONES_DETALLE`, `AVANCES_CATALOGO`, `COMENTARIOS`, `LOGS`, `NOTIFICACIONES`, `CONSOLIDADO`, `EXPORT_PRICING`, `EXPORT_MERCADEO`, `EXPORT_PLANIMETRIA`.
 
-Hojas soportadas por el codigo:
-
-- `CONFIG`
-- `CATALOGOS`
-- `ACTIVIDADES`
-- `segmentos_clientes`
-- `COMPRADORES`
-- `RESPONSABLES_SOLICITUDES`
-- `JERARQUIA_CATEGORIAS`
-- `PROMOCIONES`
-- `PROMOCIONES_DETALLE`
-- `AVANCES_CATALOGO`
-- `COMENTARIOS`
-- `LOGS`
-- `NOTIFICACIONES`
-- `CONSOLIDADO`
-- `EXPORT_PRICING`
-- `EXPORT_MERCADEO`
-- `EXPORT_PLANIMETRIA`
-
-Hojas minimas requeridas para importar respaldo:
-
-- `CONFIG`
-- `COMPRADORES`
-- `PROMOCIONES`
-- `COMENTARIOS`
-- `LOGS`
-- `NOTIFICACIONES`
+Mínimas para importar un respaldo (`REQUIRED_SHEETS`): `CONFIG`, `COMPRADORES`, `PROMOCIONES`, `COMENTARIOS`, `LOGS`, `NOTIFICACIONES`.
 
 Reglas:
 
-- `PROMOCIONES` sigue siendo la tabla principal del modelo Excel.
-- No se usan hojas separadas por comprador.
-- `CONSOLIDADO` y `EXPORT_*` son vistas generadas; no deben editarse manualmente.
-- No cambiar nombres de columnas ni hojas sin autorizacion.
+- `PROMOCIONES` es la tabla principal. No se usan hojas por comprador.
+- `CONSOLIDADO` y `EXPORT_*` son vistas generadas; no se editan a mano.
+- No cambiar nombres de hojas ni columnas sin autorización.
 
-## Reglas de Negocio
+## Reglas de negocio
 
-- SKU es obligatorio.
-- Tipo de promocion es obligatorio.
-- Promociones complejas requieren `grupo_oferta` y `tipo_sku`.
-- Los comentarios abiertos no bloquean el guardado; generan advertencias o avisos operativos.
-- La accion de borrar una promocion ya guardada la marca como `ANULADO`; las filas nuevas sin guardar se descartan localmente.
-- Las promociones guardadas conservan datos historicos; consultar el maestro SKU no reescribe precios automaticamente.
-- El flujo funcional debe respetar: Comprador -> Mercadeo -> Pricing -> Planimetria.
-- La arquitectura debe seguir preparada para migrar a SQL Server, Oracle, Dataverse o API corporativa.
-
-Reglas de anulacion: `docs/promociones_anuladas.md`.
+- SKU y tipo de promoción son obligatorios.
+- Las promociones complejas requieren `grupo_oferta` y `tipo_sku`.
+- Los comentarios abiertos no bloquean el guardado; generan avisos.
+- Borrar una promoción guardada la marca `ANULADO`; las filas nuevas sin guardar se descartan. Ver [docs/promociones_anuladas.md](docs/promociones_anuladas.md).
+- Las promociones guardadas conservan su precio y descripción históricos aunque cambie el maestro.
+- La arquitectura debe seguir preparada para migrar a SQL Server, Oracle, Dataverse o una API corporativa.
 
 ## Pruebas
 
-El proyecto usa `node:test` para pruebas focalizadas.
-
-Ejecutar todas las pruebas disponibles:
-
 ```bash
+# Todas
 node --experimental-vm-modules --test tests/*.test.mjs
-```
 
-Ejecutar pruebas del maestro SKU:
-
-```bash
+# Un archivo
 node --experimental-vm-modules --test tests/skuMaster.test.mjs
-```
 
-Validacion de produccion:
-
-```bash
+# Build
 npm run build
 ```
 
-## Convenciones de Desarrollo
+`tests/broadcastSql.test.mjs` necesita además la variable `PROMO_SQL_TEST_RUNTIME` con la ruta a PGlite; ver [docs/catalog-deadlines-broadcasts.md](docs/catalog-deadlines-broadcasts.md).
 
-- Hacer cambios pequenos y localizados.
-- Leer primero los archivos del modulo afectado.
-- No refactorizar codigo no relacionado con la solicitud.
-- No agregar dependencias sin justificacion.
-- Mantener compatibilidad con datos existentes en camelCase y snake_case.
-- Preservar RLS y permisos de Supabase al tocar servicios.
-- Mantener UI corporativa, sobria, responsive y orientada a productividad.
-- Preferir normalizadores existentes en `src/utils/promoHelpers.js` antes de cambiar nombres de campos.
+## Convenciones de desarrollo
 
-## Documentacion Complementaria
+Las reglas para personas y agentes de desarrollo están en [AGENTS.md](AGENTS.md).
 
-- `ROADMAP.md`: estado por modulo y plan de evolucion.
-- `AGENTS.md`: instrucciones de trabajo para agentes de desarrollo.
-- `docs/contexto_app_para_claude.md`: contexto resumido para asistencia externa.
-- `docs/plan_migracion_drive_supabase.md`: plan historico de migracion.
-- `docs/frontend_design_system_app_base.md`: lineamientos visuales.
-- `apps-script/README.md`: integraciones auxiliares de Apps Script.
+## Documentación
+
+- [ROADMAP.md](ROADMAP.md): estado por módulo y plan.
+- [AGENTS.md](AGENTS.md): reglas de trabajo para desarrolladores y agentes.
+- [docs/README.md](docs/README.md): índice de guías técnicas y scripts SQL.
+- [docs/contexto_app_para_claude.md](docs/contexto_app_para_claude.md): contexto resumido para asistentes externos.
