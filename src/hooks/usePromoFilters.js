@@ -59,8 +59,9 @@ export function usePromoFilters({
     const baseRows = activeRows;
     if (!term) return baseRows;
     const matchesText = (row) => `${row.sku} ${row.descripcion} ${row.numParte}`.toLowerCase().includes(term);
-    if (tipoActivo !== "Combo") return baseRows.filter(matchesText);
-    const isComboRow = (row) => (row.tipoPromo || row.tipo_promo) === "Combo";
+    // Combo y AIRES: buscar un SKU muestra la oferta completa.
+    if (tipoActivo !== "Combo" && tipoActivo !== "AIRES") return baseRows.filter(matchesText);
+    const isComboRow = (row) => (row.tipoPromo || row.tipo_promo) === tipoActivo;
     const matchingComboGroups = new Set(baseRows.filter((row) => isComboRow(row) && matchesText(row)).map((row) => row.grupoOferta || row.grupo_oferta).filter(Boolean));
     return baseRows.filter((row) => matchesText(row) || (isComboRow(row) && matchingComboGroups.has(row.grupoOferta || row.grupo_oferta)));
   }, [activeRows, search, tipoActivo]);

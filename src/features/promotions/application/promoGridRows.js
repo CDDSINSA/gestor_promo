@@ -1,4 +1,5 @@
 import { BUY_X_GET_X_PROMO_TYPES } from "../../../constants";
+import { resolveDiscountPrice } from "./promoPrices";
 import { getColumnsForPromoType } from "../../../promoTypes/promoTypeEngine";
 import { classNames, makeId } from "../../../utils/common";
 import {
@@ -17,6 +18,7 @@ export function toAppRow(row) {
   const rowId = row.row_id || row.id || makeId("ROW");
   const activityId = row.actividadId || row.actividad_id || row.catalogo_id || "";
   const tipoPromo = row.tipoPromo || row.tipo_promo || "";
+  const precioAhora = resolveDiscountPrice(tipoPromo, pickPromoFieldValue(row.precioAntes, row.precio_antes), pickPromoFieldValue(row.precioAhora, row.precio_ahora), row.descuento);
   const grupoOferta = row.grupoOferta || row.grupo_oferta || "";
   const offerId = resolveOfferId(row, rowId, activityId, tipoPromo, grupoOferta);
   const compradorId = row.comprador_id || row.compradorId || "";
@@ -47,8 +49,8 @@ export function toAppRow(row) {
     cantidad_minima: pickPromoFieldValueOr(1, row.cantidad_minima, row.cantidadMinima),
     precioAntes: pickPromoFieldValue(row.precioAntes, row.precio_antes),
     precio_antes: pickPromoFieldValue(row.precio_antes, row.precioAntes),
-    precioAhora: pickPromoFieldValue(row.precioAhora, row.precio_ahora),
-    precio_ahora: pickPromoFieldValue(row.precio_ahora, row.precioAhora),
+    precioAhora,
+    precio_ahora: precioAhora,
     comentario: row.comentario || row.comentario_comprador || "",
     comentario_comprador: row.comentario_comprador || row.comentario || "",
     aplicaSegmento,
@@ -60,6 +62,9 @@ export function toAppRow(row) {
     alcance_tipo: normalizeAlcanceType(row.alcance_tipo || row.alcanceTipo),
     alcanceValor: row.alcanceValor || row.alcance_valor || "",
     alcance_valor: row.alcance_valor || row.alcanceValor || "",
+    numPagina: row.numPagina !== undefined ? row.numPagina : (row.numero_pagina !== undefined ? row.numero_pagina : (row.num_pagina !== undefined ? row.num_pagina : "")),
+    num_pagina: row.numPagina !== undefined ? row.numPagina : (row.numero_pagina !== undefined ? row.numero_pagina : (row.num_pagina !== undefined ? row.num_pagina : "")),
+    numero_pagina: row.numPagina !== undefined ? row.numPagina : (row.numero_pagina !== undefined ? row.numero_pagina : (row.num_pagina !== undefined ? row.num_pagina : "")),
     usuarioCrea,
     usuario_crea: usuarioCrea,
     usuarioEdita,
@@ -72,7 +77,8 @@ export function toAppRow(row) {
 
 export function getGridColumnsForPromoType(type) {
   const columns = getColumnsForPromoType(type);
-  return ["sku", ...columns.filter((column) => column !== "sku")];
+  const remaining = columns.filter((column) => column !== "sku" && column !== "numPagina");
+  return ["sku", "numPagina", ...remaining];
 }
 
 export function getPromoRowClass(row) {

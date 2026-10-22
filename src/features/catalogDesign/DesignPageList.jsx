@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, ImageUp, MessageSquare, Eye } from "lucide-react";
 import { Button } from "../../components/ui";
 import { classNames } from "../../utils/common";
-import { StateBadge, PAGE_STATES, getUserLabel, getBuyerLabel, formatDate } from "./designPresentation";
+import { PAGE_IMAGE_ACCEPT } from "./UploadConfirmModal";
+import { StateBadge, PAGE_STATES, getUserLabel, getBuyerLabel, formatDate, getPageStateLabel } from "./designPresentation";
 
 export default function DesignPageList({
   visiblePages,
@@ -13,6 +14,7 @@ export default function DesignPageList({
   selectedPage,
   signedUrls,
   commentCountByPageId,
+  pendingCommentCountByPageId = {},
   isAdminOrMark,
   canUpload,
   currentUserId,
@@ -25,6 +27,7 @@ export default function DesignPageList({
   buyers,
   buyerById
 }) {
+  const [dragOverPageId, setDragOverPageId] = useState("");
   return (
     <>
     <div className="catalog-design-pages-header">
@@ -77,34 +80,53 @@ export default function DesignPageList({
             const isSelected = selectedPage?.id === page.id;
             const imageUrl = signedUrls[page.id];
             const pageCommentsCount = commentCountByPageId[page.id] || 0;
+            const pendingCount = pendingCommentCountByPageId[page.id] || 0;
             const canUploadPage = isAdminOrMark || (canUpload && page.disenador_id === currentUserId);
+            const stateClass = `state-${String(page.estado || "pendiente").toLowerCase().replace(/_/g, "-")}`;
             return (
               <div
                 key={page.id}
                 id={`filmstrip-card-${page.id}`}
-                className={classNames("catalog-design-filmstrip-card", isSelected && "selected")}
+                className={classNames("catalog-design-filmstrip-card", stateClass, isSelected && "selected", dragOverPageId === page.id && "is-drag-over")}
                 onClick={() => selectViewerPage(page)}
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    selectViewerPage(page);
+                  }
+                }}
                 onDragOver={(e) => {
                   if (canUploadPage) {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (dragOverPageId !== page.id) setDragOverPageId(page.id);
                   }
                 }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget)) setDragOverPageId("");
+                }}
                 onDrop={(e) => {
+                  setDragOverPageId("");
                   if (!canUploadPage) return;
                   e.preventDefault();
                   e.stopPropagation();
                   const file = e.dataTransfer?.files?.[0];
-                  if (file && (file.type?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file.name))) {
-                    uploadPageImage(page, file);
-                  }
+                  if (file) uploadPageImage(page, file);
                 }}
                 role="button"
                 tabIndex={0}
-                title={`Página ${page.numero_pagina} · ${page.estado || "pendiente"} (Arrastre imagen aquí para subir)`}
+                aria-current={isSelected ? "true" : undefined}
+                title={`Página ${page.numero_pagina} · ${getPageStateLabel(page.estado)}${canUploadPage ? " (arrastre una imagen aquí para subirla)" : ""}`}
               >
                 <div className="catalog-design-filmstrip-card-head">
-                  <span className="catalog-design-filmstrip-page-num">#{page.numero_pagina}</span>
+                  <div className="catalog-design-filmstrip-card-head-left">
+                    <span className="catalog-design-filmstrip-page-num">#{page.numero_pagina}</span>
+                    {page.archivo_path && (
+                      <span className="catalog-design-filmstrip-version-tag" title={`Versión ${page.version_actual || 1}`}>
+                        v{page.version_actual || 1}
+                      </span>
+                    )}
+                  </div>
                   <StateBadge state={page.estado || "pendiente"} />
                 </div>
     
@@ -118,17 +140,22 @@ export default function DesignPageList({
                     </div>
                   )}
                   {isSelected && <div className="catalog-design-filmstrip-active-pill">EN VISOR</div>}
+                  {dragOverPageId === page.id && (
+                    <div className="catalog-design-filmstrip-drop-hint"><ImageUp size={20}/><span>Soltar para revisar</span></div>
+                  )}
                 </div>
     
                 <div className="catalog-design-filmstrip-card-foot">
                   <div className="catalog-design-filmstrip-comments-count">
-                    {pageCommentsCount > 0 ? (
-                      <span className="catalog-design-filmstrip-comment-pill" title={`${pageCommentsCount} observaciones`}>
+                    {pendingCount > 0 ? (
+                      <span className="catalog-design-filmstrip-comment-pill is-pending" title={`${pendingCount} pendiente${pendingCount === 1 ? "" : "s"} de ${pageCommentsCount} observaciones`}>
+                        <MessageSquare size={12} /> {pendingCount} pend.
+                      </span>
+                    ) : pageCommentsCount > 0 ? (
+                      <span className="catalog-design-filmstrip-comment-pill" title={`${pageCommentsCount} observaciones, todas resueltas`}>
                         <MessageSquare size={12} /> {pageCommentsCount}
                       </span>
-                    ) : (
-                      <span className="catalog-design-filmstrip-no-comments">0 obs.</span>
-                    )}
+                    ) : null}
                   </div>
     
                   {canUploadPage && (
@@ -140,7 +167,7 @@ export default function DesignPageList({
                       <ImageUp size={12} /> Subir
                       <input
                         type="file"
-                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                        accept={PAGE_IMAGE_ACCEPT}
                         onChange={(event) => {
                           uploadPageImage(page, event.target.files?.[0]);
                           event.target.value = "";
@@ -178,7 +205,7 @@ export default function DesignPageList({
               <th>Diseñador</th>
               <th>Comprador</th>
               <th>Estado</th>
-              <th>Comentarios</th>
+              <th title="Pendientes / total">Observaciones</th>
               <th>Última carga</th>
               <th>Acciones</th>
             </tr>
@@ -188,6 +215,7 @@ export default function DesignPageList({
               const canUploadPage = isAdminOrMark || (canUpload && page.disenador_id === currentUserId);
               const imageUrl = signedUrls[page.id];
               const pageCommentsCount = commentCountByPageId[page.id] || 0;
+              const pendingCount = pendingCommentCountByPageId[page.id] || 0;
               const isSelected = selectedPage?.id === page.id;
               return (
                 <tr
@@ -214,6 +242,11 @@ export default function DesignPageList({
                   <td>
                     <div className="catalog-design-table-title">
                       <strong>{page.titulo_pagina || `Página ${page.numero_pagina}`}</strong>
+                      {page.archivo_path && (
+                        <span className="catalog-design-filmstrip-version-tag" title={`Versión ${page.version_actual || 1}`}>
+                          v{page.version_actual || 1}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
@@ -256,7 +289,7 @@ export default function DesignPageList({
                         onChange={(event) => updatePageField(page, "estado", event.target.value)}
                       >
                         {PAGE_STATES.map((state) => (
-                          <option key={state} value={state}>{state.replace(/_/g, " ")}</option>
+                          <option key={state} value={state}>{getPageStateLabel(state)}</option>
                         ))}
                       </select>
                     ) : (
@@ -265,8 +298,8 @@ export default function DesignPageList({
                   </td>
                   <td>
                     {pageCommentsCount > 0 ? (
-                      <span className="catalog-design-table-comment-pill" title={`${pageCommentsCount} comentarios registrados`}>
-                        <MessageSquare size={13}/> {pageCommentsCount}
+                      <span className={classNames("catalog-design-table-comment-pill", pendingCount > 0 && "is-pending")} title={`${pendingCount} pendiente${pendingCount === 1 ? "" : "s"} de ${pageCommentsCount} observaciones`}>
+                        <MessageSquare size={13}/> {pendingCount > 0 ? `${pendingCount} / ${pageCommentsCount}` : pageCommentsCount}
                       </span>
                     ) : (
                       <span className="catalog-design-table-no-comments">—</span>
@@ -280,7 +313,7 @@ export default function DesignPageList({
                           <ImageUp size={15}/> Subir
                           <input
                             type="file"
-                            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                            accept={PAGE_IMAGE_ACCEPT}
                             onChange={(event) => {
                               uploadPageImage(page, event.target.files?.[0]);
                               event.target.value = "";

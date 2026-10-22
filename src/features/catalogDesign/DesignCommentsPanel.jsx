@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, Save, CheckCircle2, XCircle, Check, RefreshCw } from "lucide-react";
+import { Plus, Save, XCircle, Check } from "lucide-react";
 import { Button } from "../../components/ui";
 import { classNames } from "../../utils/common";
 import { COMMENT_CATEGORIES, CATEGORY_COLORS, ANNOTATION_COLOR, normalizeCommentAnnotations, getCommentStatus, getUserLabel, formatDate } from "./designPresentation";
@@ -40,7 +40,10 @@ export default function DesignCommentsPanel({
   isBuyer,
   currentBuyerId,
   runAction,
-  designEvent
+  designEvent,
+  activeVersionNumber = 1,
+  currentPageVersions = [],
+  currentVersionCommentsCount = 0,
 }) {
   return (
     <div className="catalog-design-rail-content">
@@ -56,29 +59,49 @@ export default function DesignCommentsPanel({
         )}
       </div>
     
-      {/* Filtros rápidos de comentarios: Todos, Pendientes, Resueltos */}
+      {/* Filtros rápidos de comentarios: Todos, Esta Versión, Pendientes, Resueltos */}
       {selectedComments.length > 0 && (
-        <div className="catalog-design-comment-filter-pills" role="tablist">
+        <div className="catalog-design-comment-filter-pills" role="group" aria-label="Filtrar observaciones">
           <button
             type="button"
             className={classNames("catalog-design-filter-pill", commentFilter === "all" && "active")}
+            aria-pressed={commentFilter === "all"}
             onClick={() => setCommentFilter("all")}
           >
-            Todas ({selectedComments.length})
+            <span className="catalog-design-filter-label">Todas</span>
+            <span className="catalog-design-filter-count">{selectedComments.length}</span>
           </button>
+          {currentPageVersions.length > 1 && (
+            <button
+              type="button"
+              className={classNames("catalog-design-filter-pill is-version", commentFilter === "version" && "active")}
+              aria-pressed={commentFilter === "version"}
+              onClick={() => setCommentFilter(commentFilter === "version" ? "all" : "version")}
+              title={`Mostrar solo observaciones realizadas sobre la versión ${activeVersionNumber}`}
+            >
+              <span className="catalog-design-filter-label">v{activeVersionNumber}</span>
+              <span className="catalog-design-filter-count">{currentVersionCommentsCount}</span>
+            </button>
+          )}
           <button
             type="button"
-            className={classNames("catalog-design-filter-pill", commentFilter === "pending" && "active")}
+            className={classNames("catalog-design-filter-pill is-pending", commentFilter === "pending" && "active")}
+            aria-pressed={commentFilter === "pending"}
             onClick={() => setCommentFilter("pending")}
           >
-            Pendientes ({pendingCommentsCount})
+            <span className="catalog-design-filter-label">Pendientes</span>
+            <span className={classNames("catalog-design-filter-count", pendingCommentsCount > 0 && "has-pending")}>
+              {pendingCommentsCount}
+            </span>
           </button>
           <button
             type="button"
-            className={classNames("catalog-design-filter-pill", commentFilter === "resolved" && "active")}
+            className={classNames("catalog-design-filter-pill is-resolved", commentFilter === "resolved" && "active")}
+            aria-pressed={commentFilter === "resolved"}
             onClick={() => setCommentFilter("resolved")}
           >
-            Resueltas ({resolvedCommentsCount})
+            <span className="catalog-design-filter-label">Resueltas</span>
+            <span className="catalog-design-filter-count">{resolvedCommentsCount}</span>
           </button>
         </div>
       )}
@@ -88,13 +111,18 @@ export default function DesignCommentsPanel({
         <div className="catalog-design-comment-composer">
           <div className="catalog-design-composer-head">
             <strong>Nueva observación</strong>
-            {pendingAnnotationCount > 0 && (
-              <span className="catalog-design-composer-signal-tag">
-                {pendingAnnotationCount} señal{pendingAnnotationCount === 1 ? "" : "es"} en imagen
+            <div className="catalog-design-composer-tags">
+              <span className="catalog-design-composer-version-tag" title={`Esta observación quedará registrada en la versión ${activeVersionNumber}`}>
+                v{activeVersionNumber}
               </span>
-            )}
+              {pendingAnnotationCount > 0 && (
+                <span className="catalog-design-composer-signal-tag">
+                  {pendingAnnotationCount} señal{pendingAnnotationCount === 1 ? "" : "es"} en imagen
+                </span>
+              )}
+            </div>
           </div>
-          <div className="catalog-design-category-selector" role="radiogroup" aria-label="Categoría de observación">
+          <div className="catalog-design-category-selector" role="group" aria-label="Categoría de observación">
             {COMMENT_CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
@@ -102,8 +130,9 @@ export default function DesignCommentsPanel({
                 className={classNames("catalog-design-cat-pill", commentCategory === cat.id && "selected")}
                 style={{ "--cat-color": cat.color }}
                 onClick={() => setCommentCategory(cat.id)}
+                aria-pressed={commentCategory === cat.id}
               >
-                <span>{cat.icon}</span> {cat.label}
+                <cat.Icon size={13} aria-hidden="true"/> {cat.label}
               </button>
             ))}
           </div>
@@ -116,18 +145,13 @@ export default function DesignCommentsPanel({
           />
           <div className="catalog-design-composer-actions">
             <Button variant="outline" onClick={resetReviewDraft}>Cancelar</Button>
-            <Button variant="outline" onClick={addComment} disabled={!commentText.trim()}>
-              <Save size={15}/> Guardar
+            <Button variant={canReviewSelectedPage ? "outline" : "default"} onClick={addComment} disabled={!commentText.trim()} title="Guardar la observación sin cambiar el estado de la página">
+              <Save size={15}/> Guardar observación
             </Button>
             {canReviewSelectedPage && (
-              <>
-                <Button onClick={() => reviewPage("aprobada", "aprobacion")} title="Aprobar página">
-                  <CheckCircle2 size={15}/> Aprobar
-                </Button>
-                <Button variant="outline" onClick={() => reviewPage("ajustes", "rechazo")} title="Enviar a ajustes">
-                  <XCircle size={15}/> Rechazar
-                </Button>
-              </>
+              <Button className="btn-reject-sm" onClick={() => reviewPage("ajustes", "rechazo")} disabled={!commentText.trim()} title="Guardar la observación y enviar la página a ajustes">
+                <XCircle size={15}/> Solicitar ajustes
+              </Button>
             )}
           </div>
         </div>
@@ -160,9 +184,15 @@ export default function DesignCommentsPanel({
               onFocus={() => setActiveCommentId(comment.id)}
               onBlur={() => setActiveCommentId("")}
               onClick={() => highlightAndScrollComment(comment.id)}
+              onKeyDown={(event) => {
+                if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  highlightAndScrollComment(comment.id);
+                }
+              }}
             >
               <div className="catalog-design-comment-item-top">
-                {canUpdateCommentStatus ? (
+                {canUpdateCommentStatus && (
                   <button
                     type="button"
                     className={classNames("catalog-design-comment-checkbox", isResolved && "checked")}
@@ -175,40 +205,30 @@ export default function DesignCommentsPanel({
                   >
                     {isResolved ? <Check size={13}/> : null}
                   </button>
-                ) : (
-                  <div className="catalog-design-comment-id-badge" style={{ backgroundColor: catColor }}>
-                    #{commentNumber}
-                  </div>
                 )}
+                <span className="catalog-design-comment-id-badge" style={{ backgroundColor: catColor }} title={`Observación #${commentNumber}`}>
+                  #{commentNumber}
+                </span>
                 <span className="catalog-design-comment-cat-tag" style={{ color: catColor }}>
-                  {categoryInfo ? `${categoryInfo.icon} ${categoryInfo.label}` : (comment.tipo || "Observación")}
+                  {categoryInfo ? <><categoryInfo.Icon size={12} aria-hidden="true"/> {categoryInfo.label}</> : (comment.tipo || "Observación")}
                 </span>
                 <span className="catalog-design-comment-meta">{formatDate(comment.fecha_creacion) || "sin fecha"}</span>
-                <span className={classNames("catalog-design-comment-status", commentStatus)}>{commentStatus}</span>
+                {comment.numero_version && (
+                  <span className="catalog-design-comment-version-badge" title={`Observación en versión ${comment.numero_version}`}>
+                    v{comment.numero_version}
+                  </span>
+                )}
+                <span className={classNames("catalog-design-comment-status", commentStatus)}>{isResolved ? "Resuelta" : "Pendiente"}</span>
               </div>
               <div className="catalog-design-comment-body-row">
                 <strong>{getUserLabel(userById[comment.usuario_id])}</strong>
                 <p className={isResolved ? "resolved-text" : ""}>{comment.comentario}</p>
               </div>
               <div className="catalog-design-comment-item-foot">
-                {annotationCount > 0 ? (
+                {annotationCount > 0 && (
                   <span className="catalog-design-comment-signal" style={{ color: catColor, borderColor: catColor }}>
-                    Pin #{commentNumber} ({annotationCount} señal{annotationCount === 1 ? "" : "es"})
+                    {annotationCount} señal{annotationCount === 1 ? "" : "es"} en la imagen
                   </span>
-                ) : <span />}
-                {canUpdateCommentStatus && (
-                  <button
-                    type="button"
-                    className="catalog-design-comment-status-btn"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      updateCommentStatus(comment, isResolved ? "abierto" : "resuelto");
-                    }}
-                    title={isResolved ? "Reabrir observación" : "Marcar como resuelta"}
-                  >
-                    {isResolved ? <RefreshCw size={12}/> : <CheckCircle2 size={12}/>}
-                    <span>{isResolved ? "Reabrir" : "Resolver"}</span>
-                  </button>
                 )}
               </div>
               <CommentReplies
@@ -225,7 +245,12 @@ export default function DesignCommentsPanel({
         })}
         {!filteredSelectedComments.length && !isDraftingComment && (
           <div className="empty-state">
-            {commentFilter === "all" ? "Aún no hay observaciones para esta página." : `No hay observaciones ${commentFilter === "pending" ? "pendientes" : "resueltas"}.`}
+            {{
+              all: "Aún no hay observaciones para esta página.",
+              pending: "No hay observaciones pendientes.",
+              resolved: "No hay observaciones resueltas.",
+              version: `No hay observaciones en la versión ${activeVersionNumber}.`,
+            }[commentFilter] || "No hay observaciones."}
           </div>
         )}
       </div>

@@ -1,9 +1,12 @@
 import React from "react";
-import { ImageUp } from "lucide-react";
+import { ImageUp, History, RefreshCw, Layers } from "lucide-react";
 import { classNames } from "../../utils/common";
 import DesignAnnotationLayer from "./DesignAnnotationLayer";
+import { PAGE_IMAGE_ACCEPT } from "./UploadConfirmModal";
 
 export default function DesignImageViewer({
+  imageUrlError,
+  retryImageUrl,
   viewerZoom,
   isSpacePressed,
   annotationMode,
@@ -33,10 +36,28 @@ export default function DesignImageViewer({
   activeAnnotation,
   hoveredAnnotationAnchor,
   canUploadSelectedPage,
-  uploadPageImage
+  uploadPageImage,
+  isHistoricalVersion = false,
+  activeVersionNumber = 1,
+  latestVersionNumber = 1,
+  onSelectVersion,
+  isImageLoading = false,
 }) {
   return (
     <div className="catalog-design-viewer-surface">
+      {isHistoricalVersion && (
+        <div className="catalog-design-historical-banner" role="status">
+          <History size={15} />
+          <span>Estás viendo la <strong>versión {activeVersionNumber}</strong> (histórica). Las marcas corresponden a este arte.</span>
+          <button
+            type="button"
+            className="catalog-design-banner-action-btn"
+            onClick={() => onSelectVersion?.(latestVersionNumber)}
+          >
+            Volver a la versión actual (v{latestVersionNumber})
+          </button>
+        </div>
+      )}
       <div
         className={classNames(
           "catalog-design-viewer-stage",
@@ -57,12 +78,20 @@ export default function DesignImageViewer({
           <div className="catalog-design-drop-overlay">
             <ImageUp size={48} />
             <strong>Suelte la imagen aquí</strong>
-            <span>Se actualizará el arte de la página {selectedPage?.numero_pagina}</span>
+            <span>Podrá revisarla antes de cargarla como nueva versión de la página {selectedPage?.numero_pagina}</span>
           </div>
         )}
     
+        {imageUrlError && <div role="alert" className="catalog-design-historical-banner">
+          <span>{imageUrlError}</span>
+          <button type="button" className="btn btn-outline" onClick={retryImageUrl}>Reintentar</button>
+        </div>}
         {selectedImageUrl ? (
           <div className="catalog-design-image-shell" ref={imageShellRef} style={{ width: `${viewerZoom}%` }}>
+            <div className={classNames("catalog-design-image-version-watermark", isHistoricalVersion && "historical")}>
+              <Layers size={13} />
+              <span>v{activeVersionNumber} {isHistoricalVersion ? "(Histórica)" : "(Vigente)"}</span>
+            </div>
             <img src={selectedImageUrl} alt={selectedPage?.titulo_pagina || "Página de catálogo"} draggable={false} />
             {!annotationsHidden && <DesignAnnotationLayer
               annotationMode={annotationMode}
@@ -88,19 +117,25 @@ export default function DesignImageViewer({
             {annotationMode && <div className="catalog-design-drawing-hint">Arrastre sobre la imagen para señalar la corrección.</div>}
             {viewerZoom > 100 && !annotationMode && (
               <div className="catalog-design-pan-hint">
-                <span>💡 Arrastre con el ratón o mantenga espacio para desplazarse por la imagen</span>
+                <span>Arrastre para desplazarse · Ctrl + rueda para zoom · H para ver la página completa</span>
               </div>
             )}
+          </div>
+        ) : imageUrlError ? null : isImageLoading ? (
+          <div className="catalog-design-viewer-empty is-loading">
+            <RefreshCw size={36} className="catalog-design-spin" />
+            <strong>Cargando arte de la versión {activeVersionNumber}...</strong>
+            <span>Obteniendo archivo desde almacenamiento de Supabase...</span>
           </div>
         ) : (
           <div className="catalog-design-viewer-empty">
             <ImageUp size={36}/>
             <strong>{selectedPage ? "Página sin arte cargado" : "Seleccione una página"}</strong>
-            <span>{selectedPage ? "Arrastre una imagen JPG o PNG aquí, o use el botón Subir Arte superior." : "Use la tira inferior o tabla para elegir una página del proyecto."}</span>
+            <span>{selectedPage ? (canUploadSelectedPage ? "Arrastre una imagen JPG o PNG (máx. 10 MB) aquí, o use Subir arte." : "El diseñador aún no ha cargado el arte de esta página.") : "Use la tira inferior o la tabla para elegir una página del proyecto."}</span>
             {canUploadSelectedPage && selectedPage && (
               <label className="btn btn-primary catalog-design-upload-cta">
                 <ImageUp size={16}/> Seleccionar imagen
-                <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(e) => { uploadPageImage(selectedPage, e.target.files?.[0]); e.target.value = ""; }} />
+                <input type="file" accept={PAGE_IMAGE_ACCEPT} onChange={(e) => { uploadPageImage(selectedPage, e.target.files?.[0]); e.target.value = ""; }} style={{ display: "none" }} />
               </label>
             )}
           </div>

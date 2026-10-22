@@ -13,7 +13,7 @@ function buyerId(row, buyers) {
 }
 
 // Pure event builders: no persistence, UI state or network requests.
-export function buildCatalogNotificationEvents(payload = {}, { operationType = "catalog", actorRole, buyers = [], previousPromotions = new Map() } = {}) {
+export function buildCatalogNotificationEvents(payload = {}, { operationType = "catalog", actorRole, buyers = [], catalogDesigners = {}, previousPromotions = new Map() } = {}) {
   const events = [];
   const sync = payload.sync_options || {};
   const promotions = payload.promociones || [];
@@ -52,10 +52,15 @@ export function buildCatalogNotificationEvents(payload = {}, { operationType = "
       const context = name ? ` en ${kind === "catálogo" ? "el" : "la"} ${kind} «${name}»` : "";
       const count = rowIds.length;
       const message = messages[change];
+      const designers = unique(catalogDesigners[id] || []);
+      const targetsDesigners = designers.length > 0;
       events.push({
         tipoEvento: message.event, titulo: message.title,
         mensaje: `${count === 1 ? message.singular : message.plural} ${count} ${count === 1 ? "promoción" : "promociones"}${context}.${change === "annulled" ? (count === 1 ? " Ya no está activa." : " Ya no están activas.") : ""} Favor revisar.`,
-        actividadId: id, destinatarioRoles: [ROLES.MARK], urlModulo: "consolidado",
+        actividadId: id,
+        destinatarioRoles: targetsDesigners ? [] : [ROLES.MARK],
+        destinatarioUsuarioIds: targetsDesigners ? designers : [],
+        urlModulo: targetsDesigners ? "catalogDesign" : "consolidado",
         metadata: { promotionChanges: count, changeType: change, rowIds, operationId: payload.operation_id },
       });
     });
@@ -68,6 +73,8 @@ export function buildCatalogNotificationEvents(payload = {}, { operationType = "
       const buyerIds = unique(rows.map((row) => buyerId(row, buyers)));
       if (!comment.row_id && activity?.solicitante_buyer_id) buyerIds.push(activity.solicitante_buyer_id);
       const fromBuyer = normalizeRole(actorRole) === ROLES.BUYER;
+      const designers = unique(catalogDesigners[id] || []);
+      const targetsDesigners = fromBuyer && designers.length > 0;
       events.push({
         tipoEvento: fromBuyer ? "COMENTARIO_COMPRAS" : "COMENTARIO_MERCADEO",
         titulo: fromBuyer ? "Comentario de Compras actualizado" : "Comentario de Mercadeo actualizado",
@@ -75,22 +82,16 @@ export function buildCatalogNotificationEvents(payload = {}, { operationType = "
         actividadId: id,
         rowId: comment.row_id,
         comentarioId: comment.comentario_id,
-        destinatarioRoles: fromBuyer ? [ROLES.MARK] : [],
+        destinatarioRoles: fromBuyer ? (targetsDesigners ? [] : [ROLES.MARK]) : [],
+        destinatarioUsuarioIds: targetsDesigners ? designers : [],
         destinatarioBuyerIds: fromBuyer ? [] : unique(buyerIds),
-        urlModulo: "consolidado",
+        urlModulo: targetsDesigners ? "catalogDesign" : "consolidado",
         metadata: { estado: comment.estado, operationId: payload.operation_id },
       });
     });
   }
-  if (operationType === "settings") {
-    const changed = new Set(sync.actividades?.changed_ids || []);
-    (payload.actividades || []).filter((row) => changed.has(activityId(row))).forEach((row) => events.push({
-      tipoEvento: "CATALOGO_ACTUALIZADO", titulo: "Catalogo actualizado",
-      mensaje: "La configuracion del catalogo fue actualizada.", actividadId: activityId(row),
-      destinatarioRoles: [ROLES.MARK, ROLES.BUYER], urlModulo: "home",
-      metadata: { operationId: payload.operation_id },
-    }));
-  }
+  // Settings saves no longer emit a generic event: state and validity changes
+  // are notified by the database trigger notify_catalog_change.
   return events;
 }
 

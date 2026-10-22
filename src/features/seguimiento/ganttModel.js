@@ -126,7 +126,23 @@ function buildFallbackActivities(catalogos = []) {
   }));
 }
 
-export function buildSeguimientoItems({ actividades = [], rows = [], catalogos = [] }) {
+// Totales calculados en Supabase (v_seguimiento_resumen) para las actividades cuyas
+// promociones no estan cargadas en la app (carga por campaña).
+function buildResumenByActivity(resumen = []) {
+  const map = new Map();
+  (resumen || []).forEach((item) => {
+    const id = String(item?.actividad_id || item?.actividadId || "").trim();
+    if (id) map.set(id, item);
+  });
+  return map;
+}
+
+function asList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+export function buildSeguimientoItems({ actividades = [], rows = [], catalogos = [], resumen = [] }) {
+  const resumenByActivity = buildResumenByActivity(resumen);
   const catalogById = new Map(catalogos.map((catalogo) => [firstFilled(catalogo.id, catalogo.catalogo_id), catalogo]));
   const sourceActivities = actividades.length ? actividades : buildFallbackActivities(catalogos);
   const rowsByActivity = new Map();
@@ -139,16 +155,19 @@ export function buildSeguimientoItems({ actividades = [], rows = [], catalogos =
   });
 
   return sourceActivities
+    .filter((activity) => !String(getActivityId(activity)).trim().toUpperCase().startsWith("FID-")
+      && String(activity.subtipo || "").trim().toUpperCase() !== "FIDELIZACION")
     .map((activity, index) => {
       const activityId = getActivityId(activity);
       const activityRows = rowsByActivity.get(activityId) || [];
       const dates = getActivityDates(activity, catalogById);
-      const compradores = uniqueValues([getActivityBuyer(activity), ...activityRows.map(getRowBuyer)]);
-      const tiposPromo = uniqueValues(activityRows.map((row) => firstFilled(row.tipoPromo, row.tipo_promo)));
-      const tiendas = uniqueValues(activityRows.map((row) => getStoreValue(row, activity)));
-      const segmentos = uniqueValues(activityRows.map((row) => getSegmentValue(row, activity)));
-      const skus = uniqueValues(activityRows.map((row) => firstFilled(row.sku, row.SKU)));
-      const ofertas = uniqueValues(activityRows.map((row) => firstFilled(row.ofertaId, row.oferta_id, row.grupoOferta, row.grupo_oferta)));
+      const summary = !activityRows.length ? resumenByActivity.get(String(activityId).trim()) : null;
+      const compradores = uniqueValues([getActivityBuyer(activity), ...(summary ? asList(summary.compradores) : activityRows.map(getRowBuyer))]);
+      const tiposPromo = uniqueValues(summary ? asList(summary.tipos_promo) : activityRows.map((row) => firstFilled(row.tipoPromo, row.tipo_promo)));
+      const tiendas = uniqueValues(summary ? asList(summary.tiendas) : activityRows.map((row) => getStoreValue(row, activity)));
+      const segmentos = uniqueValues(summary ? asList(summary.segmentos) : activityRows.map((row) => getSegmentValue(row, activity)));
+      const skus = summary ? null : uniqueValues(activityRows.map((row) => firstFilled(row.sku, row.SKU)));
+      const ofertas = summary ? null : uniqueValues(activityRows.map((row) => firstFilled(row.ofertaId, row.oferta_id, row.grupoOferta, row.grupo_oferta)));
 
       return {
         id: activityId || `actividad-${index}`,
@@ -161,9 +180,9 @@ export function buildSeguimientoItems({ actividades = [], rows = [], catalogos =
         tiposPromo,
         tiendas,
         segmentos,
-        skuCount: skus.length,
-        offerCount: ofertas.length,
-        rowCount: activityRows.length,
+        skuCount: summary ? Number(summary.skus_count) || 0 : skus.length,
+        offerCount: summary ? Number(summary.ofertas_count) || 0 : ofertas.length,
+        rowCount: summary ? Number(summary.promociones_count) || 0 : activityRows.length,
         start: dates.start,
         end: dates.end,
         hasDates: dates.hasDates,

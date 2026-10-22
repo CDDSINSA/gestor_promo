@@ -15,7 +15,8 @@ function buildInitialCatalogState(useDemoData = false) {
   const catalogos = useDemoData ? catalogosIniciales : [];
   return {
     catalogos,
-    catalogoActivo: catalogos[0] || null,
+    // Sin preselección: el catálogo de Promociones lo elige el comprador desde Inicio.
+    catalogoActivo: null,
     catalogoAvanceActivo: catalogos[0] || null,
     actividades: mergeCatalogActivities(catalogos, []),
     compradores: useDemoData ? compradoresIniciales.map(normalizeCompradorData) : [],

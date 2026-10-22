@@ -38,6 +38,11 @@ import {
   getSegmentoSyncId,
 } from "../app/sync/syncOptions";
 import {
+  analyzePromotionDeletes,
+  describeBulkDeleteGroups,
+  getDeleteApprovalKey,
+} from "../app/sync/deleteGuard";
+import {
   getFullSyncPayload, compactSupabasePayload, hasSupabaseDeltaChanges, buildSaveOperationSummary,
 } from "../app/sync/savePayload";
 
@@ -83,6 +88,52 @@ export function useCatalogSync({
     setActividades(mergeCatalogActivities(savedCatalogos, payload.actividades));
   };
 
+  // Un click de boton llega como evento; no es un override del payload.
+  const cleanSaveOverrides = (overrides) => (overrides && (overrides.nativeEvent || typeof overrides.preventDefault === "function") ? {} : (overrides || {}));
+
+  const requestBulkDeleteApproval = ({ total, detail, approvalKey, retry }) => {
+    pendingSaveConfirmRef.current = true;
+    setPendingSaveAction({
+      title: "Confirmar eliminación de promociones",
+      description: `Este guardado eliminará ${total} promociones en Supabase.`,
+      note: `${detail}. Si usted no eliminó estas líneas, cancele y recargue los datos antes de guardar.`,
+      confirmLabel: `Eliminar ${total} y guardar`,
+      tone: "danger",
+      requireAck: `Confirmo que quiero eliminar ${total} promociones.`,
+      action: () => retry({ allowBulkDelete: true, deleteApprovalKey: approvalKey }),
+    });
+    setSaveSupabaseStatus("idle");
+    setSupabaseStatus({
+      type: "error",
+      message: `Guardado en pausa: eliminaría ${total} promociones (${detail}). Confirme o cancele.`,
+    });
+  };
+
+  /**
+   * Si el guardado eliminaria muchas promociones de una actividad, lo detiene y pide
+   * confirmacion explicita. La confirmacion vale solo para ese mismo conjunto de borrados.
+   */
+  const reviewBulkPromotionDeletes = (payload, saveFlags = {}, retry) => {
+    const deletedRowIds = payload?.sync_options?.promociones?.deleted_row_ids || [];
+    const approvalKey = getDeleteApprovalKey(deletedRowIds);
+    const approved = Boolean(saveFlags.allowBulkDelete && saveFlags.deleteApprovalKey === approvalKey);
+    const review = analyzePromotionDeletes(deletedRowIds, syncedPromotionStateRef.current);
+    if (!review.isBulk || approved) return { proceed: true, allowBulkDelete: approved, approvalKey, deletedCount: review.total };
+    requestBulkDeleteApproval({ total: review.total, detail: describeBulkDeleteGroups(review.bulkGroups), approvalKey, retry });
+    return { proceed: false, allowBulkDelete: false, approvalKey, deletedCount: review.total };
+  };
+
+  /** Supabase puede bloquear un borrado que la app no detecto (p. ej. otro usuario ya borro lineas). */
+  const handleServerBulkDeleteBlock = (error, deleteReview, retry) => {
+    if (error?.code !== "PROMO_BULK_DELETE_BLOCKED" || deleteReview.allowBulkDelete) return false;
+    const details = error.details || {};
+    const detail = details.actividad_id
+      ? `${details.actividad_id}: ${details.eliminadas} de ${details.total} promociones`
+      : "Supabase detectó un borrado masivo";
+    requestBulkDeleteApproval({ total: deleteReview.deletedCount || details.eliminadas || 0, detail, approvalKey: deleteReview.approvalKey, retry });
+    return true;
+  };
+
   const rememberSyncedPayload = (payload = {}) => {
     rememberSyncedPromotions(payload.promociones || []);
     rememberSyncedSettings(payload);
@@ -120,6 +171,22 @@ export function useCatalogSync({
     return compactPayload;
   };
 
+  // Guardado por partes: si una parte falla, las anteriores ya quedaron en Supabase.
+  // Se marcan como sincronizadas (con su nueva version) para que el reintento envie solo lo pendiente.
+  const rememberPartialSave = (payload = {}, partial = null) => {
+    if (!partial) return;
+    const fullPayload = getFullSyncPayload(payload);
+    const savedVersions = Array.isArray(partial.promociones) ? partial.promociones : [];
+    if (savedVersions.length) {
+      const savedIds = new Set(savedVersions.map((row) => String(row?.row_id || "").trim()).filter(Boolean));
+      applyPromotionVersions(fullPayload.promociones || [], savedVersions)
+        .filter((row) => savedIds.has(getPromotionSyncId(row)))
+        .forEach((row) => syncedPromotionStateRef.current.set(getPromotionSyncId(row), getPromotionSyncSnapshot(row)));
+      setRows((currentRows) => applyPromotionVersions(currentRows, savedVersions));
+    }
+    (partial.deletedRowIds || []).forEach((rowId) => syncedPromotionStateRef.current.delete(String(rowId || "").trim()));
+  };
+
   const createSaveOperation = (operationType) => {
     const operationId = window.crypto?.randomUUID?.() || makeId("SAVE");
     return {
@@ -153,7 +220,7 @@ export function useCatalogSync({
     showSuccessToast("La configuracion de conexion se guardo correctamente.", "Conexion guardada");
   };
 
-  const onSaveCatalogSettings = async (settings = {}) => {
+  const onSaveCatalogSettings = async (settings = {}, saveFlags = {}) => {
     if (dataState.status !== "ready") {
       setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar ajustes." });
       return;
@@ -185,7 +252,19 @@ export function useCatalogSync({
         showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
         return;
       }
-      const data = await runSupabaseOperation(`Guardando ajustes en Supabase (${saveSummary})...`, () => saveSettingsToSupabase(supabaseConnection, payload), "Ajustes guardados en Supabase.");
+      const retrySettings = (flags) => onSaveCatalogSettings(settings, flags);
+      const deleteReview = reviewBulkPromotionDeletes(payload, saveFlags, retrySettings);
+      if (!deleteReview.proceed) return;
+      let saveError = null;
+      const data = await runSupabaseOperation(
+        `Guardando ajustes en Supabase (${saveSummary})...`,
+        () => saveSettingsToSupabase(supabaseConnection, payload, { allowBulkDelete: deleteReview.allowBulkDelete }).catch((error) => {
+          saveError = error;
+          throw error;
+        }),
+        "Ajustes guardados en Supabase.",
+      );
+      if (!data && handleServerBulkDeleteBlock(saveError, deleteReview, retrySettings)) return;
       if (data) {
         const fullPayload = getFullSyncPayload(payload);
         setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
@@ -267,7 +346,8 @@ export function useCatalogSync({
     setSupabaseStatus({ type: "ready", message: "Cambio local descartado para la promocion en conflicto." });
   };
 
-  const onSaveSupabase = async (overrides = {}) => {
+  const onSaveSupabase = async (rawOverrides = {}, saveFlags = {}) => {
+    const overrides = cleanSaveOverrides(rawOverrides);
     if (dataState.status !== "ready") {
       setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar." });
       return;
@@ -290,7 +370,26 @@ export function useCatalogSync({
         showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
         return;
       }
-      const data = await runSupabaseOperation(`Guardando cambios en Supabase (${saveSummary})...`, () => saveCatalogToSupabase(supabaseConnection, payload), "Cambios guardados en Supabase.");
+      const retrySave = (flags) => onSaveSupabase(overrides, flags);
+      const deleteReview = reviewBulkPromotionDeletes(payload, saveFlags, retrySave);
+      if (!deleteReview.proceed) return;
+      let saveError = null;
+      const saveOptions = {
+        allowBulkDelete: deleteReview.allowBulkDelete,
+        onProgress: ({ part, total }) => {
+          if (total > 1) setSupabaseStatus({ type: "loading", message: `Guardando cambios en Supabase: parte ${part} de ${total} (${saveSummary})...` });
+        },
+      };
+      const data = await runSupabaseOperation(
+        `Guardando cambios en Supabase (${saveSummary})...`,
+        () => saveCatalogToSupabase(supabaseConnection, payload, saveOptions).catch((error) => {
+          saveError = error;
+          rememberPartialSave(payload, error?.partialSave);
+          throw error;
+        }),
+        "Cambios guardados en Supabase.",
+      );
+      if (!data && handleServerBulkDeleteBlock(saveError, deleteReview, retrySave)) return;
       if (data) {
         const fullPayload = getFullSyncPayload(payload);
         setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });

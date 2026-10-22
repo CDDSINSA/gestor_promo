@@ -19,12 +19,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  getSkuClassificationSummaryFromSupabase,
   getSkuMasterSummaryFromSupabase,
   replaceSkuMasterInSupabase,
+  updateSkuClassificationInSupabase,
 } from "../../services/supabaseService";
 import { formatDateTime } from "../../utils/common";
 import { Button, Card, CardContent } from "../../components/ui";
-import { parseSkuMasterFile } from "./skuMasterParser";
+import { ABC_DEFAULT_CODE, ABC_UDA_ID, SKU_FILE_KIND_ABC, getAbcClassificationName, parseSkuMasterFile } from "./skuMasterParser";
 
 export default function SkuMasterSettingsCard({
   supabaseConnection,
@@ -32,6 +34,7 @@ export default function SkuMasterSettingsCard({
   onSkuMasterUpdated = null,
 }) {
   const [stats, setStats] = useState({ total: 0, last_updated: null, loading: false, error: null });
+  const [abcStats, setAbcStats] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState("");
@@ -46,7 +49,11 @@ export default function SkuMasterSettingsCard({
     if (!supabaseReady) return;
     setStats((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const data = await getSkuMasterSummaryFromSupabase(supabaseConnection);
+      const [data, abc] = await Promise.all([
+        getSkuMasterSummaryFromSupabase(supabaseConnection),
+        getSkuClassificationSummaryFromSupabase(supabaseConnection),
+      ]);
+      setAbcStats(abc);
       setStats({
         total: data?.total ?? 0,
         last_updated: data?.last_updated ?? null,
@@ -104,8 +111,35 @@ export default function SkuMasterSettingsCard({
       message: "Preparando actualización del catálogo maestro...",
     });
 
+    if (parsedResult.kind === SKU_FILE_KIND_ABC) {
+      try {
+        const result = await updateSkuClassificationInSupabase(
+          supabaseConnection,
+          parsedResult.rows,
+          ({ percent, message }) => setUploadState({ status: "uploading", percent, message })
+        );
+        const summary = result?.summary || {};
+        const defaults = Number(summary.maestro_sin_clasificacion ?? summary.maestro_descontinuado_por_defecto) || 0;
+        setUploadState({
+          status: "success",
+          percent: 100,
+          message: `Clasificación ABC actualizada: ${result.total.toLocaleString()} SKU clasificados${summary.maestro_total !== undefined ? `; ${defaults.toLocaleString()} SKU del maestro sin clasificación quedan como ${ABC_DEFAULT_CODE} - ${getAbcClassificationName(ABC_DEFAULT_CODE)}` : ""}.`,
+        });
+        await fetchStats();
+        setParsedResult(null);
+        setSelectedFile(null);
+      } catch (err) {
+        setUploadState({
+          status: "error",
+          percent: 0,
+          message: `${err.message || "No se pudo actualizar la clasificación ABC."} La clasificación anterior se conserva.`,
+        });
+      }
+      return;
+    }
+
     try {
-      await replaceSkuMasterInSupabase(
+      const uploadResult = await replaceSkuMasterInSupabase(
         supabaseConnection,
         parsedResult.rows,
         ({ phase, percent, message }) => {
@@ -116,7 +150,7 @@ export default function SkuMasterSettingsCard({
       setUploadState({
         status: "success",
         percent: 100,
-        message: `¡Catálogo maestro actualizado exitosamente! Se procesaron ${parsedResult.rows.length.toLocaleString()} artículos.`,
+        message: `¡Catálogo maestro actualizado exitosamente! Se procesaron ${parsedResult.rows.length.toLocaleString()} artículos${uploadResult?.costs ? ` y ${uploadResult.costs.toLocaleString()} costos` : ""}${uploadResult?.promotionsCompleted ? `; se completó el costo de ${uploadResult.promotionsCompleted.toLocaleString()} líneas de promoción` : ""}.${uploadResult?.completionError ? ` Aviso: no se pudo completar el costo de promociones existentes (${uploadResult.completionError}); se reintentará en la próxima carga.` : ""}`,
       });
 
       await fetchStats();
@@ -149,12 +183,15 @@ export default function SkuMasterSettingsCard({
             String(row.sku || "").toLowerCase().includes(q) ||
             String(row.descripcion || "").toLowerCase().includes(q) ||
             String(row.proveedor || "").toLowerCase().includes(q) ||
-            String(row.num_parte || "").toLowerCase().includes(q)
+            String(row.num_parte || "").toLowerCase().includes(q) ||
+            String(row.clasificacion_abc_nombre || "").toLowerCase().includes(q)
           );
         })
         .slice(0, 8)
     : [];
 
+  const isAbc = parsedResult?.kind === SKU_FILE_KIND_ABC;
+  const withoutAbc = Number(abcStats?.maestro_sin_clasificacion ?? abcStats?.maestro_descontinuado_por_defecto) || 0;
   const isExcel = selectedFile?.name?.toLowerCase().endsWith(".xlsx") || selectedFile?.name?.toLowerCase().endsWith(".xls");
 
   return (
@@ -254,6 +291,12 @@ export default function SkuMasterSettingsCard({
                 <strong style={{ color: "#006B3F" }}>Columna O:</strong> Número de Parte / VPN
               </div>
             </div>
+            <p style={{ margin: "0.85rem 0 0", color: "#15803d", lineHeight: "1.4" }}>
+              <strong>Clasificación ABC (actualización parcial):</strong> si el archivo trae los encabezados{" "}
+              <code>UDA_ID, UDA_DESC, UDA_ITEM, UDA_VALUE</code>, la app lo reconoce y solo actualiza la clasificación
+              (filas con UDA_ID = {ABC_UDA_ID}). No reemplaza el catálogo. Los SKU que no vengan en el archivo quedan como{" "}
+              {ABC_DEFAULT_CODE} - {getAbcClassificationName(ABC_DEFAULT_CODE)}.
+            </p>
           </div>
         )}
 
@@ -300,6 +343,36 @@ export default function SkuMasterSettingsCard({
             <div style={{ fontSize: "1.05rem", fontWeight: 600, color: "#334155", marginTop: "0.45rem" }}>
               {stats.last_updated ? formatDateTime(stats.last_updated) : "Sin registros cargados aún"}
             </div>
+          </div>
+
+          <div
+            style={{
+              padding: "1rem 1.25rem",
+              background: "#ffffff",
+              borderRadius: "0.75rem",
+              border: "1px solid #e2e8f0",
+              borderLeft: "4px solid #f59e0b",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+            }}
+          >
+            <div style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.03em" }}>
+              Clasificación ABC
+            </div>
+            {abcStats ? (
+              <>
+                <div style={{ fontSize: "1.05rem", fontWeight: 600, color: "#334155", marginTop: "0.45rem" }}>
+                  {abcStats.maestro_con_clasificacion.toLocaleString()} de {abcStats.maestro_total.toLocaleString()} SKU clasificados
+                </div>
+                <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.2rem" }}>
+                  {abcStats.last_updated ? `Actualizada ${formatDateTime(abcStats.last_updated)}` : "Sin clasificación cargada"}
+                  {withoutAbc > 0 && ` · ${withoutAbc.toLocaleString()} como ${ABC_DEFAULT_CODE} - ${getAbcClassificationName(ABC_DEFAULT_CODE)}`}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.45rem" }}>
+                {stats.loading ? "Consultando..." : "No disponible (ejecutar paso 35)"}
+              </div>
+            )}
           </div>
 
           <div
@@ -470,12 +543,35 @@ export default function SkuMasterSettingsCard({
                     {selectedFile?.name}
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.4rem", marginTop: "0.15rem", fontSize: "0.78rem" }}>
+                    {isAbc && (
+                      <span style={{ color: "#92400e", background: "#fef3c7", padding: "0.05rem 0.4rem", borderRadius: "0.25rem", fontWeight: 600 }}>
+                        Actualización de clasificación ABC
+                      </span>
+                    )}
                     <span style={{ color: "#047857", fontWeight: 600 }}>
-                      {parsedResult.totalValid.toLocaleString()} artículos válidos
+                      {parsedResult.totalValid.toLocaleString()} {isAbc ? "SKU con clasificación" : "artículos válidos"}
                     </span>
+                    {isAbc && parsedResult.otherUdaCount > 0 && (
+                      <span style={{ color: "#475569", background: "#f1f5f9", padding: "0.05rem 0.4rem", borderRadius: "0.25rem" }}>
+                        {parsedResult.otherUdaCount.toLocaleString()} filas de otro UDA ignoradas
+                      </span>
+                    )}
+                    {isAbc && parsedResult.invalidValueCount > 0 && (
+                      <span
+                        title={`Valores no reconocidos: ${parsedResult.invalidValues.join(", ")}`}
+                        style={{ color: "#b45309", background: "#fef3c7", padding: "0.05rem 0.4rem", borderRadius: "0.25rem" }}
+                      >
+                        {parsedResult.invalidValueCount.toLocaleString()} con valor no reconocido (ignorados)
+                      </span>
+                    )}
                     {parsedResult.duplicateCount > 0 && (
                       <span style={{ color: "#0284c7", background: "#e0f2fe", padding: "0.05rem 0.4rem", borderRadius: "0.25rem" }}>
                         {parsedResult.duplicateCount.toLocaleString()} duplicados unificados
+                      </span>
+                    )}
+                    {!isAbc && (
+                      <span style={{ color: parsedResult.costCount ? "#047857" : "#b45309", background: parsedResult.costCount ? "#ecfdf5" : "#fef3c7", padding: "0.05rem 0.4rem", borderRadius: "0.25rem" }}>
+                        {parsedResult.hasCostColumn ? `${parsedResult.costCount.toLocaleString()} con costo (AV_COST, C$)` : "Sin columna AV_COST"}
                       </span>
                     )}
                     {parsedResult.invalidCount > 0 && (
@@ -548,6 +644,13 @@ export default function SkuMasterSettingsCard({
             <div style={{ overflowX: "auto", background: "#ffffff" }}>
               <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
                 <thead>
+                  {isAbc ? (
+                  <tr style={{ background: "#f8fafc", textAlign: "left", color: "#475569", borderBottom: "1px solid #e2e8f0" }}>
+                    <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>SKU</th>
+                    <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>Código</th>
+                    <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>Clasificación</th>
+                  </tr>
+                  ) : (
                   <tr style={{ background: "#f8fafc", textAlign: "left", color: "#475569", borderBottom: "1px solid #e2e8f0" }}>
                     <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>SKU</th>
                     <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>Descripción</th>
@@ -557,9 +660,18 @@ export default function SkuMasterSettingsCard({
                     <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600, textAlign: "right" }}>Precio Regular</th>
                     <th style={{ padding: "0.6rem 0.85rem", fontWeight: 600 }}>Núm. Parte</th>
                   </tr>
+                  )}
                 </thead>
                 <tbody>
-                  {filteredPreview.length > 0 ? (
+                  {filteredPreview.length > 0 && isAbc ? (
+                    filteredPreview.map((row, idx) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "0.55rem 0.85rem", fontWeight: 600, color: "#0f172a" }}>{row.sku}</td>
+                        <td style={{ padding: "0.55rem 0.85rem", color: "#334155" }}>{row.clasificacion_abc}</td>
+                        <td style={{ padding: "0.55rem 0.85rem", color: "#475569" }}>{row.clasificacion_abc_nombre}</td>
+                      </tr>
+                    ))
+                  ) : filteredPreview.length > 0 ? (
                     filteredPreview.map((row, idx) => (
                       <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.15s" }}>
                         <td style={{ padding: "0.55rem 0.85rem", fontWeight: 600, color: "#0f172a" }}>{row.sku}</td>
@@ -579,7 +691,7 @@ export default function SkuMasterSettingsCard({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8" }}>
+                      <td colSpan={isAbc ? 3 : 7} style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8" }}>
                         No hay registros que coincidan con el filtro en la vista previa.
                       </td>
                     </tr>
@@ -603,10 +715,18 @@ export default function SkuMasterSettingsCard({
             >
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", color: "#475569", fontSize: "0.84rem" }}>
                 <Info size={18} color="#006B3F" style={{ flexShrink: 0 }} />
-                <span>
-                  Al aplicar los cambios, el catálogo anterior será reemplazado íntegramente por estos{" "}
-                  <strong style={{ color: "#0f172a" }}>{parsedResult.totalValid.toLocaleString()} artículos</strong>.
-                </span>
+                {isAbc ? (
+                  <span>
+                    Solo se actualizará la clasificación ABC de{" "}
+                    <strong style={{ color: "#0f172a" }}>{parsedResult.totalValid.toLocaleString()} SKU</strong>. El catálogo, precios y costos no cambian;
+                    los SKU que no estén en este archivo quedarán como {ABC_DEFAULT_CODE} - {getAbcClassificationName(ABC_DEFAULT_CODE)}.
+                  </span>
+                ) : (
+                  <span>
+                    Al aplicar los cambios, el catálogo anterior será reemplazado íntegramente por estos{" "}
+                    <strong style={{ color: "#0f172a" }}>{parsedResult.totalValid.toLocaleString()} artículos</strong>.
+                  </span>
+                )}
               </div>
               <Button
                 style={{
@@ -624,7 +744,7 @@ export default function SkuMasterSettingsCard({
                 onClick={handleStartUpload}
                 disabled={!supabaseReady}
               >
-                <span>Confirmar y Actualizar Catálogo</span>
+                <span>{isAbc ? "Confirmar y Actualizar Clasificación" : "Confirmar y Actualizar Catálogo"}</span>
                 <ArrowRight size={16} />
               </Button>
             </div>
@@ -757,18 +877,28 @@ export default function SkuMasterSettingsCard({
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "#0f172a" }}>
-                    ¿Actualizar catálogo maestro?
+                    {isAbc ? "¿Actualizar clasificación ABC?" : "¿Actualizar catálogo maestro?"}
                   </h3>
-                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>Acción de reemplazo total</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>{isAbc ? "Actualización parcial del maestro" : "Acción de reemplazo total"}</div>
                 </div>
               </div>
 
+              {isAbc ? (
+              <p style={{ color: "#475569", fontSize: "0.88rem", lineHeight: "1.45", margin: "0 0 1.25rem" }}>
+                Se asignará la clasificación a{" "}
+                <strong style={{ color: "#0f172a" }}>{parsedResult?.totalValid?.toLocaleString()} SKU</strong> según este archivo.
+                <br /><br />
+                Los SKU del maestro que no estén en el archivo pasarán a{" "}
+                <strong style={{ color: "#0f172a" }}>{ABC_DEFAULT_CODE} - {getAbcClassificationName(ABC_DEFAULT_CODE)}</strong>. No se borra ni modifica ningún artículo.
+              </p>
+              ) : (
               <p style={{ color: "#475569", fontSize: "0.88rem", lineHeight: "1.45", margin: "0 0 1.25rem" }}>
                 Se reemplazarán los registros actuales del catálogo por los{" "}
                 <strong style={{ color: "#0f172a" }}>{parsedResult?.totalValid?.toLocaleString()} artículos</strong> contenidos en este archivo.
                 <br /><br />
                 Los artículos no incluidos en la nueva lista dejarán de aparecer en las búsquedas del sistema.
               </p>
+              )}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
                 <Button variant="outline" onClick={() => setShowConfirmModal(false)}>
@@ -778,7 +908,7 @@ export default function SkuMasterSettingsCard({
                   style={{ background: "#006B3F", color: "#ffffff", borderColor: "#004B2D", fontWeight: 600 }}
                   onClick={executeUpload}
                 >
-                  Sí, actualizar catálogo
+                  {isAbc ? "Sí, actualizar clasificación" : "Sí, actualizar catálogo"}
                 </Button>
               </div>
             </div>

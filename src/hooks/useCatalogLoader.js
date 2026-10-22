@@ -15,6 +15,7 @@ export function useCatalogLoader({
   resetDomainState, runSupabaseOperation, applyCatalogData,
   rememberSyncedPromotions, rememberSyncedSettings, rememberSyncedOperations,
   applySpecialRequestsData, rememberSyncedOperationalRows, applyPromotionScopeData,
+  campaignLoadingEnabled = false,
 }) {
   const getPromotionScopeKey = ({ actividadId, comprador, tipoPromo } = {}) => [
     actividadId || "",
@@ -33,7 +34,8 @@ export function useCatalogLoader({
     let loadError = null;
     const data = await runSupabaseOperation("Cargando catalogo desde Supabase...", async () => {
       try {
-        return await loadCatalogFromSupabase(supabaseConnection);
+        // Con carga por campaña, el inicio no trae promociones: cada pantalla pide las suyas.
+        return await loadCatalogFromSupabase(supabaseConnection, { includePromotions: !campaignLoadingEnabled });
       } catch (error) {
         // The shared operation handler updates React state and returns null.
         // Capture this request's error instead of reading the previous render's status.
