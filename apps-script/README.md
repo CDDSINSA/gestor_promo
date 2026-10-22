@@ -1,5 +1,8 @@
 # Apps Script para Google Sheets
 
+> **Histórico (obsoleto).** El frontend actual no usa Google Sheets ni esta API: la persistencia es Supabase. Se conserva solo como referencia de la etapa anterior. Ver [README principal](../README.md) y [docs/README.md](../docs/README.md).
+
+
 Este script convierte la hoja de calculo existente en una API simple para la app React.
 
 ## Instalacion

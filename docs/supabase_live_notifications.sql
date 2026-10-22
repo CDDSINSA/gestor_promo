@@ -106,6 +106,7 @@ declare
   v_promocion_id uuid;
   v_comentario_uuid uuid;
   v_inserted integer := 0;
+  v_has_catalog_designers boolean := false;
 begin
   select *
     into v_actor
@@ -164,19 +165,66 @@ begin
     end;
   end if;
 
+  -- Comprobar si hay diseñadores asignados a las páginas de este catálogo
+  if (coalesce(trim(p_legacy_actividad_id), '') <> '' or v_campana_id is not null)
+     and ('MARK' = any(coalesce(p_destinatario_roles, array[]::text[])))
+     and (p_tipo_evento like 'PROMOCION_%' or p_tipo_evento = 'COMENTARIO_COMPRAS') then
+
+    perform 1
+    from public.catalogo_proyecto_diseno p
+    join public.catalogo_paginas_diseno pag on pag.proyecto_id = p.id
+    join public.usuarios_app u on u.id = pag.disenador_id
+    where (
+      p.catalogo_id = trim(p_legacy_actividad_id)
+      or (v_campana_id is not null and (
+        p.catalogo_id = v_campana_id::text
+        or p.catalogo_id = (select legacy_actividad_id from public.campanas where id = v_campana_id limit 1)
+      ))
+    )
+    and pag.disenador_id is not null
+    and u.activo = true
+    and u.id <> v_actor.id;
+
+    v_has_catalog_designers := found;
+  end if;
+
   with role_targets as (
     select
       u.id as usuario_id,
-      u.rol as destinatario_rol
+      u.rol as destinatario_rol,
+      coalesce(p_url_modulo, '') as target_url_modulo
     from public.usuarios_app u
     where u.activo = true
       and u.id <> v_actor.id
       and upper(u.rol) = any(coalesce(p_destinatario_roles, array[]::text[]))
+      -- Si el catálogo tiene diseñadores asignados, no se emite el broadcast general a MARK
+      and not (v_has_catalog_designers = true and upper(u.rol) = 'MARK')
+  ),
+  catalog_designer_targets as (
+    select distinct
+      u.id as usuario_id,
+      u.rol as destinatario_rol,
+      'catalogDesign'::text as target_url_modulo
+    from public.catalogo_proyecto_diseno p
+    join public.catalogo_paginas_diseno pag on pag.proyecto_id = p.id
+    join public.usuarios_app u on u.id = pag.disenador_id
+    where (
+      p.catalogo_id = trim(p_legacy_actividad_id)
+      or (v_campana_id is not null and (
+        p.catalogo_id = v_campana_id::text
+        or p.catalogo_id = (select legacy_actividad_id from public.campanas where id = v_campana_id limit 1)
+      ))
+    )
+    and pag.disenador_id is not null
+    and u.activo = true
+    and u.id <> v_actor.id
+    and v_has_catalog_designers = true
   ),
   direct_targets as (
     select
       u.id as usuario_id,
-      u.rol as destinatario_rol
+      u.rol as destinatario_rol,
+      coalesce(p_url_modulo, '') as target_url_modulo
     from public.usuarios_app u
     where u.activo = true
       and u.id <> v_actor.id
@@ -185,7 +233,8 @@ begin
   buyer_targets as (
     select
       u.id as usuario_id,
-      u.rol as destinatario_rol
+      u.rol as destinatario_rol,
+      coalesce(p_url_modulo, '') as target_url_modulo
     from public.usuarios_app u
     where u.activo = true
       and u.id <> v_actor.id
@@ -194,11 +243,14 @@ begin
   targets as (
     select distinct on (usuario_id)
       usuario_id,
-      destinatario_rol
+      destinatario_rol,
+      target_url_modulo
     from (
       select * from direct_targets
       union all
       select * from buyer_targets
+      union all
+      select * from catalog_designer_targets
       union all
       select * from role_targets
     ) recipients
@@ -232,7 +284,7 @@ begin
       trim(p_tipo_evento),
       trim(p_titulo),
       coalesce(p_mensaje, ''),
-      coalesce(p_url_modulo, ''),
+      target_url_modulo,
       coalesce(p_metadata, '{}'::jsonb)
     from targets
     returning id

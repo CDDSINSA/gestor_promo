@@ -1,5 +1,8 @@
 # Retiro de Drive y operacion con Supabase
 
+> **Documento histórico** (análisis del 2026-06-23). La migración está completada; la operación vigente se describe en el [README principal](../README.md) y el orden de scripts SQL en [docs/README.md](README.md). Los archivos CSV/XLSX citados abajo no forman parte del repositorio.
+
+
 ## Estado actual revisado
 
 Fecha de analisis: 2026-06-23.

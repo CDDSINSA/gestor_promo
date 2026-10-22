@@ -1,5 +1,8 @@
 # Guia frontend base para nueva app
 
+> **Alcance.** Especificación visual para crear *otras* apps con el mismo estilo. La estructura de archivos y los nombres de tokens propuestos aquí (`--color-primary`, `navigation.js`, `AppShell.jsx`, etc.) son una recomendación y no corresponden uno a uno con este repositorio. En esta app, los tokens reales están en `src/styles/base/variables.css` y la navegación en `src/constants/ui.js` y `src/app/shell/AppNavigation.jsx`.
+
+
 Este documento sirve como especificacion visual y de experiencia para crear una app nueva desde cero reutilizando el estilo frontend de esta aplicacion, pero sin heredar su logica de negocio.
 
 La nueva app debe sentirse como parte de la misma familia: corporativa, sobria, moderna, productiva y facil de operar en escritorio y movil.

@@ -88,7 +88,8 @@ create index if not exists idx_save_operations_expires_at
 
 alter table public.promociones
   add column if not exists usuario_crea text not null default '',
-  add column if not exists usuario_edita text not null default '';
+  add column if not exists usuario_edita text not null default '',
+  add column if not exists numero_pagina integer default null;
 
 alter table public.save_operations enable row level security;
 revoke all on table public.save_operations from anon;
@@ -677,6 +678,7 @@ begin
           'variante', p.variante,
           'dep_id', p.dep_id,
           'sku', p.sku,
+          'numero_pagina', p.numero_pagina,
           'num_parte', p.num_parte,
           'descripcion', p.descripcion,
           'tipo_cantidad', p.tipo_cantidad,
@@ -845,7 +847,7 @@ begin
 
       insert into public.promociones as p (
         legacy_row_id, campana_id, oferta_id, buyer_id, tipo_promo, grupo_oferta, tipo_sku,
-        variante, sku, num_parte, descripcion, tipo_cantidad, cantidad_minima, precio_antes,
+        variante, sku, numero_pagina, num_parte, descripcion, tipo_cantidad, cantidad_minima, precio_antes,
         precio_ahora, descuento, comentario_comprador, aplica_segmento, segmento_cliente,
         alcance_tipo, alcance_valor, estado_registro, dep_id, usuario_crea, usuario_edita,
         ultima_modificacion_por
@@ -860,6 +862,7 @@ begin
         coalesce(nullif(v_row ->> 'tipo_sku', ''), 'simple'),
         coalesce(v_row ->> 'variante', ''),
         coalesce(v_row ->> 'sku', ''),
+        nullif(v_row ->> 'numero_pagina', '')::integer,
         coalesce(v_row ->> 'num_parte', ''),
         coalesce(v_row ->> 'descripcion', ''),
         coalesce(nullif(v_row ->> 'tipo_cantidad', ''), 'Exacta'),
@@ -893,6 +896,7 @@ begin
         tipo_sku = excluded.tipo_sku,
         variante = excluded.variante,
         sku = excluded.sku,
+        numero_pagina = excluded.numero_pagina,
         num_parte = excluded.num_parte,
         descripcion = excluded.descripcion,
         tipo_cantidad = excluded.tipo_cantidad,

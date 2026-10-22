@@ -95,7 +95,7 @@ create table if not exists public.catalogo_pagina_comentarios (
   fecha_resolucion timestamptz,
   fecha_creacion timestamptz not null default now(),
   constraint catalogo_pagina_comentarios_tipo_check
-    check (tipo in ('comentario', 'observacion', 'aprobacion', 'rechazo', 'ajuste')),
+    check (tipo in ('comentario', 'observacion', 'aprobacion', 'rechazo', 'ajuste', 'precio', 'imagen', 'general')),
   constraint catalogo_pagina_comentarios_estado_check
     check (estado in ('abierto', 'resuelto'))
 );

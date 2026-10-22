@@ -1,43 +1,40 @@
 # Supabase Auth y RLS
 
-Esta guia deja la app operando sin usuario tecnico. Todas las lecturas y escrituras usan el token del usuario logueado en Supabase Auth, y Supabase aplica permisos mediante RLS y `public.usuarios_app`.
+Actualizado: 2026-10-12.
+
+Esta guía deja la app operando sin usuario técnico. Todas las lecturas y escrituras usan el token del usuario logueado en Supabase Auth, y Supabase aplica permisos mediante RLS y `public.usuarios_app`.
 
 ## Variables de entorno
 
-Configurar en `.env.local` para desarrollo y en Vercel como Environment Variables:
+Configurar en `.env.local` para desarrollo y en las variables de entorno del hosting (por ejemplo Vercel) para producción. La lista completa y su descripción están en el [README principal](../README.md#variables-de-entorno).
 
 ```env
 VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
 VITE_SUPABASE_ANON_KEY=tu-anon-key
-VITE_SUPABASE_AUTH_REDIRECT_URL=http://localhost:5173/
+VITE_SUPABASE_AUTH_REDIRECT_URL=http://localhost:3005/
 ```
 
-No se usan `VITE_SUPABASE_TECH_EMAIL` ni `VITE_SUPABASE_TECH_PASSWORD`.
-`VITE_SUPABASE_AUTH_REDIRECT_URL` es opcional, pero ayuda a que el enlace de recuperacion vuelva a esta app en local y en Vercel.
+- No se usan credenciales técnicas (`VITE_SUPABASE_TECH_EMAIL`, `VITE_SUPABASE_TECH_PASSWORD`) ni la clave `service_role`.
+- `VITE_SUPABASE_AUTH_REDIRECT_URL` es opcional. Si falta, el enlace de recuperación vuelve a la URL actual del navegador. Si se define, debe coincidir con una de las `Redirect URLs` de Supabase.
 
-## Orden de preparacion
+## Orden de preparación
 
-1. Ejecutar el esquema base de Supabase.
-2. Ejecutar el delta operativo si el proyecto aun no tiene tablas como `responsables_solicitudes`, `jerarquia_categorias` y `avances_catalogo`.
-3. Ejecutar `docs/supabase_roles_permissions_mvp.sql`.
-4. Crear usuarios en Supabase Auth.
-5. Registrar cada usuario en `public.usuarios_app`.
-6. Para usuarios `BUYER`, asociar `buyer_id` con una fila existente en `public.compradores`.
+1. Ejecutar los scripts SQL de núcleo (pasos 1 y 2 de [docs/README.md](README.md#orden-recomendado-para-una-base-nueva)).
+2. Crear los usuarios en Supabase Auth.
+3. Ejecutar `docs/supabase_roles_permissions_mvp.sql` y continuar con el resto de scripts en el orden del índice.
+4. Registrar cada usuario en `public.usuarios_app` con su rol.
+5. Para usuarios `BUYER`, asociar `buyer_id` a una fila existente de `public.compradores` (la base lo exige).
 
 ## Supabase Auth
 
-En el panel de Supabase, revisar:
+En el panel de Supabase, revisar `Authentication > URL Configuration`:
 
-1. `Authentication > URL Configuration`
-2. `Site URL`
-3. `Redirect URLs`
+- `Site URL`: la URL de producción.
+- `Redirect URLs`: agregar al menos
+  - `http://localhost:3005/` (desarrollo; puerto definido en `vite.config.js`),
+  - la URL de producción, por ejemplo `https://tu-proyecto.vercel.app/`.
 
-Agregar al menos:
-
-- `http://localhost:5173/`
-- La URL real de Vercel, por ejemplo `https://tu-proyecto.vercel.app/`
-
-Eso permite que el enlace de recuperacion de contraseña vuelva a la pantalla correcta.
+Esto permite que el enlace de recuperación de contraseña vuelva a la pantalla correcta.
 
 ## Plantilla del correo de recuperacion
 
@@ -90,23 +87,26 @@ Ingresa a este enlace para crear una nueva contraseña:
 Si no solicitaste este cambio, puedes ignorar este correo.
 ```
 
-Si quieres que el correo apunte siempre a Vercel, confirma que la URL esté incluida en `Redirect URLs` y que `VITE_SUPABASE_AUTH_REDIRECT_URL` coincida con esa misma direccion.
+Si el correo debe apuntar siempre a producción, confirmar que la URL esté incluida en `Redirect URLs` y que `VITE_SUPABASE_AUTH_REDIRECT_URL` coincida con esa misma dirección.
 
 ## Roles vigentes
 
-`ADMIN`: acceso total y administracion de catalogos base.
+Valores válidos de `usuarios_app.rol` (restricción en la base): `ADMIN`, `BUYER`, `MARK`, `OPER`, `AUD`, `DISENADOR`.
 
-`BUYER`: crea/edita promociones, promociones especiales, avances, solicitudes, consulta SKU, Export y Consolidado.
+| Rol | Uso |
+| --- | --- |
+| `ADMIN` | Acceso total y administración de catálogos base, compradores, maestro SKU y difusión. No crea solicitudes de Fidelización. |
+| `BUYER` | Promociones, promociones especiales, avances, solicitudes, Consulta SKU, Fidelización de su alcance, Consolidado, Exportar y revisión en Diseño. |
+| `MARK` | Diseño de catálogos (gestión, carga y revisión), Consolidado con comentarios, Exportar y Seguimiento. |
+| `OPER` | Ejecutor (Pricing/Planimetría): Solicitudes, Fidelización, Exportar y Seguimiento. |
+| `AUD` | Logs, Seguimiento y Diseño en lectura. |
+| `DISENADOR` | Carga de páginas en Diseño y Seguimiento. |
 
-`MARK`: usa Consolidado con comentarios y estados de comentario, y usa Export.
-
-`OPER`: usa Export y Solicitudes.
-
-`AUD`: usa Logs.
+La matriz detallada está en `src/constants/permissions.js` y en el [README principal](../README.md#roles-y-permisos).
 
 ## Tabla public.usuarios_app
 
-Campos minimos por usuario:
+Campos mínimos por usuario:
 
 ```sql
 insert into public.usuarios_app (
@@ -120,22 +120,24 @@ insert into public.usuarios_app (
 values (
   'UUID_DE_AUTH_USERS',
   'Nombre Apellido',
-  'correo@sinsa.com',
+  'correo@sinsa.com.ni',
   'BUYER',
   'UUID_DE_PUBLIC_COMPRADORES',
   true
 );
 ```
 
-Para `ADMIN`, `MARK`, `OPER` y `AUD`, `buyer_id` puede ir `null`.
+`buyer_id` es obligatorio para `BUYER` y puede ir `null` para los demás roles.
 
-## Verificacion rapida
+## Verificación rápida
 
-Ejecutar en Supabase SQL Editor con un usuario autenticado desde la app:
+En el SQL Editor no hay usuario de Auth en sesión (`auth.uid()` es `null`), por lo que `current_user_role()` devuelve `null` allí. Para revisar el alta, consultar directamente:
 
 ```sql
-select public.current_user_role();
-select public.current_buyer_id();
+select u.email, a.rol, a.activo, a.buyer_id
+from auth.users u
+left join public.usuarios_app a on a.auth_user_id = u.id
+order by u.email;
 ```
 
-Si `current_user_role()` devuelve `null`, el usuario existe en Auth pero falta o esta inactivo en `public.usuarios_app`.
+Un usuario sin fila en `usuarios_app`, o con `activo = false`, inicia sesión en Auth pero la app no le asigna rol. Desde la app, el rol se obtiene con la RPC `current_user_role`.

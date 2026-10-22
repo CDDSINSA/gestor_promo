@@ -19,17 +19,33 @@
 --   Para poder borrar promociones/campanas, se desactivan temporalmente
 --   los triggers protectores de logs; las FK actualizan campana_id/promocion_id
 --   a null y luego los triggers se reactivan.
+-- - Los triggers guard_fidelizacion_* validan el rol del usuario de la app.
+--   Desde el SQL Editor no hay auth.uid(), por lo que bloquearian el borrado
+--   de solicitudes FID-. Se desactivan temporalmente y se reactivan al final.
+-- - Todo ocurre en UNA sola transaccion: si algo falla, no se borra nada y
+--   los triggers quedan como estaban.
 -- - Al borrar public.catalogo_proyecto_diseno tambien se elimina la informacion
 --   dependiente de diseno, incluyendo catalogo_consolidado_final si existe.
+-- - public.promociones_costo (foto del costo por promocion) no se lista aqui,
+--   pero se vacia sola por ON DELETE CASCADE al borrar public.promociones.
+-- - Los archivos en Storage (buckets sns_app_promo y catalogo_final) NO se
+--   borran con este script; limpiarlos aparte si se desea.
 --
--- NO borra catalogos base como:
+-- NO borra catalogos base / maestros / configuracion como:
 -- - usuarios_app
 -- - compradores
 -- - configuracion
 -- - segmentos_clientes
 -- - jerarquia_categorias
 -- - sku_master
+-- - sku_costos (tabla de costos)
+-- - sku_clasificacion_abc, clasificacion_abc_catalogo
 -- - canasto_fidelizacion
+-- - fidelizacion_orce_historial, fidelizacion_orce_importaciones
+--   (auditoria/conciliacion ORCE del canasto maestro)
+-- - notificaciones_eventos, notificaciones_grupos,
+--   notificaciones_grupo_miembros, notificaciones_suscripciones,
+--   notificaciones_correo_tipos (configuracion de avisos)
 -- - logs
 
 begin;
@@ -40,12 +56,22 @@ declare
   v_tables text[] := array[
     -- Control/idempotencia de guardados
     'save_operations',
+    'catalogo_diseno_operaciones',
+
+    -- Avisos en vivo y cola de correos (historial operativo)
+    'notificaciones_correo',
+    'notificaciones_envivo',
 
     -- Diseno de catalogos: dependientes primero
+    'catalogo_pagina_respuestas',
     'catalogo_pagina_comentarios',
+    'catalogo_pagina_versiones',
     'catalogo_paginas_diseno',
     'catalogo_consolidado_final',
     'catalogo_proyecto_diseno',
+
+    -- Calendario de eventos automaticos por campana
+    'catalogo_eventos_programados',
 
     -- Fidelizacion: solicitudes/staging, no canasto maestro
     'fidelizacion_solicitudes_detalle',
@@ -62,12 +88,27 @@ declare
     'responsables_solicitudes'
   ];
 begin
+  -- Desactivar triggers protectores
   if to_regclass('public.logs') is not null then
     alter table public.logs disable trigger logs_prevent_update;
     alter table public.logs disable trigger logs_prevent_delete;
     raise notice 'Triggers protectores de public.logs desactivados temporalmente.';
   end if;
 
+  if exists (select 1 from pg_trigger
+             where tgrelid = 'public.campanas'::regclass
+               and tgname = 'guard_fidelizacion_campana') then
+    alter table public.campanas disable trigger guard_fidelizacion_campana;
+  end if;
+
+  if to_regclass('public.fidelizacion_solicitudes_detalle') is not null
+     and exists (select 1 from pg_trigger
+                 where tgrelid = 'public.fidelizacion_solicitudes_detalle'::regclass
+                   and tgname = 'guard_fidelizacion_rows') then
+    alter table public.fidelizacion_solicitudes_detalle disable trigger guard_fidelizacion_rows;
+  end if;
+
+  -- Borrado
   foreach v_table in array v_tables loop
     if to_regclass(format('public.%I', v_table)) is not null then
       execute format('delete from public.%I', v_table);
@@ -77,6 +118,26 @@ begin
     end if;
   end loop;
 
+  -- Reactivar triggers protectores (misma transaccion)
+  if to_regclass('public.logs') is not null then
+    alter table public.logs enable trigger logs_prevent_update;
+    alter table public.logs enable trigger logs_prevent_delete;
+    raise notice 'Triggers protectores de public.logs reactivados.';
+  end if;
+
+  if exists (select 1 from pg_trigger
+             where tgrelid = 'public.campanas'::regclass
+               and tgname = 'guard_fidelizacion_campana') then
+    alter table public.campanas enable trigger guard_fidelizacion_campana;
+  end if;
+
+  if to_regclass('public.fidelizacion_solicitudes_detalle') is not null
+     and exists (select 1 from pg_trigger
+                 where tgrelid = 'public.fidelizacion_solicitudes_detalle'::regclass
+                   and tgname = 'guard_fidelizacion_rows') then
+    alter table public.fidelizacion_solicitudes_detalle enable trigger guard_fidelizacion_rows;
+  end if;
+  raise notice 'Triggers guard_fidelizacion_* reactivados.';
 end $$;
 
 commit;
@@ -95,16 +156,23 @@ declare
   v_object text;
   v_objects text[] := array[
     'save_operations',
+    'catalogo_diseno_operaciones',
+    'notificaciones_correo',
+    'notificaciones_envivo',
     'responsables_solicitudes',
     'promociones_detalle',
     'promociones',
+    'promociones_costo',
     'notificaciones',
     'fidelizacion_solicitudes_detalle',
     'comentarios',
     'catalogo_proyecto_diseno',
     'catalogo_paginas_diseno',
+    'catalogo_pagina_versiones',
     'catalogo_pagina_comentarios',
+    'catalogo_pagina_respuestas',
     'catalogo_consolidado_final',
+    'catalogo_eventos_programados',
     'campanas',
     'avances_catalogo',
     'export_pricing',
@@ -122,13 +190,17 @@ begin
       values (v_object || ' (no existe)', null);
     end if;
   end loop;
-
-  if to_regclass('public.logs') is not null then
-    alter table public.logs enable trigger logs_prevent_update;
-    alter table public.logs enable trigger logs_prevent_delete;
-    raise notice 'Triggers protectores de public.logs reactivados.';
-  end if;
 end $$;
+
+-- Triggers protectores: todos deben quedar habilitados (tgenabled = 'O').
+select c.relname as tabla, t.tgname as trigger_protector, t.tgenabled as estado
+from pg_trigger t
+join pg_class c on c.oid = t.tgrelid
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and t.tgname in ('logs_prevent_update', 'logs_prevent_delete',
+                   'guard_fidelizacion_campana', 'guard_fidelizacion_rows')
+order by 1, 2;
 
 select *
 from pg_temp.reset_operational_counts

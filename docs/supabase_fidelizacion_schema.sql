@@ -52,6 +52,97 @@ create or replace trigger trg_canasto_fidelizacion_updated_at
 before update on public.canasto_fidelizacion
 for each row execute function public.set_updated_at();
 
+-- Solo Comprador y Ejecutor pueden operar Fidelizacion.
+create or replace function public.fidelizacion_buyer_allowed(p_buyer uuid)
+returns boolean language sql stable security definer set search_path = public
+as $$ select coalesce(public.current_user_role() = 'OPER' or
+  (public.current_user_role() = 'BUYER' and p_buyer = any(public.current_buyer_scope_ids())), false); $$;
+
+create or replace function public.fidelizacion_owner_allowed(p_comprador text)
+returns boolean language sql stable security definer set search_path = public
+as $$ select coalesce(public.current_user_role() = 'OPER' or
+  (public.current_user_role() = 'BUYER' and exists (
+    select 1 from public.compradores c where c.id = any(public.current_buyer_scope_ids())
+      and lower(trim(c.comprador)) = lower(trim(p_comprador)) and nullif(trim(c.comprador), '') is not null
+  )), false); $$;
+
+create or replace function public.fidelizacion_request_allowed(p_actividad text)
+returns boolean language sql stable security definer set search_path = public
+as $$ select exists (select 1 from public.campanas c
+  where c.legacy_actividad_id = p_actividad and c.legacy_actividad_id like 'FID-%'
+    and c.tipo_actividad = 'ESPECIAL' and public.fidelizacion_buyer_allowed(c.solicitante_buyer_id)); $$;
+
+-- No permite apropiarse de SKU ya asignados a otro comprador del canasto.
+create or replace function public.fidelizacion_sku_allowed(p_sku text)
+returns boolean language sql stable security definer set search_path = public
+as $$ select coalesce(public.current_user_role() = 'OPER' or
+  (public.current_user_role() = 'BUYER' and not exists (
+    select 1 from public.canasto_fidelizacion f where f.sku = p_sku
+      and not public.fidelizacion_owner_allowed(f.comprador)
+  )), false); $$;
+
+-- Protege cabeceras incluso cuando otras RPC SECURITY DEFINER escriben campanas.
+create or replace function public.guard_fidelizacion_campana()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_op <> 'INSERT' and old.legacy_actividad_id like 'FID-%' then
+    if not public.fidelizacion_buyer_allowed(old.solicitante_buyer_id) then
+      raise exception 'Sin permiso sobre esta solicitud de Fidelizacion.' using errcode = '42501';
+    end if;
+    if tg_op = 'UPDATE' and (new.legacy_actividad_id <> old.legacy_actividad_id or new.tipo_actividad <> 'ESPECIAL') then
+      raise exception 'No se puede reclasificar una solicitud de Fidelizacion.' using errcode = '42501';
+    end if;
+  end if;
+  if tg_op <> 'DELETE' and new.legacy_actividad_id like 'FID-%' then
+    if new.tipo_actividad <> 'ESPECIAL' or not public.fidelizacion_buyer_allowed(new.solicitante_buyer_id) then
+      raise exception 'Solo Comprador y Ejecutor pueden operar Fidelizacion en su alcance.' using errcode = '42501';
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end; $$;
+drop trigger if exists guard_fidelizacion_campana on public.campanas;
+create trigger guard_fidelizacion_campana before insert or update or delete on public.campanas
+for each row execute function public.guard_fidelizacion_campana();
+
+
+-- Las RPC con privilegios del propietario tampoco pueden eludir el alcance.
+create or replace function public.guard_fidelizacion_rows()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_op <> 'INSERT' then
+    if not public.fidelizacion_owner_allowed(old.comprador) then
+      raise exception 'Registro de Fidelizacion fuera de su alcance.' using errcode = '42501';
+    end if;
+    if tg_table_name = 'fidelizacion_solicitudes_detalle' then
+      if not public.fidelizacion_request_allowed(old.actividad_id) then
+        raise exception 'Solicitud fuera de su alcance.' using errcode = '42501';
+      end if;
+    end if;
+  end if;
+  if tg_op <> 'DELETE' then
+    if not public.fidelizacion_owner_allowed(new.comprador) or not public.fidelizacion_sku_allowed(new.sku) then
+      raise exception 'Registro de Fidelizacion fuera de su alcance.' using errcode = '42501';
+    end if;
+    if tg_table_name = 'fidelizacion_solicitudes_detalle' then
+      if not public.fidelizacion_request_allowed(new.actividad_id) then
+        raise exception 'Solicitud fuera de su alcance.' using errcode = '42501';
+      end if;
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end; $$;
+revoke all on function public.guard_fidelizacion_rows() from public, anon;
+drop trigger if exists guard_fidelizacion_rows on public.canasto_fidelizacion;
+create trigger guard_fidelizacion_rows before insert or update or delete on public.canasto_fidelizacion
+for each row execute function public.guard_fidelizacion_rows();
+drop trigger if exists guard_fidelizacion_rows on public.fidelizacion_solicitudes_detalle;
+create trigger guard_fidelizacion_rows before insert or update or delete on public.fidelizacion_solicitudes_detalle
+for each row execute function public.guard_fidelizacion_rows();
+
 -- 5. RPC Transaccional: Creacion atomica de Solicitud de Fidelizacion
 create or replace function public.crear_solicitud_fidelizacion(
   p_actividad jsonb,
@@ -73,11 +164,27 @@ declare
   v_item jsonb;
   v_count integer := 0;
 begin
+  if coalesce(public.current_user_role(), '') not in ('BUYER', 'OPER') then
+    raise exception 'Solo Comprador y Ejecutor pueden operar Fidelizacion.' using errcode = '42501';
+  end if;
   v_actividad_id := coalesce(nullif(p_actividad ->> 'legacy_actividad_id', ''), nullif(p_actividad ->> 'actividad_id', ''));
   if v_actividad_id is null or v_actividad_id = '' then
     return jsonb_build_object('success', false, 'error', 'Identificador de actividad invalido.');
   end if;
 
+  if v_actividad_id not like 'FID-%' then
+    raise exception 'Fidelizacion requiere un identificador FID-.';
+  end if;
+  -- Serializa solicitudes del mismo identificador, incluida su primera creacion.
+  perform pg_advisory_xact_lock(hashtextextended(v_actividad_id, 0));
+  if exists (select 1 from public.campanas where legacy_actividad_id = v_actividad_id) then
+    if not public.fidelizacion_request_allowed(v_actividad_id) then
+      raise exception 'Solicitud fuera de su alcance.' using errcode = '42501';
+    end if;
+    if exists (select 1 from public.campanas where legacy_actividad_id = v_actividad_id and estado in ('Finalizado', 'Archivado')) then
+      raise exception 'No se puede reemplazar una solicitud finalizada.';
+    end if;
+  end if;
   v_canal := coalesce(nullif(p_actividad ->> 'canal', ''), 'Comasa');
   v_nombre := coalesce(nullif(p_actividad ->> 'nombre_actividad', ''), 'Fidelizacion ' || upper(v_canal));
   v_motivo := coalesce(p_actividad ->> 'motivo_solicitud', '');
@@ -117,6 +224,10 @@ begin
 
   if v_buyer_id is not null then
     select comprador into v_comprador from public.compradores where id = v_buyer_id limit 1;
+  end if;
+
+  if not public.fidelizacion_buyer_allowed(v_buyer_id) then
+    raise exception 'Comprador fuera de su alcance autorizado.' using errcode = '42501';
   end if;
 
   -- 2. Insertar o actualizar la cabecera en public.campanas
@@ -165,6 +276,9 @@ begin
 
   -- 4. Insertar cada fila de detalle
   for v_item in select value from jsonb_array_elements(p_detalles) loop
+    if not public.fidelizacion_sku_allowed(trim(v_item ->> 'sku')) then
+      raise exception 'SKU fuera de su alcance de Fidelizacion.' using errcode = '42501';
+    end if;
     insert into public.fidelizacion_solicitudes_detalle (
       actividad_id,
       canal,
@@ -190,7 +304,7 @@ begin
       coalesce(v_item ->> 'tipo_cambio', 'NUEVO'),
       'PENDIENTE',
       coalesce(nullif(v_item ->> 'solicitante', ''), v_solicitante),
-      coalesce(nullif(v_item ->> 'comprador', ''), v_comprador),
+      v_comprador,
       now()
     );
     v_count := v_count + 1;
@@ -216,6 +330,16 @@ declare
   v_rec record;
   v_nuevo_estatus text;
 begin
+  perform pg_advisory_xact_lock(hashtextextended(p_actividad_id, 0));
+  perform 1 from public.campanas where legacy_actividad_id = p_actividad_id for update;
+  if not public.fidelizacion_request_allowed(p_actividad_id) then
+    raise exception 'Sin permiso para finalizar esta solicitud de Fidelizacion.' using errcode = '42501';
+  end if;
+  if exists (select 1 from public.fidelizacion_solicitudes_detalle d
+    where d.actividad_id = p_actividad_id and
+      (not public.fidelizacion_owner_allowed(d.comprador) or not public.fidelizacion_sku_allowed(d.sku))) then
+    raise exception 'Detalle fuera de su alcance autorizado.' using errcode = '42501';
+  end if;
   -- Verificar que existan registros pendientes para la solicitud
   select count(*) into v_count
   from public.fidelizacion_solicitudes_detalle
@@ -304,92 +428,35 @@ begin
 end;
 $$;
 
--- 7. Grants y Permisos
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on public.canasto_fidelizacion to anon, authenticated;
-grant select, insert, update, delete on public.fidelizacion_solicitudes_detalle to anon, authenticated;
-grant execute on function public.crear_solicitud_fidelizacion(jsonb, jsonb) to anon, authenticated;
-grant execute on function public.finalizar_solicitud_fidelizacion(text) to anon, authenticated;
+-- 7. Eliminar permisos abiertos anteriores (las politicas permisivas se suman).
+revoke all on public.canasto_fidelizacion, public.fidelizacion_solicitudes_detalle from public, anon;
+grant select, insert, update, delete on public.canasto_fidelizacion, public.fidelizacion_solicitudes_detalle to authenticated;
+revoke all on function public.crear_solicitud_fidelizacion(jsonb, jsonb) from public, anon;
+revoke all on function public.finalizar_solicitud_fidelizacion(text) from public, anon;
+grant execute on function public.crear_solicitud_fidelizacion(jsonb, jsonb), public.finalizar_solicitud_fidelizacion(text) to authenticated;
 
--- 8. Politicas de Seguridad RLS (Row Level Security)
 alter table public.canasto_fidelizacion enable row level security;
 alter table public.fidelizacion_solicitudes_detalle enable row level security;
+do $$ declare p record; begin
+  for p in select schemaname, tablename, policyname from pg_policies
+    where schemaname = 'public' and tablename in ('canasto_fidelizacion', 'fidelizacion_solicitudes_detalle')
+  loop execute format('drop policy %I on %I.%I', p.policyname, p.schemaname, p.tablename); end loop;
+end; $$;
+create policy fidelizacion_canasto_scoped on public.canasto_fidelizacion for all to authenticated
+using (public.fidelizacion_owner_allowed(comprador))
+with check (public.fidelizacion_owner_allowed(comprador) and public.fidelizacion_sku_allowed(sku));
+create policy fidelizacion_detalle_scoped on public.fidelizacion_solicitudes_detalle for all to authenticated
+using (public.fidelizacion_request_allowed(actividad_id) and public.fidelizacion_owner_allowed(comprador))
+with check (public.fidelizacion_request_allowed(actividad_id) and public.fidelizacion_owner_allowed(comprador)
+  and public.fidelizacion_sku_allowed(sku));
 
--- Lectura para usuarios autenticados y anonimos
-drop policy if exists "canasto_fidelizacion_select_policy" on public.canasto_fidelizacion;
-create policy "canasto_fidelizacion_select_policy"
-  on public.canasto_fidelizacion
-  for select
-  to authenticated, anon
-  using (true);
+-- Cabeceras de Fidelizacion tampoco se exponen por lectura general de campanas.
+drop policy if exists fidelizacion_campanas_scope on public.campanas;
+create policy fidelizacion_campanas_scope on public.campanas as restrictive for all to authenticated
+using (legacy_actividad_id not like 'FID-%' or public.fidelizacion_buyer_allowed(solicitante_buyer_id))
+with check (legacy_actividad_id not like 'FID-%' or public.fidelizacion_buyer_allowed(solicitante_buyer_id));
 
-drop policy if exists "fidelizacion_solicitudes_detalle_select_policy" on public.fidelizacion_solicitudes_detalle;
-create policy "fidelizacion_solicitudes_detalle_select_policy"
-  on public.fidelizacion_solicitudes_detalle
-  for select
-  to authenticated, anon
-  using (true);
-
--- Escritura para roles operativos en public.usuarios_app
-drop policy if exists "canasto_fidelizacion_write_policy" on public.canasto_fidelizacion;
-create policy "canasto_fidelizacion_write_policy"
-  on public.canasto_fidelizacion
-  for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.usuarios_app u
-      where u.auth_user_id = auth.uid()
-        and u.activo = true
-        and u.rol in ('ADMIN', 'BUYER', 'COMPRADOR', 'OPER', 'PRICING', 'MERCADEO', 'MARK')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.usuarios_app u
-      where u.auth_user_id = auth.uid()
-        and u.activo = true
-        and u.rol in ('ADMIN', 'BUYER', 'COMPRADOR', 'OPER', 'PRICING', 'MERCADEO', 'MARK')
-    )
-  );
-
-drop policy if exists "fidelizacion_solicitudes_detalle_write_policy" on public.fidelizacion_solicitudes_detalle;
-create policy "fidelizacion_solicitudes_detalle_write_policy"
-  on public.fidelizacion_solicitudes_detalle
-  for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.usuarios_app u
-      where u.auth_user_id = auth.uid()
-        and u.activo = true
-        and u.rol in ('ADMIN', 'BUYER', 'COMPRADOR', 'OPER', 'PRICING', 'MERCADEO', 'MARK')
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.usuarios_app u
-      where u.auth_user_id = auth.uid()
-        and u.activo = true
-        and u.rol in ('ADMIN', 'BUYER', 'COMPRADOR', 'OPER', 'PRICING', 'MERCADEO', 'MARK')
-    )
-  );
-
--- Politica permisiva anon para pruebas de integracion
-drop policy if exists "canasto_fidelizacion_anon_policy" on public.canasto_fidelizacion;
-create policy "canasto_fidelizacion_anon_policy"
-  on public.canasto_fidelizacion
-  for all
-  to anon
-  using (true)
-  with check (true);
-
-drop policy if exists "fidelizacion_solicitudes_detalle_anon_policy" on public.fidelizacion_solicitudes_detalle;
-create policy "fidelizacion_solicitudes_detalle_anon_policy"
-  on public.fidelizacion_solicitudes_detalle
-  for all
-  to anon
-  using (true)
-  with check (true);
-
-
+revoke all on function public.fidelizacion_buyer_allowed(uuid), public.fidelizacion_owner_allowed(text),
+  public.fidelizacion_request_allowed(text), public.fidelizacion_sku_allowed(text), public.guard_fidelizacion_campana() from public, anon;
+grant execute on function public.fidelizacion_buyer_allowed(uuid), public.fidelizacion_owner_allowed(text),
+  public.fidelizacion_request_allowed(text), public.fidelizacion_sku_allowed(text) to authenticated;

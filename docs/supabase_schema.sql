@@ -122,6 +122,7 @@ create table if not exists public.promociones (
   tipo_sku text not null default 'simple',
   variante text not null default '',
   sku text not null,
+  numero_pagina integer default null,
   num_parte text not null default '',
   descripcion text not null default '',
   tipo_cantidad text not null default 'Exacta',
@@ -217,8 +218,106 @@ create table if not exists public.notificaciones (
 );
 
 -- =========================================================
--- Helpers de seguridad
+-- Alineacion de columnas para bases de datos existentes
 -- =========================================================
+
+alter table public.compradores
+  add column if not exists comprador_id text,
+  add column if not exists categoria_comprador text not null default 'Senior',
+  add column if not exists senior_id text not null default '';
+
+alter table public.usuarios_app
+  add column if not exists auth_user_id uuid,
+  add column if not exists nombre text not null default '',
+  add column if not exists email text,
+  add column if not exists rol text,
+  add column if not exists buyer_id uuid references public.compradores(id),
+  add column if not exists activo boolean not null default true;
+
+alter table public.campanas
+  add column if not exists solicitante_buyer_id uuid references public.compradores(id),
+  add column if not exists comprador text not null default '',
+  add column if not exists responsable text not null default '',
+  add column if not exists recursos_ocupados text not null default '',
+  add column if not exists promo_ids text not null default '',
+  add column if not exists oferta_ids text not null default '',
+  add column if not exists divisiones text not null default '';
+
+alter table public.sku_master
+  add column if not exists buyer_id uuid references public.compradores(id),
+  add column if not exists vpn text not null default '',
+  add column if not exists descripcion text not null default '',
+  add column if not exists precio numeric(14, 2),
+  add column if not exists activo boolean not null default true,
+  add column if not exists fuente text not null default 'ERP_EXCEL';
+
+alter table public.promociones
+  add column if not exists campana_id uuid references public.campanas(id) on delete cascade,
+  add column if not exists oferta_id text,
+  add column if not exists buyer_id uuid references public.compradores(id),
+  add column if not exists tipo_promo text,
+  add column if not exists grupo_oferta text not null default '',
+  add column if not exists tipo_sku text not null default 'simple',
+  add column if not exists variante text not null default '',
+  add column if not exists sku text,
+  add column if not exists numero_pagina integer default null,
+  add column if not exists num_parte text not null default '',
+  add column if not exists descripcion text not null default '',
+  add column if not exists tipo_cantidad text not null default 'Exacta',
+  add column if not exists cantidad_minima numeric(14, 2) not null default 1,
+  add column if not exists precio_antes numeric(14, 2),
+  add column if not exists precio_ahora numeric(14, 2),
+  add column if not exists descuento text not null default '',
+  add column if not exists comentario_comprador text not null default '',
+  add column if not exists aplica_segmento text not null default 'NO',
+  add column if not exists segmento_cliente text not null default '',
+  add column if not exists alcance_tipo text not null default '',
+  add column if not exists alcance_valor text not null default '',
+  add column if not exists estado_registro text not null default 'BORRADOR',
+  add column if not exists dep_id text not null default '',
+  add column if not exists usuario_crea text not null default '',
+  add column if not exists usuario_edita text not null default '',
+  add column if not exists ultima_modificacion_por text not null default '',
+  add column if not exists version bigint not null default 1;
+
+alter table public.comentarios
+  add column if not exists campana_id uuid references public.campanas(id) on delete cascade,
+  add column if not exists alcance_comentario text not null default 'LINEA',
+  add column if not exists fecha timestamptz not null default now();
+
+alter table public.logs
+  add column if not exists actor_auth_user_id uuid,
+  add column if not exists usuario_id uuid references public.usuarios_app(id),
+  add column if not exists request_id text not null default '',
+  add column if not exists operation_id text not null default '',
+  add column if not exists origen text not null default 'db',
+  add column if not exists contexto jsonb not null default '{}'::jsonb;
+
+-- =========================================================
+-- Helpers de seguridad y roles normalizados
+-- =========================================================
+
+create or replace function public.normalize_role(p_role text)
+returns text language sql immutable as $$
+  select case upper(trim(coalesce(p_role, '')))
+    when 'ADMINISTRADOR' then 'ADMIN'
+    when 'COMPRADOR' then 'BUYER'
+    when 'COMP' then 'BUYER'
+    when 'MERCADEO' then 'MARK'
+    when 'MARKETING' then 'MARK'
+    when 'PRICING' then 'OPER'
+    when 'PRICE' then 'OPER'
+    when 'PLANIMETRIA' then 'OPER'
+    when 'EJECUTOR' then 'OPER'
+    when 'AUDITOR' then 'AUD'
+    when 'AUT' then 'AUD'
+    when 'CDD' then 'DISENADOR'
+    when 'DISEÑADOR' then 'DISENADOR'
+    when 'DISEÃ‘ADOR' then 'DISENADOR'
+    when 'DESIGNER' then 'DISENADOR'
+    else upper(trim(coalesce(p_role, '')))
+  end;
+$$;
 
 create or replace function public.current_user_role()
 returns text
@@ -227,7 +326,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select rol
+  select public.normalize_role(rol)
   from public.usuarios_app
   where auth_user_id = auth.uid()
     and activo = true
@@ -248,6 +347,20 @@ as $$
   limit 1;
 $$;
 
+create or replace function public.current_app_user_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id
+  from public.usuarios_app
+  where auth_user_id = auth.uid()
+    and activo = true
+  limit 1;
+$$;
+
 create or replace function public.is_role(required_role text)
 returns boolean
 language sql
@@ -255,7 +368,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.current_user_role() = required_role;
+  select public.normalize_role(public.current_user_role()) = public.normalize_role(required_role);
 $$;
 
 create or replace function public.is_any_role(required_roles text[])
@@ -265,7 +378,48 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.current_user_role() = any(required_roles);
+  select exists (
+    select 1
+    from unnest(required_roles) as r
+    where public.normalize_role(r) = public.normalize_role(public.current_user_role())
+  );
+$$;
+
+create or replace function public.current_buyer_scope_ids()
+returns uuid[]
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with current_buyer as (
+    select c.*
+    from public.compradores c
+    where c.id = public.current_buyer_id()
+      and c.activo = true
+    limit 1
+  ),
+  buyer_scope as (
+    select c.id
+    from public.compradores c
+    cross join current_buyer cb
+    where c.activo = true
+      and (
+        c.id = cb.id
+        or exists (
+          select 1
+          from regexp_split_to_table(coalesce(c.senior_id, ''), '[;,|]+') as ref(value)
+          where btrim(ref.value) in (cb.id::text, cb.comprador_id, cb.comprador, cb.correo)
+        )
+        or exists (
+          select 1
+          from regexp_split_to_table(coalesce(cb.senior_id, ''), '[;,|]+') as ref(value)
+          where btrim(ref.value) in (c.id::text, c.comprador_id, c.comprador, c.correo)
+        )
+      )
+  )
+  select coalesce(array_agg(distinct id), array[]::uuid[])
+  from buyer_scope;
 $$;
 
 -- =========================================================
@@ -499,8 +653,22 @@ for each row execute function public.set_updated_at();
 -- Vistas generadas
 -- =========================================================
 
+drop view if exists public.export_planimetria cascade;
+drop view if exists public.export_mercadeo cascade;
+drop view if exists public.export_pricing cascade;
+drop view if exists public.consolidado cascade;
+
 create or replace view public.consolidado
 with (security_invoker = true) as
+with comentarios_actividad as (
+  select
+    campana_id,
+    string_agg(estado || ': ' || comentario, ' | ' order by fecha) as comentarios_actividad,
+    count(*) filter (where estado = 'ABIERTO') as comentarios_actividad_abiertos
+  from public.comentarios
+  where alcance_comentario = 'ACTIVIDAD'
+  group by campana_id
+)
 select
   c.legacy_actividad_id as actividad_id,
   p.oferta_id,
@@ -515,6 +683,7 @@ select
   p.tipo_sku,
   p.variante,
   p.sku,
+  p.numero_pagina,
   p.num_parte,
   p.descripcion,
   p.tipo_cantidad,
@@ -529,21 +698,36 @@ select
   p.estado_registro,
   count(cm.id) filter (where cm.estado = 'ABIERTO') as comentarios_abiertos,
   count(cm.id) as total_comentarios,
+  coalesce(ca.comentarios_actividad, '') as comentarios_actividad,
+  coalesce(ca.comentarios_actividad_abiertos, 0) as comentarios_actividad_abiertos,
   p.usuario_crea,
   p.usuario_edita,
-  p.updated_at as fecha_modificacion
+  p.updated_at as fecha_modificacion,
+  p.ultima_modificacion_por
 from public.promociones p
 join public.campanas c on c.id = p.campana_id
 join public.compradores b on b.id = p.buyer_id
-left join public.comentarios cm on cm.promocion_id = p.id
+left join public.comentarios cm
+  on cm.promocion_id = p.id
+  and cm.alcance_comentario = 'LINEA'
+left join comentarios_actividad ca on ca.campana_id = p.campana_id
 group by c.legacy_actividad_id, p.oferta_id, c.tipo_actividad, c.canal, p.alcance_tipo,
   p.alcance_valor, b.comprador, b.division, p.tipo_promo, p.grupo_oferta, p.tipo_sku,
-  p.variante, p.sku, p.num_parte, p.descripcion, p.tipo_cantidad, p.cantidad_minima,
+  p.variante, p.sku, p.numero_pagina, p.num_parte, p.descripcion, p.tipo_cantidad, p.cantidad_minima,
   p.precio_antes, p.precio_ahora, p.descuento, p.comentario_comprador, p.aplica_segmento,
-  p.segmento_cliente, p.estado_registro, p.usuario_crea, p.usuario_edita, p.updated_at;
+  p.segmento_cliente, p.estado_registro, ca.comentarios_actividad,
+  ca.comentarios_actividad_abiertos, p.usuario_crea, p.usuario_edita, p.updated_at, p.ultima_modificacion_por;
 
 create or replace view public.export_pricing
 with (security_invoker = true) as
+with comentarios_actividad as (
+  select
+    campana_id,
+    string_agg(estado || ': ' || comentario, ' | ' order by fecha) as comentarios_actividad
+  from public.comentarios
+  where alcance_comentario = 'ACTIVIDAD'
+  group by campana_id
+)
 select
   c.legacy_actividad_id as actividad_id,
   p.oferta_id,
@@ -565,13 +749,23 @@ select
   p.aplica_segmento,
   p.segmento_cliente,
   case when p.aplica_segmento = 'SI' then p.segmento_cliente else 'Todos' end as segmento,
-  p.estado_registro
+  p.estado_registro,
+  coalesce(ca.comentarios_actividad, '') as comentarios_actividad
 from public.promociones p
 join public.campanas c on c.id = p.campana_id
-join public.compradores b on b.id = p.buyer_id;
+join public.compradores b on b.id = p.buyer_id
+left join comentarios_actividad ca on ca.campana_id = p.campana_id;
 
 create or replace view public.export_mercadeo
 with (security_invoker = true) as
+with comentarios_actividad as (
+  select
+    campana_id,
+    string_agg(estado || ': ' || comentario, ' | ' order by fecha) as comentarios_actividad
+  from public.comentarios
+  where alcance_comentario = 'ACTIVIDAD'
+  group by campana_id
+)
 select
   c.legacy_actividad_id as actividad_id,
   p.oferta_id,
@@ -584,6 +778,7 @@ select
   p.grupo_oferta,
   p.variante,
   p.sku,
+  p.numero_pagina,
   p.num_parte,
   p.descripcion,
   p.precio_antes,
@@ -593,18 +788,30 @@ select
   p.aplica_segmento,
   p.segmento_cliente,
   case when p.aplica_segmento = 'SI' then p.segmento_cliente else 'Todos' end as segmento,
-  string_agg(cm.comentario, ' | ') filter (where cm.estado = 'ABIERTO') as comentarios_abiertos_mercadeo
+  coalesce(ca.comentarios_actividad, '') as comentarios_actividad,
+  string_agg(cm.comentario, ' | ' order by cm.fecha) filter (where cm.estado = 'ABIERTO') as comentarios_abiertos_mercadeo
 from public.promociones p
 join public.campanas c on c.id = p.campana_id
 join public.compradores b on b.id = p.buyer_id
-left join public.comentarios cm on cm.promocion_id = p.id
+left join public.comentarios cm
+  on cm.promocion_id = p.id
+  and cm.alcance_comentario = 'LINEA'
+left join comentarios_actividad ca on ca.campana_id = p.campana_id
 group by c.legacy_actividad_id, p.oferta_id, c.tipo_actividad, c.canal, p.alcance_tipo,
   p.alcance_valor, b.comprador, p.tipo_promo, p.grupo_oferta, p.variante, p.sku,
-  p.num_parte, p.descripcion, p.precio_antes, p.precio_ahora, p.descuento,
-  p.comentario_comprador, p.aplica_segmento, p.segmento_cliente;
+  p.numero_pagina, p.num_parte, p.descripcion, p.precio_antes, p.precio_ahora, p.descuento,
+  p.comentario_comprador, p.aplica_segmento, p.segmento_cliente, ca.comentarios_actividad;
 
 create or replace view public.export_planimetria
 with (security_invoker = true) as
+with comentarios_actividad as (
+  select
+    campana_id,
+    string_agg(estado || ': ' || comentario, ' | ' order by fecha) as comentarios_actividad
+  from public.comentarios
+  where alcance_comentario = 'ACTIVIDAD'
+  group by campana_id
+)
 select
   c.legacy_actividad_id as actividad_id,
   p.oferta_id,
@@ -624,10 +831,13 @@ select
   p.descuento,
   p.aplica_segmento,
   p.segmento_cliente,
-  case when p.aplica_segmento = 'SI' then p.segmento_cliente else 'Todos' end as segmento
+  case when p.aplica_segmento = 'SI' then p.segmento_cliente else 'Todos' end as segmento,
+  p.estado_registro,
+  coalesce(ca.comentarios_actividad, '') as comentarios_actividad
 from public.promociones p
 join public.campanas c on c.id = p.campana_id
-join public.compradores b on b.id = p.buyer_id;
+join public.compradores b on b.id = p.buyer_id
+left join comentarios_actividad ca on ca.campana_id = p.campana_id;
 
 -- =========================================================
 -- Indices
@@ -711,10 +921,11 @@ using (public.is_role('ADMIN'))
 with check (public.is_role('ADMIN'));
 
 drop policy if exists usuarios_select_self_or_admin on public.usuarios_app;
-create policy usuarios_select_self_or_admin
+drop policy if exists usuarios_select_self_admin_mark on public.usuarios_app;
+create policy usuarios_select_self_admin_mark
 on public.usuarios_app for select
 to authenticated
-using (auth_user_id = auth.uid() or public.is_role('ADMIN'));
+using (public.current_user_role() is not null);
 
 drop policy if exists usuarios_admin_all on public.usuarios_app;
 create policy usuarios_admin_all
@@ -740,35 +951,37 @@ drop policy if exists campanas_select_roles on public.campanas;
 create policy campanas_select_roles
 on public.campanas for select
 to authenticated
-using (public.is_any_role(array['ADMIN', 'COMPRADOR', 'MERCADEO', 'PRICING', 'PLANIMETRIA']));
+using (public.is_any_role(array['ADMIN', 'BUYER', 'MARK', 'OPER', 'DISENADOR', 'AUD']));
 
+drop policy if exists campanas_write_admin_buyer on public.campanas;
 drop policy if exists campanas_write_admin_mercadeo_comprador on public.campanas;
-create policy campanas_write_admin_mercadeo_comprador
+create policy campanas_write_admin_buyer
 on public.campanas for insert
 to authenticated
 with check (
-  public.is_any_role(array['ADMIN', 'MERCADEO'])
-  or (public.is_role('COMPRADOR') and solicitante_buyer_id = public.current_buyer_id())
+  public.is_any_role(array['ADMIN', 'MARK'])
+  or (public.is_role('BUYER') and solicitante_buyer_id = any(public.current_buyer_scope_ids()))
 );
 
+drop policy if exists campanas_update_admin_buyer on public.campanas;
 drop policy if exists campanas_update_admin_mercadeo_comprador on public.campanas;
-create policy campanas_update_admin_mercadeo_comprador
+create policy campanas_update_admin_buyer
 on public.campanas for update
 to authenticated
 using (
-  public.is_any_role(array['ADMIN', 'MERCADEO'])
-  or (public.is_role('COMPRADOR') and solicitante_buyer_id = public.current_buyer_id())
+  public.is_any_role(array['ADMIN', 'MARK'])
+  or (public.is_role('BUYER') and solicitante_buyer_id = any(public.current_buyer_scope_ids()))
 )
 with check (
-  public.is_any_role(array['ADMIN', 'MERCADEO'])
-  or (public.is_role('COMPRADOR') and solicitante_buyer_id = public.current_buyer_id())
+  public.is_any_role(array['ADMIN', 'MARK'])
+  or (public.is_role('BUYER') and solicitante_buyer_id = any(public.current_buyer_scope_ids()))
 );
 
 drop policy if exists segmentos_read_authenticated on public.segmentos_clientes;
 create policy segmentos_read_authenticated
 on public.segmentos_clientes for select
 to authenticated
-using (true);
+using (public.current_user_role() is not null);
 
 drop policy if exists segmentos_admin_all on public.segmentos_clientes;
 create policy segmentos_admin_all
@@ -782,24 +995,30 @@ create policy sku_master_select_roles
 on public.sku_master for select
 to authenticated
 using (
-  public.is_any_role(array['ADMIN', 'MERCADEO', 'PRICING', 'PLANIMETRIA'])
-  or buyer_id = public.current_buyer_id()
+  public.is_any_role(array['ADMIN', 'MARK', 'OPER', 'DISENADOR'])
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
 );
 
 drop policy if exists sku_master_write_owner_or_admin on public.sku_master;
 create policy sku_master_write_owner_or_admin
 on public.sku_master for all
 to authenticated
-using (public.is_role('ADMIN') or buyer_id = public.current_buyer_id())
-with check (public.is_role('ADMIN') or buyer_id = public.current_buyer_id());
+using (
+  public.is_role('ADMIN')
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
+)
+with check (
+  public.is_role('ADMIN')
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
+);
 
 drop policy if exists promociones_select_roles on public.promociones;
 create policy promociones_select_roles
 on public.promociones for select
 to authenticated
 using (
-  public.is_any_role(array['ADMIN', 'MERCADEO', 'PRICING', 'PLANIMETRIA'])
-  or buyer_id = public.current_buyer_id()
+  public.is_any_role(array['ADMIN', 'MARK', 'OPER', 'DISENADOR', 'AUD'])
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
 );
 
 drop policy if exists promociones_insert_buyer_admin on public.promociones;
@@ -808,22 +1027,21 @@ on public.promociones for insert
 to authenticated
 with check (
   public.is_role('ADMIN')
-  or (public.is_role('COMPRADOR') and buyer_id = public.current_buyer_id())
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
 );
 
+drop policy if exists promociones_update_buyer_admin on public.promociones;
 drop policy if exists promociones_update_buyer_admin_mercadeo on public.promociones;
-create policy promociones_update_buyer_admin_mercadeo
+create policy promociones_update_buyer_admin
 on public.promociones for update
 to authenticated
 using (
   public.is_role('ADMIN')
-  or public.is_role('MERCADEO')
-  or (public.is_role('COMPRADOR') and buyer_id = public.current_buyer_id())
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
 )
 with check (
   public.is_role('ADMIN')
-  or public.is_role('MERCADEO')
-  or (public.is_role('COMPRADOR') and buyer_id = public.current_buyer_id())
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()))
 );
 
 drop policy if exists promociones_delete_admin_owner on public.promociones;
@@ -832,7 +1050,7 @@ on public.promociones for delete
 to authenticated
 using (
   public.is_role('ADMIN')
-  or (public.is_role('COMPRADOR') and buyer_id = public.current_buyer_id() and estado_registro = 'BORRADOR')
+  or (public.is_role('BUYER') and buyer_id = any(public.current_buyer_scope_ids()) and estado_registro = 'BORRADOR')
 );
 
 drop policy if exists promociones_detalle_select_roles on public.promociones_detalle;
@@ -845,8 +1063,8 @@ using (
     from public.promociones p
     where p.id = promocion_id
       and (
-        public.is_any_role(array['ADMIN', 'MERCADEO', 'PRICING', 'PLANIMETRIA'])
-        or p.buyer_id = public.current_buyer_id()
+        public.is_any_role(array['ADMIN', 'MARK', 'OPER', 'DISENADOR', 'AUD'])
+        or (public.is_role('BUYER') and p.buyer_id = any(public.current_buyer_scope_ids()))
       )
   )
 );
@@ -861,7 +1079,8 @@ using (
     select 1
     from public.promociones p
     where p.id = promocion_id
-      and p.buyer_id = public.current_buyer_id()
+      and public.is_role('BUYER')
+      and p.buyer_id = any(public.current_buyer_scope_ids())
   )
 )
 with check (
@@ -870,7 +1089,8 @@ with check (
     select 1
     from public.promociones p
     where p.id = promocion_id
-      and p.buyer_id = public.current_buyer_id()
+      and public.is_role('BUYER')
+      and p.buyer_id = any(public.current_buyer_scope_ids())
   )
 );
 
@@ -879,39 +1099,44 @@ create policy comentarios_select_roles
 on public.comentarios for select
 to authenticated
 using (
-  public.is_any_role(array['ADMIN', 'MERCADEO', 'PRICING', 'PLANIMETRIA'])
+  public.is_any_role(array['ADMIN', 'MARK', 'OPER', 'DISENADOR', 'AUD'])
   or exists (
     select 1 from public.promociones p
     where p.id = promocion_id
-      and p.buyer_id = public.current_buyer_id()
+      and public.is_role('BUYER')
+      and p.buyer_id = any(public.current_buyer_scope_ids())
+  )
+  or exists (
+    select 1 from public.campanas c
+    where c.id = campana_id
+      and public.is_role('BUYER')
+      and c.solicitante_buyer_id = any(public.current_buyer_scope_ids())
   )
 );
 
 drop policy if exists comentarios_insert_mercadeo_admin on public.comentarios;
-create policy comentarios_insert_mercadeo_admin
+drop policy if exists comentarios_insert_mark_buyer_admin on public.comentarios;
+create policy comentarios_insert_mark_buyer_admin
 on public.comentarios for insert
 to authenticated
-with check (public.is_any_role(array['ADMIN', 'MERCADEO']));
+with check (
+  public.can_write_comment_scope(promocion_id, campana_id)
+  and usuario_id = public.current_app_user_id()
+);
 
 drop policy if exists comentarios_update_mercadeo_admin on public.comentarios;
-create policy comentarios_update_mercadeo_admin
+drop policy if exists comentarios_update_mark_buyer_admin on public.comentarios;
+create policy comentarios_update_mark_buyer_admin
 on public.comentarios for update
 to authenticated
-using (public.is_any_role(array['ADMIN', 'MERCADEO']))
-with check (public.is_any_role(array['ADMIN', 'MERCADEO']));
+using (public.can_write_comment_scope(promocion_id, campana_id))
+with check (public.can_write_comment_scope(promocion_id, campana_id));
 
 drop policy if exists logs_select_roles on public.logs;
 create policy logs_select_roles
 on public.logs for select
 to authenticated
-using (
-  public.is_any_role(array['ADMIN', 'MERCADEO', 'PRICING', 'PLANIMETRIA'])
-  or exists (
-    select 1 from public.promociones p
-    where p.id = promocion_id
-      and p.buyer_id = public.current_buyer_id()
-  )
-);
+using (public.is_any_role(array['ADMIN', 'AUD']));
 
 drop policy if exists logs_insert_authenticated on public.logs;
 drop policy if exists logs_update_authenticated on public.logs;
@@ -921,7 +1146,7 @@ drop policy if exists notificaciones_select_roles on public.notificaciones;
 create policy notificaciones_select_roles
 on public.notificaciones for select
 to authenticated
-using (public.is_any_role(array['ADMIN', 'MERCADEO']));
+using (public.is_role('ADMIN'));
 
 drop policy if exists notificaciones_admin_all on public.notificaciones;
 create policy notificaciones_admin_all

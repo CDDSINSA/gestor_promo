@@ -67,3 +67,80 @@ Para la comprobación manual con sesión de usuario:
 
 Las pruebas locales de renderizado no validan operaciones remotas ni interacción
 real en navegador. No se efectuaron escrituras de prueba en Supabase.
+
+## Etapa 3: versiones seguras y enlaces temporales
+
+Aplicar `supabase_catalogo_diseno_versiones_seguras.sql` después del esquema base,
+`supabase_catalogo_diseno_versiones.sql` y la corrección de fechas, antes de publicar
+el frontend. La migración de categorías de la etapa 2 sigue siendo necesaria.
+No ejecutar después el esquema antiguo de versiones, pues vuelve a abrir sus políticas.
+Para inspeccionar el despliegue se incluye `supabase_catalogo_diseno_auditoria.sql`
+(solo lectura). No se contrastaron las políticas remotas: el entorno únicamente
+contiene la configuración pública del cliente, sin conexión administrativa.
+
+Las cargas usan un UUID por archivo y no permiten sobrescribirlo. La RPC
+`register_catalog_design_version` bloquea la página, asigna el siguiente número,
+guarda el historial y actualiza el arte vigente en una transacción. Verifica la
+asignación y que el archivo pertenezca a la sesión que lo cargó. Confirmar de nuevo
+el mismo archivo es idempotente. El historial conserva sus rutas anteriores y la
+lectura se verifica contra la página asignada (ADMIN/MARK/AUD pueden leer todas).
+Las escrituras directas al historial y a las columnas de archivo de la página se
+reemplazan por la RPC; otros campos conservan sus políticas existentes.
+
+El archivo de Storage y la transacción SQL son operaciones distintas. Si la
+confirmación falla, se informa al usuario para actualizar antes de reintentar.
+No se elimina automáticamente el objeto: ante un timeout podría haberse confirmado.
+Los archivos no registrados pueden quedar huérfanos y requieren revisión administrativa.
+No se ocultan errores de historial ni se guardan comentarios descartando su versión.
+
+`useDesignImageUrls.js` renueva enlaces cinco minutos antes de vencer, comprueba
+cada minuto y al volver a la ventana, y ofrece reintento ante errores. El caché
+se descarta al cambiar de conexión o conjunto de imágenes. Las comprobaciones
+fallidas tienen una espera de un minuto para evitar bucles de peticiones.
+Las URLs se generan con una vigencia de una hora; un enlace ya emitido puede seguir
+siendo válido hasta su vencimiento después de cambiar una asignación.
+
+Validación: pruebas locales de PostgreSQL mediante PGlite (instalado fuera del
+proyecto, sin agregar dependencias a la aplicación), pruebas del servicio y caché,
+y compilación. La prueba local no reproduce el servidor HTTP de Storage ni dos
+sesiones remotas simultáneas. Tras aplicar el SQL, verificar con dos diseñadores,
+un comprador y Mercadeo: cargas simultáneas, historial propio/ajeno, rechazo de
+sobrescrituras y renovación tras una hora o suspensión de la pestaña.
+
+## Etapa 4: guardados completos
+
+Aplicar `supabase_catalogo_diseno_operaciones_atomicas.sql` después de las
+migraciones de categorías y versiones seguras, antes del frontend de esta etapa.
+No se ejecutó esta migración en la base remota.
+
+`save_catalog_design_project` guarda los datos del proyecto y su cantidad de
+páginas en una transacción. Rechaza reducciones que afecten imágenes, historial o
+comentarios antes de guardar metadatos. Bloquea proyecto y páginas durante el
+cambio y compara la fecha de actualización para evitar sobrescribir otra edición.
+Conserva títulos y asignaciones existentes; genera solamente las páginas faltantes.
+
+`review_catalog_design_page` bloquea la página y verifica permisos, versión y ruta
+vigentes dentro de la transacción. El estado y el comentario se guardan juntos.
+Las aprobaciones desde los selectores de estado también usan esta operación.
+Los comentarios abiertos siguen sin bloquear una aprobación.
+
+La tabla privada `catalogo_diseno_operaciones` conserva solicitud, actor y resultado
+para reconocer reintentos. La interfaz bloquea acciones simultáneas; ante una
+respuesta perdida vuelve a confirmar una vez con el mismo identificador. Mientras
+se conserve la conexión en memoria, repetir el mismo contenido no cambia ese ID.
+No se promete recuperar ese identificador tras recargar el navegador o cambiar de
+conexión: si la confirmación sigue fallando, se debe actualizar y comprobar el
+resultado antes de repetir. Los rechazos explícitos indican que no se guardaron
+cambios; si el guardado fue confirmado y falla la recarga, se informa que solo
+falta actualizar la vista. Las notificaciones continúan siendo posteriores al guardado.
+
+La confirmación de imágenes reintenta la RPC idempotente sin volver a subir el
+archivo. Storage y PostgreSQL siguen siendo operaciones separadas; pueden quedar
+objetos sin registro si la confirmación falla definitivamente. El PDF final se
+mantiene fuera de esta etapa, pues su interfaz corresponde a la etapa 5.
+
+Pruebas locales: fallos forzados de creación de página y comentario, reversión de
+metadatos al fallar el cambio de cantidad, edición desactualizada, permisos,
+reintentos repetidos, versión incorrecta y aprobación con observaciones abiertas.
+Después de desplegar, verificar creación, aumento/reducción y revisión desde dos
+sesiones. No se han probado estas operaciones contra el servicio remoto real.
