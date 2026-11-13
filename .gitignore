@@ -1,0 +1,20 @@
+node_modules/
+dist/
+
+.env
+.env.local
+.env.*.local
+
+*.log
+*.out.log
+*.err.log
+
+# Supabase CLI: nunca versionar secretos locales
+supabase/.env
+supabase/functions/.env
+supabase/.temp/
+summary-preview.*
+Claude outputs/
+output/
+outputs/
+.archify/

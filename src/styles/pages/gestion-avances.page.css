@@ -1,0 +1,100 @@
+/* Estilos cargados solo con: GestionAvancesPage.
+   Generado al separar el CSS global por página (oct-2026). Mantener aquí solo
+   reglas cuyas clases se usan exclusivamente en esas páginas. */
+
+/* --- desde pages/gestion-avances.css --- */
+.avance-division-list {
+  display: grid;
+  gap: 0.7rem;
+  max-height: 42rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.avance-division-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #f59e0b;
+  border-radius: 0.9rem;
+  color: #334155;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.avance-division-card div > span {
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.avance-division-card .avance-card-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.avance-detail-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #dbe7e1;
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgba(232, 245, 238, 0.95), rgba(255, 255, 255, 0.95)),
+    #ffffff;
+}
+
+.avance-detail-hero h2,
+.avance-detail-hero p {
+  margin: 0;
+}
+
+.avance-detail-hero div > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #006b3f;
+  font-size: 0.78rem;
+  font-weight: var(--weight-medium);
+}
+
+.avance-buyer-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.avance-buyer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #ffffff;
+}
+
+.avance-buyer-row div > span {
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 900px) {
+  .avance-buyer-row,
+    .avance-detail-hero {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+}

@@ -1,0 +1,27 @@
+.catalog-design-replies {
+  border-top: 1px solid var(--border, #e2e8e5);
+  margin-top: 10px;
+  padding-top: 8px;
+  font-size: 12px;
+  cursor: default;
+}
+
+.catalog-design-reply {
+  border-left: 2px solid var(--comment-accent, #006b3f);
+  margin: 0 0 10px 6px;
+  padding-left: 9px;
+}
+
+.catalog-design-reply-meta,
+.catalog-design-reply-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.catalog-design-reply-meta span { color: var(--text-muted, #64748b); }
+.catalog-design-reply p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.catalog-design-replies .catalog-design-comment-composer { margin: 8px 0 0; }
+.catalog-design-reply-error { color: #b42318; overflow-wrap: anywhere; }

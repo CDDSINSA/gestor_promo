@@ -1,0 +1,139 @@
+.home-topbar .header {
+  margin-bottom: 0;
+}
+
+.home-sync {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.85rem;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.home-sync-main {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.home-sync-main > div {
+  min-width: 0;
+}
+
+.home-sync-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.16);
+}
+
+.home-sync-dot.ready {
+  background: #047857;
+  box-shadow: 0 0 0 4px rgba(4, 120, 87, 0.12);
+}
+
+.home-sync-dot.loading {
+  background: #0284c7;
+  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.12);
+}
+
+.home-sync-dot.error {
+  background: #b91c1c;
+  box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.12);
+}
+
+.home-sync strong,
+.home-sync span,
+.home-sync p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-sync strong {
+  font-size: 0.82rem;
+  line-height: 1rem;
+}
+
+.home-sync span {
+  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  line-height: 0.95rem;
+}
+
+.home-sync p {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  line-height: 0.95rem;
+}
+
+.home-sync .toolbar-actions {
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+}
+
+.home-sync .toolbar-actions .btn {
+  min-height: 1.85rem;
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  line-height: 1rem;
+  font-weight: var(--weight-regular);
+  white-space: nowrap;
+}
+
+.home-sync .toolbar-actions .btn svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.home-catalog-toolbar {
+  align-items: center;
+}
+
+.buyer-comment-alert strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.78rem;
+  line-height: 1rem;
+  font-weight: var(--weight-medium);
+}
+
+.buyer-comment-alert span {
+  display: block;
+  margin-top: 0.05rem;
+  color: #475569;
+  font-size: 0.74rem;
+  line-height: 1rem;
+}
+
+/* Hub principal de modulos - Rediseño Refinado */
+
+/* Luces difusas sutiles de fondo */
+
+.home-hub-subtitle {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #475569;
+  line-height: 1.5;
+}
+
+/* Tarjetas individuales estilo Portal Comercial */
+
+.hub-tile-desc strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+.catalog-countdown > svg { flex-shrink: 0; margin-top: 0.1rem; }
+.catalog-countdown-copy > strong { font-size: 0.83rem; line-height: 1.5; }
+.catalog-countdown summary { cursor: pointer; width: fit-content; margin-top: 0.3rem; text-decoration: underline; text-underline-offset: 3px; }
+.catalog-countdown ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.catalog-countdown li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 0.5rem; }
+.catalog-countdown time { white-space: nowrap; }
+

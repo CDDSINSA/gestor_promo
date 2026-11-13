@@ -1,0 +1,486 @@
+import { buildCatalogNotificationEvents } from "../features/notifications/notificationEvents";
+import { deliverNotifications } from "../features/notifications/deliverNotifications";
+import {
+  hasSupabaseConnection,
+  createLiveNotification,
+  loadSavedPromotionsFromSupabase,
+  saveCatalogToSupabase,
+  saveSettingsToSupabase,
+  saveStoredSupabaseConnection,
+} from "../services/supabaseService";
+import {
+  makeId,
+} from "../utils/common";
+import {
+  mergeCatalogActivities,
+  normalizeCompradorData,
+  normalizeCatalogo,
+  stripCatalogosConfig,
+  toAppRow,
+} from "../utils/promoHelpers";
+import {
+  AVANCE_SYNC_FIELDS,
+  COMMENT_SYNC_FIELDS,
+  JERARQUIA_SYNC_FIELDS,
+  RESPONSABLE_SYNC_FIELDS,
+  SEGMENTO_SYNC_FIELDS,
+  applyPromotionVersions,
+  buildActivitySyncOptions,
+  buildBuyerSyncOptions,
+  buildKeyedSyncOptions,
+  buildNotificacionSyncOptions,
+  buildPromotionSyncOptions,
+  findUnconfirmedSavedPromotions,
+  getAvanceSyncId,
+  getCommentSyncId,
+  getJerarquiaSyncId,
+  getPromotionSyncId,
+  getPromotionSyncSnapshot,
+  getResponsableSyncId,
+  getSegmentoSyncId,
+} from "../app/sync/syncOptions";
+import {
+  analyzePromotionDeletes,
+  describeBulkDeleteGroups,
+  getDeleteApprovalKey,
+} from "../app/sync/deleteGuard";
+import {
+  getFullSyncPayload, compactSupabasePayload, hasSupabaseDeltaChanges, buildSaveOperationSummary,
+} from "../app/sync/savePayload";
+
+export function useCatalogSync({
+  dataState, config, catalogos, compradores, supabaseSettings, supabaseConnection,
+  isSyncing, pendingSaveAction, promotionConflict,
+  setConfig, setCatalogos, setCompradores, setActividades, setRows,
+  setSupabaseSettings, setSupabaseStatus, setSaveSupabaseStatus, setPendingSaveAction, setPromotionConflict,
+  saveOperationInFlightRef, pendingSaveConfirmRef,
+  syncedPromotionStateRef, syncedBuyerStateRef, syncedActivityStateRef, syncedCommentStateRef,
+  syncedAvanceStateRef, syncedResponsableStateRef, syncedJerarquiaStateRef, syncedSegmentoStateRef, syncedNotificacionStateRef,
+  buildCatalogPayload, runSupabaseOperation, applyCatalogData,
+  rememberSyncedPromotions, rememberSyncedSettings, rememberSyncedOperations,
+  showSuccessToast, onLoadSupabase,
+}) {
+  const requestSupabaseSaveConfirmation = (payload) => {
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar." });
+      return;
+    }
+    if (isSyncing || saveOperationInFlightRef.current || pendingSaveConfirmRef.current) return;
+    pendingSaveConfirmRef.current = true;
+    setPendingSaveAction(payload);
+  };
+
+  const executePendingSaveAction = async () => {
+    const current = pendingSaveAction;
+    if (!current || saveOperationInFlightRef.current) return;
+    pendingSaveConfirmRef.current = false;
+    setPendingSaveAction(null);
+    try {
+      await current.action();
+    } catch (error) {
+      setSupabaseStatus({ type: "error", message: error.message || "No se pudo completar el guardado." });
+    }
+  };
+
+  const applySavedActivities = (payload = {}) => {
+    if (!Array.isArray(payload.actividades)) return;
+    const savedCatalogos = Array.isArray(payload.catalogos)
+      ? payload.catalogos.map(normalizeCatalogo)
+      : catalogos;
+    setActividades(mergeCatalogActivities(savedCatalogos, payload.actividades));
+  };
+
+  // Un click de boton llega como evento; no es un override del payload.
+  const cleanSaveOverrides = (overrides) => (overrides && (overrides.nativeEvent || typeof overrides.preventDefault === "function") ? {} : (overrides || {}));
+
+  const requestBulkDeleteApproval = ({ total, detail, approvalKey, retry }) => {
+    pendingSaveConfirmRef.current = true;
+    setPendingSaveAction({
+      title: "Confirmar eliminación de promociones",
+      description: `Este guardado eliminará ${total} promociones en Supabase.`,
+      note: `${detail}. Si usted no eliminó estas líneas, cancele y recargue los datos antes de guardar.`,
+      confirmLabel: `Eliminar ${total} y guardar`,
+      tone: "danger",
+      requireAck: `Confirmo que quiero eliminar ${total} promociones.`,
+      action: () => retry({ allowBulkDelete: true, deleteApprovalKey: approvalKey }),
+    });
+    setSaveSupabaseStatus("idle");
+    setSupabaseStatus({
+      type: "error",
+      message: `Guardado en pausa: eliminaría ${total} promociones (${detail}). Confirme o cancele.`,
+    });
+  };
+
+  /**
+   * Si el guardado eliminaria muchas promociones de una actividad, lo detiene y pide
+   * confirmacion explicita. La confirmacion vale solo para ese mismo conjunto de borrados.
+   */
+  const reviewBulkPromotionDeletes = (payload, saveFlags = {}, retry) => {
+    const deletedRowIds = payload?.sync_options?.promociones?.deleted_row_ids || [];
+    const approvalKey = getDeleteApprovalKey(deletedRowIds);
+    const approved = Boolean(saveFlags.allowBulkDelete && saveFlags.deleteApprovalKey === approvalKey);
+    const review = analyzePromotionDeletes(deletedRowIds, syncedPromotionStateRef.current);
+    if (!review.isBulk || approved) return { proceed: true, allowBulkDelete: approved, approvalKey, deletedCount: review.total };
+    requestBulkDeleteApproval({ total: review.total, detail: describeBulkDeleteGroups(review.bulkGroups), approvalKey, retry });
+    return { proceed: false, allowBulkDelete: false, approvalKey, deletedCount: review.total };
+  };
+
+  /** Supabase puede bloquear un borrado que la app no detecto (p. ej. otro usuario ya borro lineas). */
+  const handleServerBulkDeleteBlock = (error, deleteReview, retry) => {
+    if (error?.code !== "PROMO_BULK_DELETE_BLOCKED" || deleteReview.allowBulkDelete) return false;
+    const details = error.details || {};
+    const detail = details.actividad_id
+      ? `${details.actividad_id}: ${details.eliminadas} de ${details.total} promociones`
+      : "Supabase detectó un borrado masivo";
+    requestBulkDeleteApproval({ total: deleteReview.deletedCount || details.eliminadas || 0, detail, approvalKey: deleteReview.approvalKey, retry });
+    return true;
+  };
+
+  const rememberSyncedPayload = (payload = {}) => {
+    rememberSyncedPromotions(payload.promociones || []);
+    rememberSyncedSettings(payload);
+    rememberSyncedOperations(payload);
+  };
+
+  const buildSupabasePayload = (overrides = {}, operation = {}) => {
+    const fullPayload = buildCatalogPayload(overrides);
+    const operationId = operation.operationId || "";
+    const payload = {
+      ...fullPayload,
+      logs: [],
+      operation_id: operationId,
+      operation_type: operation.operationType || "",
+      client_started_at: operation.startedAt || "",
+      sync_options: {
+        return_mode: "delta",
+        promociones: buildPromotionSyncOptions(fullPayload.promociones, syncedPromotionStateRef.current),
+        compradores: buildBuyerSyncOptions(fullPayload.compradores, syncedBuyerStateRef.current),
+        actividades: buildActivitySyncOptions(fullPayload.actividades, fullPayload.catalogos, syncedActivityStateRef.current),
+        comentarios: buildKeyedSyncOptions(fullPayload.comentarios, syncedCommentStateRef.current, getCommentSyncId, COMMENT_SYNC_FIELDS),
+        avances_catalogo: buildKeyedSyncOptions(fullPayload.avances_catalogo, syncedAvanceStateRef.current, getAvanceSyncId, AVANCE_SYNC_FIELDS),
+        responsables_solicitudes: buildKeyedSyncOptions(fullPayload.responsables_solicitudes, syncedResponsableStateRef.current, getResponsableSyncId, RESPONSABLE_SYNC_FIELDS),
+        jerarquia_categorias: buildKeyedSyncOptions(fullPayload.jerarquia_categorias, syncedJerarquiaStateRef.current, getJerarquiaSyncId, JERARQUIA_SYNC_FIELDS),
+        segmentos_clientes: buildKeyedSyncOptions(fullPayload.segmentos_clientes, syncedSegmentoStateRef.current, getSegmentoSyncId, SEGMENTO_SYNC_FIELDS),
+        notificaciones: buildNotificacionSyncOptions(fullPayload.notificaciones, syncedNotificacionStateRef.current),
+      },
+    };
+
+    const compactPayload = compactSupabasePayload(payload);
+    Object.defineProperty(compactPayload, "__full_sync_payload", {
+      value: payload,
+      enumerable: false,
+    });
+    return compactPayload;
+  };
+
+  // Guardado por partes: si una parte falla, las anteriores ya quedaron en Supabase.
+  // Se marcan como sincronizadas (con su nueva version) para que el reintento envie solo lo pendiente.
+  const rememberPartialSave = (payload = {}, partial = null) => {
+    if (!partial) return;
+    const fullPayload = getFullSyncPayload(payload);
+    const savedVersions = Array.isArray(partial.promociones) ? partial.promociones : [];
+    if (savedVersions.length) {
+      const savedIds = new Set(savedVersions.map((row) => String(row?.row_id || "").trim()).filter(Boolean));
+      applyPromotionVersions(fullPayload.promociones || [], savedVersions)
+        .filter((row) => savedIds.has(getPromotionSyncId(row)))
+        .forEach((row) => syncedPromotionStateRef.current.set(getPromotionSyncId(row), getPromotionSyncSnapshot(row)));
+      setRows((currentRows) => applyPromotionVersions(currentRows, savedVersions));
+    }
+    (partial.deletedRowIds || []).forEach((rowId) => syncedPromotionStateRef.current.delete(String(rowId || "").trim()));
+  };
+
+  // Conflicto en una linea NUEVA (sin version): casi siempre es una parte que Supabase si guardo
+  // pero cuya respuesta no llego (corte de internet). No es un cambio de otro usuario.
+  const isUnconfirmedInsertConflict = (error) => {
+    if (error?.code !== "PROMOTION_VERSION_CONFLICT") return false;
+    const conflicts = Array.isArray(error.conflict?.conflicts) ? error.conflict.conflicts : [error.conflict || {}];
+    return conflicts.some((item) => item && item.action !== "delete" && (item.expected_version === null || item.expected_version === undefined || item.expected_version === ""));
+  };
+
+  /**
+   * Busca en Supabase las lineas nuevas del guardado. Las que ya estan guardadas con el mismo
+   * contenido se marcan como sincronizadas (con su version) para que el reintento no las reenvie.
+   * Las que difieren se dejan como estan: el reintento mostrara el conflicto normal.
+   */
+  const reconcileUnconfirmedPromotions = async (payload = {}) => {
+    const fullPayload = getFullSyncPayload(payload);
+    const sync = fullPayload.sync_options?.promociones || {};
+    const changed = new Set((sync.changed_row_ids || []).map((id) => String(id || "").trim()));
+    const expected = sync.expected_versions || {};
+    const candidates = (fullPayload.promociones || []).filter((row) => {
+      const rowId = getPromotionSyncId(row);
+      return changed.has(rowId) && !expected[rowId];
+    });
+    if (!candidates.length) return 0;
+    const activityIds = Array.from(new Set(candidates.map((row) => String(row.actividad_id || row.actividadId || "").trim()).filter(Boolean)));
+    const savedRows = await loadSavedPromotionsFromSupabase(supabaseConnection, activityIds);
+    const diagnostics = {};
+    const confirmed = findUnconfirmedSavedPromotions(candidates, savedRows, diagnostics);
+    // Diagnostico en la consola del navegador (no cambia datos).
+    if (typeof console !== "undefined") console.info("[guardado] reconocimiento de lineas ya guardadas", diagnostics);
+    if (!confirmed.length) return 0;
+    const confirmedIds = new Set(confirmed.map((item) => item.row_id));
+    applyPromotionVersions(candidates, confirmed)
+      .filter((row) => confirmedIds.has(getPromotionSyncId(row)))
+      .forEach((row) => syncedPromotionStateRef.current.set(getPromotionSyncId(row), getPromotionSyncSnapshot(row)));
+    setRows((currentRows) => applyPromotionVersions(currentRows, confirmed));
+    return confirmed.length;
+  };
+
+  const createSaveOperation = (operationType) => {
+    const operationId = window.crypto?.randomUUID?.() || makeId("SAVE");
+    return {
+      operationId: `save-${operationType}-${operationId}`,
+      operationType,
+      startedAt: new Date().toISOString(),
+    };
+  };
+
+  const notifyAfterSave = async (payload = {}, operationType = "catalog", previousPromotions = new Map()) => {
+    if (!hasSupabaseConnection(supabaseConnection)) return;
+    const events = buildCatalogNotificationEvents(payload, {
+      operationType, actorRole: supabaseConnection.appUser?.rol, buyers: compradores,
+      previousPromotions,
+    });
+    const warnings = await deliverNotifications(events, (event) => createLiveNotification(supabaseConnection, event));
+    if (warnings.length) {
+      const message = `Cambios guardados. Advertencias de notificacion: ${warnings.join(" ")}`;
+      setSupabaseStatus((current) => current?.type === "error" ? current : { type: "ready", message });
+      showSuccessToast(message, "Guardado con advertencias de notificacion");
+    }
+  };
+
+  const onSaveSupabaseSettings = () => {
+    const saved = saveStoredSupabaseConnection(supabaseSettings);
+    setSupabaseSettings(saved);
+    setSupabaseStatus({
+      type: hasSupabaseConnection(saved) ? "ready" : "idle",
+      message: hasSupabaseConnection(saved) ? "Conexion guardada. Ya puede probar o cargar desde Supabase." : "Complete URL y anon key para activar Supabase.",
+    });
+    showSuccessToast("La configuracion de conexion se guardo correctamente.", "Conexion guardada");
+  };
+
+  const onSaveCatalogSettings = async (settings = {}, saveFlags = {}) => {
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar ajustes." });
+      return;
+    }
+    const nextConfig = stripCatalogosConfig(config);
+    const nextCatalogos = (settings.catalogos || catalogos).map(normalizeCatalogo);
+    const nextCompradores = (settings.compradores || compradores).map(normalizeCompradorData);
+    setConfig(nextConfig);
+    setCatalogos(nextCatalogos);
+    setCompradores(nextCompradores);
+    if (!hasSupabaseConnection(supabaseConnection)) {
+      setSupabaseStatus({ type: "ready", message: "Ajustes guardados en la app. Configure Supabase para sincronizarlos." });
+      showSuccessToast("Los ajustes quedaron guardados en la aplicacion.", "Ajustes guardados");
+      return;
+    }
+    if (saveOperationInFlightRef.current) {
+      setSupabaseStatus({ type: "loading", message: "Ya hay un guardado en curso. Espere a que finalice antes de intentar nuevamente." });
+      return;
+    }
+    saveOperationInFlightRef.current = true;
+    setSaveSupabaseStatus("saving");
+    try {
+      const operation = createSaveOperation("settings");
+      const payload = buildSupabasePayload({ config: nextConfig, catalogos: nextCatalogos, compradores: nextCompradores }, operation);
+      const saveSummary = buildSaveOperationSummary(payload);
+      if (!hasSupabaseDeltaChanges(payload)) {
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: "No hay ajustes pendientes para sincronizar." });
+        showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
+        return;
+      }
+      const retrySettings = (flags) => onSaveCatalogSettings(settings, flags);
+      const deleteReview = reviewBulkPromotionDeletes(payload, saveFlags, retrySettings);
+      if (!deleteReview.proceed) return;
+      let saveError = null;
+      const data = await runSupabaseOperation(
+        `Guardando ajustes en Supabase (${saveSummary})...`,
+        () => saveSettingsToSupabase(supabaseConnection, payload, { allowBulkDelete: deleteReview.allowBulkDelete }).catch((error) => {
+          saveError = error;
+          throw error;
+        }),
+        "Ajustes guardados en Supabase.",
+      );
+      if (!data && handleServerBulkDeleteBlock(saveError, deleteReview, retrySettings)) return;
+      if (data) {
+        const fullPayload = getFullSyncPayload(payload);
+        setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
+        if (data.sync_mode === "delta") {
+          applySavedActivities(fullPayload);
+          const syncedPayload = { ...fullPayload, promociones: applyPromotionVersions(fullPayload.promociones, data.promociones || []) };
+          setRows((currentRows) => applyPromotionVersions(currentRows, data.promociones || []));
+          rememberSyncedPayload(syncedPayload);
+        } else {
+          applyCatalogData(data, { fallbackActivities: fullPayload.actividades });
+          rememberSyncedPromotions(data.promociones || []);
+          rememberSyncedSettings(data);
+          rememberSyncedOperations(data);
+        }
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Estos cambios ya estaban guardados en el sistema." : "Cambios guardados en el sistema." });
+        showSuccessToast("La información se sincronizó correctamente en el sistema.");
+        if (!data.idempotent_replay) await notifyAfterSave(fullPayload, "settings");
+      } else {
+        setSaveSupabaseStatus("error");
+        setSupabaseStatus((current) => ({ type: "error", message: "No se pudieron guardar los cambios en el sistema. " + (current?.message || "Revise la conexión y vuelva a intentar.") }));
+      }
+    } finally {
+      saveOperationInFlightRef.current = false;
+    }
+  };
+
+  const onRequestSaveSupabase = () => requestSupabaseSaveConfirmation({
+    title: "Confirmar guardado",
+    description: "Vas a guardar los cambios del catálogo en el sistema.",
+    note: "Este guardado sincroniza promociones, comentarios, avances y ajustes relacionados.",
+    confirmLabel: "Guardar cambios",
+    action: onSaveSupabase,
+  });
+
+  const onRequestSaveSupabaseSettings = () => requestSupabaseSaveConfirmation({
+    title: "Confirmar ajustes",
+    description: "Vas a guardar los ajustes de conexión en el sistema.",
+    note: "La conexión se actualizará con los valores actuales de la pantalla de Ajustes.",
+    confirmLabel: "Guardar ajustes",
+    action: onSaveSupabaseSettings,
+  });
+
+  const onRequestSaveCatalogSettings = (settings = {}) => requestSupabaseSaveConfirmation({
+    title: "Confirmar guardado",
+    description: "Vas a guardar compradores y catálogos en el sistema.",
+    note: "Este cambio impacta la estructura base del sistema y luego sincroniza el catálogo.",
+    confirmLabel: "Guardar cambios",
+    action: () => onSaveCatalogSettings(settings),
+  });
+
+  const reloadAfterPromotionConflict = async () => {
+    const data = await onLoadSupabase({ blocking: false });
+    if (data) {
+      setPromotionConflict(null);
+      setSupabaseStatus({ type: "ready", message: "Datos recargados desde Supabase." });
+    }
+  };
+
+  const keepLocalPromotionConflict = () => {
+    setPromotionConflict(null);
+    setSupabaseStatus({
+      type: "error",
+      message: "Se conservaron los cambios locales. Compare con la version actual antes de intentar guardar nuevamente.",
+    });
+  };
+
+  const discardLocalPromotionConflict = () => {
+    const currentRow = promotionConflict?.current_row;
+    const rowId = promotionConflict?.row_id;
+    if (!currentRow || !rowId) {
+      void reloadAfterPromotionConflict();
+      return;
+    }
+    const appRow = toAppRow(currentRow);
+    setRows((currentRows) => currentRows.map((row) => getPromotionSyncId(row) === rowId ? appRow : row));
+    syncedPromotionStateRef.current.set(rowId, getPromotionSyncSnapshot(currentRow));
+    setPromotionConflict(null);
+    setSupabaseStatus({ type: "ready", message: "Cambio local descartado para la promocion en conflicto." });
+  };
+
+  const onSaveSupabase = async (rawOverrides = {}, saveFlags = {}) => {
+    const overrides = cleanSaveOverrides(rawOverrides);
+    if (dataState.status !== "ready") {
+      setSupabaseStatus({ type: "error", message: "Espere a que los datos operativos carguen correctamente antes de guardar." });
+      return;
+    }
+    if (saveOperationInFlightRef.current) {
+      setSupabaseStatus({ type: "loading", message: "Ya hay un guardado en curso. Espere a que finalice antes de intentar nuevamente." });
+      return;
+    }
+    saveOperationInFlightRef.current = true;
+    setSaveSupabaseStatus("saving");
+    let retryAfterReconcile = null;
+    try {
+      const operation = createSaveOperation("catalog");
+      const payload = buildSupabasePayload(overrides, operation);
+      // Keep notification context before successful saves replace the sync snapshots.
+      const previousPromotions = new Map(syncedPromotionStateRef.current);
+      const saveSummary = buildSaveOperationSummary(payload);
+      if (!hasSupabaseDeltaChanges(payload)) {
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: "No hay cambios pendientes para sincronizar." });
+        showSuccessToast("No se detectaron cambios nuevos para enviar a Supabase.", "Sin cambios");
+        return;
+      }
+      const retrySave = (flags) => onSaveSupabase(overrides, flags);
+      const deleteReview = reviewBulkPromotionDeletes(payload, saveFlags, retrySave);
+      if (!deleteReview.proceed) return;
+      let saveError = null;
+      let reconciledCount = 0;
+      const saveOptions = {
+        allowBulkDelete: deleteReview.allowBulkDelete,
+        onProgress: ({ part, total }) => {
+          if (total > 1) setSupabaseStatus({ type: "loading", message: `Guardando cambios en Supabase: parte ${part} de ${total} (${saveSummary})...` });
+        },
+      };
+      const data = await runSupabaseOperation(
+        `Guardando cambios en Supabase (${saveSummary})...`,
+        () => saveCatalogToSupabase(supabaseConnection, payload, saveOptions).catch(async (error) => {
+          saveError = error;
+          rememberPartialSave(payload, error?.partialSave);
+          if (!saveFlags.reconciled && isUnconfirmedInsertConflict(error)) {
+            setSupabaseStatus({ type: "loading", message: "Verificando en Supabase las lineas que ya quedaron guardadas..." });
+            try {
+              reconciledCount = await reconcileUnconfirmedPromotions(payload);
+            } catch (reconcileError) {
+              if (typeof console !== "undefined") console.warn("[guardado] no se pudo verificar lo ya guardado", reconcileError);
+              reconciledCount = 0;
+            }
+            if (reconciledCount) return { reconciled: reconciledCount };
+          }
+          throw error;
+        }),
+        "Cambios guardados en Supabase.",
+      );
+      if (data?.reconciled) {
+        // Se reintenta una sola vez, ya sin las lineas reconocidas.
+        retryAfterReconcile = { count: data.reconciled, flags: { ...saveFlags, reconciled: true } };
+        return;
+      }
+      if (!data && handleServerBulkDeleteBlock(saveError, deleteReview, retrySave)) return;
+      if (data) {
+        const fullPayload = getFullSyncPayload(payload);
+        setSupabaseStatus({ type: "loading", message: "Aplicando respuesta de Supabase en la app..." });
+        if (data.sync_mode === "delta") {
+          applySavedActivities(fullPayload);
+          const syncedPayload = { ...fullPayload, promociones: applyPromotionVersions(fullPayload.promociones, data.promociones || []) };
+          setRows((currentRows) => applyPromotionVersions(currentRows, data.promociones || []));
+          rememberSyncedPayload(syncedPayload);
+        } else {
+          applyCatalogData(data, { fallbackActivities: fullPayload.actividades });
+          rememberSyncedPromotions(data.promociones || []);
+          rememberSyncedSettings(data);
+          rememberSyncedOperations(data);
+        }
+        setSaveSupabaseStatus("success");
+        setSupabaseStatus({ type: "ready", message: data.idempotent_replay ? "Estos cambios ya estaban guardados en el sistema." : "Cambios guardados en el sistema." });
+        showSuccessToast("La información se sincronizó correctamente en el sistema.");
+        if (!data.idempotent_replay) await notifyAfterSave(fullPayload, "catalog", previousPromotions);
+      } else {
+        setSaveSupabaseStatus("error");
+        setSupabaseStatus((current) => ({ type: "error", message: `No se pudieron guardar los cambios en el sistema. ${current?.message || "Revise la conexión y vuelva a intentar."}` }));
+      }
+    } finally {
+      saveOperationInFlightRef.current = false;
+      if (retryAfterReconcile) {
+        setSupabaseStatus({ type: "loading", message: `${retryAfterReconcile.count} lineas ya estaban guardadas en Supabase. Enviando solo lo pendiente...` });
+        await onSaveSupabase(overrides, retryAfterReconcile.flags);
+      }
+    }
+  };
+
+  return {
+    executePendingSaveAction,
+    onSaveSupabase, onRequestSaveSupabase, onRequestSaveSupabaseSettings, onRequestSaveCatalogSettings,
+    reloadAfterPromotionConflict, keepLocalPromotionConflict, discardLocalPromotionConflict,
+  };
+}

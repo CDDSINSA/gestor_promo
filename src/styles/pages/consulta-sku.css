@@ -1,0 +1,24 @@
+.consulta-panel > div,
+.consulta-summary-card > div {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.consulta-kpi span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.consulta-kpi strong {
+  color: #0f172a;
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: var(--weight-strong);
+}
+
+.consulta-kpi.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}

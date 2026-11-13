@@ -1,0 +1,179 @@
+export const ROLES = {
+  ADMIN: "ADMIN",
+  BUYER: "BUYER",
+  MARK: "MARK",
+  OPER: "OPER",
+  AUD: "AUD",
+  DESIGNER: "DISENADOR",
+};
+
+export const PERMISSIONS = {
+  VIEW_HOME: "view:home",
+  VIEW_PROMOS: "view:promos",
+  EDIT_PROMOS: "edit:promos",
+  VIEW_CONSULTA: "view:consulta",
+  VIEW_SOLICITUDES: "view:solicitudes",
+  CHANGE_REQUEST_STATUS: "change:request_status",
+  MANAGE_SOLICITUDES: "manage:solicitudes",
+  CREATE_SPECIAL_PROMO: "create:promocion_especial",
+  VIEW_SEGUIMIENTO: "view:seguimiento",
+  VIEW_AVANCES: "view:avances",
+  EDIT_AVANCES: "edit:avances",
+  VIEW_CATALOG_DESIGN: "view:catalog_design",
+  MANAGE_CATALOG_DESIGN: "manage:catalog_design",
+  UPLOAD_CATALOG_PAGE: "upload:catalog_page",
+  REVIEW_CATALOG_PAGE: "review:catalog_page",
+  VIEW_LOGS: "view:logs",
+  VIEW_CONSOLIDADO: "view:consolidado",
+  MANAGE_MARKETING_COMMENTS: "manage:marketing_comments",
+  EXPORT_CONSOLIDADO: "export:consolidado",
+  VIEW_EXPORTS: "view:exports",
+  DOWNLOAD_EXPORTS: "download:exports",
+  MANAGE_SETTINGS: "manage:settings",
+  SYNC_SUPABASE: "sync:supabase",
+  VIEW_FIDELIZACION: "view:fidelizacion",
+  MANAGE_FIDELIZACION: "manage:fidelizacion",
+  VIEW_MARGINS: "view:margenes",
+  EXPORT_MARGINS: "export:margenes",
+};
+
+export const ROLE_LABELS = {
+  [ROLES.ADMIN]: "Administrador",
+  [ROLES.BUYER]: "Comprador",
+  [ROLES.MARK]: "Marketing",
+  [ROLES.OPER]: "Ejecutor",
+  [ROLES.AUD]: "Auditor",
+  [ROLES.DESIGNER]: "Diseñador",
+};
+
+export const ROLE_PERMISSIONS = {
+  [ROLES.ADMIN]: Object.values(PERMISSIONS).filter((permission) => permission !== PERMISSIONS.MANAGE_FIDELIZACION),
+  [ROLES.BUYER]: [
+    PERMISSIONS.VIEW_HOME,
+    PERMISSIONS.VIEW_PROMOS,
+    PERMISSIONS.EDIT_PROMOS,
+    PERMISSIONS.VIEW_CONSULTA,
+    PERMISSIONS.VIEW_SOLICITUDES,
+    PERMISSIONS.CREATE_SPECIAL_PROMO,
+    PERMISSIONS.VIEW_SEGUIMIENTO,
+    PERMISSIONS.VIEW_AVANCES,
+    PERMISSIONS.EDIT_AVANCES,
+    PERMISSIONS.VIEW_CATALOG_DESIGN,
+    PERMISSIONS.REVIEW_CATALOG_PAGE,
+    PERMISSIONS.VIEW_CONSOLIDADO,
+    PERMISSIONS.MANAGE_MARKETING_COMMENTS,
+    PERMISSIONS.EXPORT_CONSOLIDADO,
+    PERMISSIONS.VIEW_EXPORTS,
+    PERMISSIONS.DOWNLOAD_EXPORTS,
+    PERMISSIONS.SYNC_SUPABASE,
+    PERMISSIONS.VIEW_FIDELIZACION,
+    PERMISSIONS.MANAGE_FIDELIZACION,
+    PERMISSIONS.VIEW_MARGINS,
+    PERMISSIONS.EXPORT_MARGINS,
+  ],
+  [ROLES.MARK]: [
+    PERMISSIONS.VIEW_HOME,
+    PERMISSIONS.VIEW_CATALOG_DESIGN,
+    PERMISSIONS.MANAGE_CATALOG_DESIGN,
+    PERMISSIONS.UPLOAD_CATALOG_PAGE,
+    PERMISSIONS.REVIEW_CATALOG_PAGE,
+    PERMISSIONS.VIEW_SEGUIMIENTO,
+    PERMISSIONS.VIEW_CONSOLIDADO,
+    PERMISSIONS.MANAGE_MARKETING_COMMENTS,
+    PERMISSIONS.EXPORT_CONSOLIDADO,
+    PERMISSIONS.VIEW_EXPORTS,
+    PERMISSIONS.DOWNLOAD_EXPORTS,
+    PERMISSIONS.SYNC_SUPABASE,
+  ],
+  [ROLES.OPER]: [
+    PERMISSIONS.VIEW_HOME,
+    PERMISSIONS.CHANGE_REQUEST_STATUS,
+    PERMISSIONS.VIEW_CONSULTA,
+    PERMISSIONS.VIEW_SOLICITUDES,
+    PERMISSIONS.VIEW_SEGUIMIENTO,
+    PERMISSIONS.VIEW_CONSOLIDADO,
+    PERMISSIONS.EXPORT_CONSOLIDADO,
+    PERMISSIONS.VIEW_EXPORTS,
+    PERMISSIONS.DOWNLOAD_EXPORTS,
+    PERMISSIONS.VIEW_FIDELIZACION,
+    PERMISSIONS.MANAGE_FIDELIZACION,
+    PERMISSIONS.VIEW_MARGINS,
+    PERMISSIONS.EXPORT_MARGINS,
+  ],
+  [ROLES.AUD]: [
+    PERMISSIONS.VIEW_HOME,
+    PERMISSIONS.VIEW_SEGUIMIENTO,
+    PERMISSIONS.VIEW_LOGS,
+  ],
+  [ROLES.DESIGNER]: [
+    PERMISSIONS.VIEW_HOME,
+    PERMISSIONS.VIEW_CATALOG_DESIGN,
+    PERMISSIONS.UPLOAD_CATALOG_PAGE,
+    PERMISSIONS.VIEW_SEGUIMIENTO,
+  ],
+};
+
+export const MODULE_PERMISSIONS = {
+  home: PERMISSIONS.VIEW_HOME,
+  ajustes: PERMISSIONS.MANAGE_SETTINGS,
+  promos: PERMISSIONS.VIEW_PROMOS,
+  consulta: PERMISSIONS.VIEW_CONSULTA,
+  solicitudes: PERMISSIONS.VIEW_SOLICITUDES,
+  especial: PERMISSIONS.CREATE_SPECIAL_PROMO,
+  seguimiento: PERMISSIONS.VIEW_SEGUIMIENTO,
+  avances: PERMISSIONS.VIEW_AVANCES,
+  catalogDesign: PERMISSIONS.VIEW_CATALOG_DESIGN,
+  logs: PERMISSIONS.VIEW_LOGS,
+  consolidado: PERMISSIONS.VIEW_CONSOLIDADO,
+  export: PERMISSIONS.VIEW_EXPORTS,
+  fidelizacion: PERMISSIONS.VIEW_FIDELIZACION,
+  margenes: PERMISSIONS.VIEW_MARGINS,
+};
+
+export function normalizeRole(role) {
+  const normalized = String(role || "").trim().toUpperCase();
+  const aliases = {
+    COMPRADOR: ROLES.BUYER,
+    COMP: ROLES.BUYER,
+    MERCADEO: ROLES.MARK,
+    MARKETING: ROLES.MARK,
+    PRICING: ROLES.OPER,
+    PRICE: ROLES.OPER,
+    PLANIMETRIA: ROLES.OPER,
+    EJECUTOR: ROLES.OPER,
+    AUDITOR: ROLES.AUD,
+    AUT: ROLES.AUD,
+    CDD: ROLES.DESIGNER,
+    DISEÑADOR: ROLES.DESIGNER,
+  };
+  return aliases[normalized] || normalized;
+}
+
+export function getRolePermissions(role) {
+  return ROLE_PERMISSIONS[normalizeRole(role)] || [];
+}
+
+export function roleHasPermission(role, permission) {
+  if (!permission) return true;
+  return getRolePermissions(role).includes(permission);
+}
+
+export function roleHasAnyPermission(role, permissions = []) {
+  const required = Array.isArray(permissions) ? permissions.filter(Boolean) : [permissions].filter(Boolean);
+  if (!required.length) return true;
+  return required.some((permission) => roleHasPermission(role, permission));
+}
+
+export function roleHasAllPermissions(role, permissions = []) {
+  const required = Array.isArray(permissions) ? permissions.filter(Boolean) : [permissions].filter(Boolean);
+  if (!required.length) return true;
+  return required.every((permission) => roleHasPermission(role, permission));
+}
+
+export function canAccessModule(role, moduleId) {
+  return roleHasPermission(role, MODULE_PERMISSIONS[moduleId]);
+}
+
+export function getFirstAllowedModule(role, items = []) {
+  return items.find((item) => canAccessModule(role, item.id))?.id || "home";
+}

@@ -1,0 +1,346 @@
+import React, { useMemo, useState } from "react";
+import { Download, Search, X } from "lucide-react";
+import { PERMISSIONS } from "../constants/permissions";
+import { usePermissions } from "../hooks/usePermissions";
+import { exportStyledWorkbook } from "../services/excelStyleService";
+import { formatPromotionValidationErrors, validatePromotions } from "../services/promotionValidationService";
+import { loadExportDataFromSupabase } from "../services/supabaseService";
+import {
+  channelMatchesFilter,
+  isActivityComment,
+  isLineComment,
+  isSegmentedRow,
+  normalizeActividad,
+  normalizeCanal,
+  splitChannelValues,
+  toAppComment,
+  toAppRow,
+} from "../utils/promoHelpers";
+import { Button, Card, CardContent, Header } from "./ui";
+import DesignExportPanel from "../features/designExport/DesignExportPanel";
+import "../styles/pages/catalog-design-export-compartido.page.css";
+import "../styles/pages/export.page.css";
+
+const OPERATIONAL_EXPORT_STATUSES = new Set(["APROBADO", "APROBADA", "APROVADO", "APROVADA", "REGISTRADO", "LISTA_CONSOLIDAR", "ANULADO"]);
+
+function isOperationalExportReady(row) {
+  const status = String(row.estado_registro || row.estadoRegistro || "").trim().toUpperCase();
+  return OPERATIONAL_EXPORT_STATUSES.has(status);
+}
+
+function displayValue(value) {
+  return value ?? "";
+}
+
+export default function ExportPageV2({ rows = [], actividades = [], comentarios = [], catalogos = [], supabaseConnection = null, supabaseReady = false }) {
+  const { can } = usePermissions();
+  const canDownload = can(PERMISSIONS.DOWNLOAD_EXPORTS);
+  const [compradorFiltro, setCompradorFiltro] = useState("Todos");
+  const [tipoFiltro, setTipoFiltro] = useState("Todos");
+  const [tipoActividadFiltro, setTipoActividadFiltro] = useState("Todos");
+  const [canalFiltro, setCanalFiltro] = useState("Todos");
+  const [alcanceFiltro, setAlcanceFiltro] = useState("Todos");
+  const [estadoComentarioFiltro, setEstadoComentarioFiltro] = useState("Todos");
+  const [skuFiltro, setSkuFiltro] = useState("");
+  const [actividadCatalogoFiltro, setActividadCatalogoFiltro] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState(null);
+  const [exportData, setExportData] = useState(null);
+  const [exportStatus, setExportStatus] = useState({ type: "idle", message: "" });
+
+  const sourceRows = exportData?.rows || rows;
+  const sourceActividades = exportData?.actividades || actividades;
+  const sourceComentarios = exportData?.comentarios || comentarios;
+
+  const activityMap = useMemo(
+    () => new Map((sourceActividades || []).map((item) => {
+      const activity = normalizeActividad(item);
+      return [activity.actividad_id, activity];
+    })),
+    [sourceActividades],
+  );
+  const optionActivityMap = useMemo(
+    () => new Map([...(actividades || []), ...(sourceActividades || [])].map((item) => {
+      const activity = normalizeActividad(item);
+      return [activity.actividad_id, activity];
+    })),
+    [actividades, sourceActividades],
+  );
+
+  const getActivityId = (row) => row.actividadId || row.actividad_id || row.catalogo_id || "";
+  const getRowId = (row) => row.id || row.row_id || row.rowId || "";
+  const getActivity = (row) => activityMap.get(row.actividadId || row.actividad_id) || activityMap.get(row.catalogo_id) || {};
+  const getOptionActivity = (row) => optionActivityMap.get(row.actividadId || row.actividad_id) || optionActivityMap.get(row.catalogo_id) || {};
+  const optionRows = exportData ? [...rows, ...sourceRows] : sourceRows;
+  const commentIndexes = useMemo(() => {
+    const byRowId = new Map();
+    const byActivityId = new Map();
+    (sourceComentarios || []).forEach((comment) => {
+      if (isLineComment(comment)) {
+        const rowId = comment.rowId || comment.row_id || "";
+        if (rowId) byRowId.set(rowId, [...(byRowId.get(rowId) || []), comment]);
+      }
+      if (isActivityComment(comment)) {
+        const activityId = comment.actividadId || comment.actividad_id || "";
+        if (activityId) byActivityId.set(activityId, [...(byActivityId.get(activityId) || []), comment]);
+      }
+    });
+    return { byRowId, byActivityId };
+  }, [sourceComentarios]);
+  const getComentariosRow = (rowId) => commentIndexes.byRowId.get(rowId) || [];
+  const getActivityComments = (activityId) => commentIndexes.byActivityId.get(activityId) || [];
+
+  const compradoresUnicos = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.comprador || getOptionActivity(row).comprador || getOptionActivity(row).solicitante || "Sin comprador")))];
+  const tiposUnicos = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.tipoPromo || "Sin tipo")))];
+  const tiposActividad = ["Todos", ...Array.from(new Set(optionRows.map((row) => getOptionActivity(row).tipo_actividad || "CATALOGO")))];
+  const canales = ["Todos", ...Array.from(optionRows.reduce((map, row) => {
+    const values = splitChannelValues(getOptionActivity(row).canal);
+    if (!values.length) {
+      if (!map.has("sin-canal")) map.set("sin-canal", "Sin canal");
+      return map;
+    }
+    values.forEach((item) => {
+      const key = normalizeCanal(item);
+      if (key && !map.has(key)) map.set(key, item);
+    });
+    return map;
+  }, new Map()).values())];
+  const alcances = ["Todos", ...Array.from(new Set(optionRows.map((row) => row.alcanceTipo || row.alcance_tipo || "Sin alcance")))];
+
+  const buildCurrentFilters = () => ({
+    comprador: compradorFiltro,
+    tipo: tipoFiltro,
+    tipoActividad: tipoActividadFiltro,
+    canal: canalFiltro,
+    alcance: alcanceFiltro,
+    estadoComentario: estadoComentarioFiltro,
+    sku: skuFiltro,
+    actividadCatalogo: actividadCatalogoFiltro,
+  });
+
+  const applyFilters = async () => {
+    const nextFilters = buildCurrentFilters();
+    setAppliedFilters(nextFilters);
+    if (!supabaseReady || !supabaseConnection) {
+      setExportData(null);
+      setExportStatus({ type: "ready", message: "Filtros aplicados sobre la data cargada en memoria." });
+      return;
+    }
+
+    setExportStatus({ type: "loading", message: "Consultando promociones en Supabase..." });
+    try {
+      const data = await loadExportDataFromSupabase(supabaseConnection, nextFilters);
+      setExportData({
+        rows: (data.promociones || []).map(toAppRow),
+        actividades: data.actividades || [],
+        comentarios: (data.comentarios || []).map(toAppComment),
+      });
+      setExportStatus({ type: "ready", message: "Consulta lista desde Supabase." });
+    } catch (error) {
+      setExportData({ rows: [], actividades: [], comentarios: [] });
+      setExportStatus({ type: "error", message: error.message || "No se pudo consultar Supabase para exportar." });
+    }
+  };
+
+  const clearFilters = () => {
+    setCompradorFiltro("Todos");
+    setTipoFiltro("Todos");
+    setTipoActividadFiltro("Todos");
+    setCanalFiltro("Todos");
+    setAlcanceFiltro("Todos");
+    setEstadoComentarioFiltro("Todos");
+    setSkuFiltro("");
+    setActividadCatalogoFiltro("");
+    setAppliedFilters(null);
+    setExportData(null);
+    setExportStatus({ type: "idle", message: "" });
+  };
+
+  const rowsFiltradas = appliedFilters ? sourceRows.filter((row) => {
+    const activity = getActivity(row);
+    const comentariosRow = getComentariosRow(getRowId(row));
+    const comentariosActividad = getActivityComments(getActivityId(row));
+    const comentariosTotales = [...comentariosRow, ...comentariosActividad];
+    const tieneAbierto = comentariosTotales.some((c) => String(c.estado).toLowerCase() === "abierto");
+    const tieneResuelto = comentariosTotales.some((c) => String(c.estado).toLowerCase() === "resuelto");
+    const compradorRow = row.comprador || activity.comprador || activity.solicitante || "Sin comprador";
+    const tipoActividad = activity.tipo_actividad || "CATALOGO";
+    const activityId = getActivityId(row);
+    const activityName = activity.nombre_actividad || activity.nombreActividad || activity.nombre || "";
+    const canal = activity.canal || "Sin canal";
+    const alcance = row.alcanceTipo || row.alcance_tipo || "Sin alcance";
+    const skuTerm = appliedFilters.sku.trim().toLowerCase();
+    const activityTerm = appliedFilters.actividadCatalogo.trim().toLowerCase();
+    const matchesSku = !skuTerm || String(row.sku || "").toLowerCase().includes(skuTerm);
+    const matchesActivity = !activityTerm || `${activityId} ${activityName}`.toLowerCase().includes(activityTerm);
+    return matchesSku
+      && matchesActivity
+      && (appliedFilters.comprador === "Todos" || compradorRow === appliedFilters.comprador)
+      && (appliedFilters.tipo === "Todos" || (row.tipoPromo || "Sin tipo") === appliedFilters.tipo)
+      && (appliedFilters.tipoActividad === "Todos" || tipoActividad === appliedFilters.tipoActividad)
+      && (appliedFilters.canal === "Todos"
+        || (canal === "Sin canal" ? appliedFilters.canal === "Sin canal" : channelMatchesFilter(canal, appliedFilters.canal)))
+      && (appliedFilters.alcance === "Todos" || alcance === appliedFilters.alcance)
+      && (appliedFilters.estadoComentario === "Todos"
+        || (appliedFilters.estadoComentario === "Abiertos" && tieneAbierto)
+        || (appliedFilters.estadoComentario === "Resueltos" && tieneResuelto)
+        || (appliedFilters.estadoComentario === "Sin comentarios" && comentariosTotales.length === 0));
+  }) : [];
+
+  const makeCommon = (row) => {
+    const activity = getActivity(row);
+    const activityId = getActivityId(row);
+    const comentariosRow = getComentariosRow(getRowId(row));
+    const segmenta = isSegmentedRow(row) ? "SI" : "NO";
+    return {
+      activity,
+      activityId,
+      segmenta,
+      segmentoCliente: row.segmentoCliente || row.segmento_cliente || (segmenta === "SI" ? row.segmento : ""),
+      comentariosActividad: getActivityComments(activityId).map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | "),
+      comentariosLinea: comentariosRow.map((c) => `${c.estado}: ${c.texto || c.comentario}`).join(" | "),
+      comentariosLineaAbiertos: comentariosRow
+        .filter((c) => String(c.estado).toLowerCase() === "abierto")
+        .map((c) => c.texto || c.comentario)
+        .join(" | "),
+    };
+  };
+
+  const exportDefs = {
+    pricing: {
+      title: "Pricing",
+      desc: "Base operativa para configurar promociones.",
+      file: "export_pricing",
+      onlyApproved: true,
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["tipo_sku", (row) => row.tipoSku || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["tipo_cantidad", (row) => row.tipoCantidad || ""], ["cantidad_minima", (row) => displayValue(row.cantidadMinima)], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
+    },
+    mercadeo: {
+      title: "Mercadeo",
+      desc: "Base para artes, catalogo y revision.",
+      file: "export_mercadeo",
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["nombre_actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["alcance_tipo", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["alcance_valor", (row) => row.alcanceValor || row.alcance_valor || ""], ["comprador", (row) => row.comprador || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["numero_pagina", (row) => row.numero_pagina || row.num_pagina || row.numPagina || ""], ["num_parte", (row) => row.numParte || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["comentario_comprador", (row) => row.comentario || ""], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || row.estadoRegistro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad], ["comentarios_abiertos_mercadeo", (row, ctx) => ctx.comentariosLineaAbiertos]],
+    },
+    planimetria: {
+      title: "Planimetria",
+      desc: "Base para tickets, rotulos y exhibiciones.",
+      file: "export_planimetria",
+      onlyApproved: true,
+      columns: [["actividad_id", (row, ctx) => ctx.activityId], ["oferta_id", (row) => row.ofertaId || row.oferta_id || ""], ["tipo_actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["canal", (row, ctx) => ctx.activity.canal || ""], ["comprador", (row) => row.comprador || ""], ["division", (row) => row.division || ""], ["tipo_promo", (row) => row.tipoPromo || ""], ["grupo_oferta", (row) => row.grupoOferta || ""], ["variante", (row) => row.variante || ""], ["sku", (row) => row.sku || ""], ["descripcion", (row) => row.descripcion || ""], ["precio_antes", (row) => displayValue(row.precioAntes)], ["precio_ahora", (row) => displayValue(row.precioAhora)], ["descuento", (row) => displayValue(row.descuento)], ["aplica_segmento", (row, ctx) => ctx.segmenta], ["segmento_cliente", (row, ctx) => ctx.segmentoCliente], ["segmento", (row) => row.segmento || ""], ["estado_registro", (row) => row.estado_registro || row.estadoRegistro || ""], ["comentarios_actividad", (row, ctx) => ctx.comentariosActividad]],
+    },
+    consolidado: {
+      title: "Consolidado",
+      desc: "Base completa con revision y aplicabilidad.",
+      file: "consolidado_promociones",
+      columns: [["Actividad", (row, ctx) => ctx.activityId], ["Nombre actividad", (row, ctx) => ctx.activity.nombre_actividad || ""], ["Oferta ID", (row) => row.ofertaId || row.oferta_id || ""], ["Tipo actividad", (row, ctx) => ctx.activity.tipo_actividad || "CATALOGO"], ["Canal", (row, ctx) => ctx.activity.canal || ""], ["Alcance", (row) => row.alcanceTipo || row.alcance_tipo || ""], ["Valor alcance", (row) => row.alcanceValor || row.alcance_valor || ""], ["Segmenta", (row, ctx) => ctx.segmenta], ["Segmento cliente", (row, ctx) => ctx.segmentoCliente], ["Comprador", (row) => row.comprador || ""], ["Tipo promo", (row) => row.tipoPromo || ""], ["Oferta", (row) => row.grupoOferta || ""], ["Rol", (row) => row.tipoSku || ""], ["Variante", (row) => row.variante || ""], ["SKU", (row) => row.sku || ""], ["Página", (row) => row.numero_pagina || row.num_pagina || row.numPagina || ""], ["Descripcion", (row) => row.descripcion || ""], ["Cantidad", (row) => displayValue(row.cantidadMinima)], ["Precio ahora", (row) => displayValue(row.precioAhora)], ["Descuento", (row) => displayValue(row.descuento)], ["Estado", (row) => row.estado_registro || row.estadoRegistro || ""], ["Comentario comprador", (row) => row.comentario || row.comentario_comprador || ""]],
+    },
+  };
+
+  const downloadExport = async (key) => {
+    const def = exportDefs[key];
+    if (!def || !rowsFiltradas.length) return;
+    const exportRows = def.onlyApproved ? rowsFiltradas.filter(isOperationalExportReady) : rowsFiltradas;
+    if (!exportRows.length) {
+      window.alert(`No hay promociones aprobadas o registradas para exportar en ${def.title}.`);
+      return;
+    }
+    const filteredRowIds = new Set(exportRows.map((row) => row.row_id || row.id).filter(Boolean));
+    const validation = validatePromotions(sourceRows, { actividades: sourceActividades, scopeRowIds: filteredRowIds });
+    if (validation.errors.length) {
+      window.alert(`No se puede exportar porque hay promociones incompletas o inválidas:\n${formatPromotionValidationErrors(validation).join("\n")}`);
+      return;
+    }
+
+    const sheetRows = [
+      def.columns.map(([label]) => label),
+      ...exportRows.map((row) => {
+        const ctx = makeCommon(row);
+        return def.columns.map(([, getter]) => getter(row, ctx));
+      }),
+    ];
+
+    await exportStyledWorkbook({
+      sheetName: def.title,
+      rows: sheetRows,
+      dataRows: exportRows,
+      columnCount: def.columns.length,
+      fileName: `${def.file}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    });
+  };
+
+  return (
+    <div>
+      <Header title="Exportaciones" subtitle="Salidas preparadas para Pricing, Mercadeo, Planimetría, Consolidación y Diseño." />
+      <div className="export-section" style={{ marginTop: 0 }}>
+        <div className="export-section-head">
+          <div>
+            <h2>Promociones Comerciales</h2>
+            <span>Salidas operativas y consolidadas basadas en promociones.</span>
+          </div>
+        </div>
+        <Card className="consolidado-filter-card export-filter-card">
+          <CardContent>
+            <div className="section-head">
+              <div>
+                <h2>Filtros</h2>
+              <span>{exportStatus.type === "loading" ? exportStatus.message : appliedFilters ? `${rowsFiltradas.length} filas listas para exportar` : "Presione Buscar para preparar descargas"}</span>
+            </div>
+            <div className="toolbar-actions">
+              <Button variant="outline" onClick={applyFilters} disabled={exportStatus.type === "loading"}><Search size={16}/> Buscar</Button>
+              <Button variant="outline" onClick={clearFilters} disabled={exportStatus.type === "loading"}><X size={16}/> Limpiar</Button>
+            </div>
+          </div>
+          {exportStatus.type === "error" && <div className="status error">{exportStatus.message}</div>}
+          <div className="filter-grid">
+            <label className="filter-field">
+              <span>SKU</span>
+              <input value={skuFiltro} onChange={(e) => setSkuFiltro(e.target.value)} placeholder="Buscar SKU" />
+            </label>
+            <label className="filter-field">
+              <span>Actividad / catalogo</span>
+              <input value={actividadCatalogoFiltro} onChange={(e) => setActividadCatalogoFiltro(e.target.value)} placeholder="ID o nombre" />
+            </label>
+            <label className="filter-field">
+              <span>Comprador</span>
+              <select value={compradorFiltro} onChange={(e) => setCompradorFiltro(e.target.value)}>{compradoresUnicos.map((item) => <option key={item}>{item}</option>)}</select>
+            </label>
+            <label className="filter-field">
+              <span>Tipo actividad</span>
+              <select value={tipoActividadFiltro} onChange={(e) => setTipoActividadFiltro(e.target.value)}>{tiposActividad.map((item) => <option key={item}>{item}</option>)}</select>
+            </label>
+            <label className="filter-field">
+              <span>Canal</span>
+              <select value={canalFiltro} onChange={(e) => setCanalFiltro(e.target.value)}>{canales.map((item) => <option key={item}>{item}</option>)}</select>
+            </label>
+            <label className="filter-field">
+              <span>Alcance</span>
+              <select value={alcanceFiltro} onChange={(e) => setAlcanceFiltro(e.target.value)}>{alcances.map((item) => <option key={item}>{item}</option>)}</select>
+            </label>
+            <label className="filter-field">
+              <span>Tipo promo</span>
+              <select value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value)}>{tiposUnicos.map((item) => <option key={item}>{item}</option>)}</select>
+            </label>
+            <label className="filter-field">
+              <span>Comentarios</span>
+              <select value={estadoComentarioFiltro} onChange={(e) => setEstadoComentarioFiltro(e.target.value)}><option>Todos</option><option>Abiertos</option><option>Resueltos</option><option>Sin comentarios</option></select>
+            </label>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="export-grid">
+        {Object.entries(exportDefs).map(([key, def]) => (
+          <Card key={key}>
+            <CardContent>
+              <Download size={22} />
+              <h3>{def.title}</h3>
+              <p>{def.desc}</p>
+              {canDownload && <Button onClick={() => downloadExport(key)} disabled={!rowsFiltradas.length || exportStatus.type === "loading"}>
+                <Download size={16} /> Descargar XLSX
+              </Button>}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      </div>
+      <DesignExportPanel catalogos={catalogos} supabaseConnection={supabaseConnection} supabaseReady={supabaseReady}/>
+    </div>
+  );
+}
